@@ -49,7 +49,14 @@ def limit_field(utilization, resets_at=None, locked_reason=None, dollars=(None, 
             "locked_reason": locked_reason}
 
 
-def usage_cache(fetched_at=NOW, session=10, weekly=40, resets_at=None, limits=None, **fields):
+def claude_json(cache, oauth="acct-1"):
+    """登入中的 ~/.claude.json：oauthAccount 是目前登入帳號，cachedUsageUtilization 是額度快取（可能還是別的帳號的）。"""
+    return {"oauthAccount": {"accountUuid": oauth, "emailAddress": "someone@example.com"},
+            "cachedUsageUtilization": cache}
+
+
+def usage_cache(fetched_at=NOW, session=10, weekly=40, resets_at=None, limits=None, account_uuid="acct-1",
+                **fields):
     resets = (resets_at or NOW + timedelta(days=3)).isoformat()
     if limits is None:
         limits = [
@@ -60,7 +67,7 @@ def usage_cache(fetched_at=NOW, session=10, weekly=40, resets_at=None, limits=No
         ]
     return {
         "fetchedAtMs": int(fetched_at.timestamp() * 1000),
-        "accountUuid": "acct-1",
+        "accountUuid": account_uuid,
         "utilization": dict(fields, limits=limits),
     }
 
@@ -108,7 +115,12 @@ class HomeTestCase(unittest.TestCase):
         return path
 
     def write_claude_json(self, data):
-        self.paths.claude_json.write_text(json.dumps(data), encoding="utf-8")
+        """修改時間一律往後推：同一個時間刻度內的第二次寫入，核心會當成檔案沒變。"""
+        path = self.paths.claude_json
+        mtime = path.stat().st_mtime_ns + 1_000_000_000 if path.exists() else None
+        path.write_text(json.dumps(data), encoding="utf-8")
+        if mtime:
+            os.utime(path, ns=(mtime, mtime))
 
     def write_credentials(self, refresh="rt-1", access="at-1", expires_at=NOW + timedelta(hours=8),
                           refresh_expires_at=NOW + timedelta(days=30)):
@@ -128,8 +140,12 @@ class HomeTestCase(unittest.TestCase):
         self.write_claude_json({"oauthAccount": {"accountUuid": account_uuid,
                                                  "emailAddress": "someone@example.com"}})
 
+    def write_cache(self, oauth="acct-1", **cache):
+        """Claude Code 以 oauth 帳號登入中，額度快取是 usage_cache(**cache)（識別碼預設 acct-1）。"""
+        self.write_claude_json(claude_json(usage_cache(**cache), oauth))
+
     def poll_card(self, **cache):
-        self.write_claude_json({"cachedUsageUtilization": usage_cache(**cache)})
+        self.write_cache(**cache)
         return self.core.poll().cards[0]
 
 

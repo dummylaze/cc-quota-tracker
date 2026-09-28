@@ -6,7 +6,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Callable, FrozenSet, Optional, Tuple
+from typing import Callable, FrozenSet, Optional, Set, Tuple
 
 from . import atomic
 from . import claude_provider as provider
@@ -27,6 +27,14 @@ class AddWarning(Enum):
     PERMISSIONS_FIXED = "permissions_fixed"  # 納管目錄或檔案的權限原本不符（他人可存取或靠繼承），已修正
     LABEL_LOOKS_LIKE_EMAIL = "label_looks_like_email"  # 帳號標籤會顯示在畫面上
     NOT_BOUND = "not_bound"  # 讀不到目前登入帳號的識別碼，憑證快照暫時沒有綁定
+
+
+@dataclass(frozen=True)
+class _Account:
+    """納管帳號：帳號鍵、憑證快照的憑證指紋、綁定的帳號識別碼（沒有綁定為 None）。"""
+    key: str
+    fingerprint: Optional[str]
+    account_id: Optional[str]
 
 
 @dataclass(frozen=True)
@@ -58,6 +66,9 @@ class Core:
         self._path_fields = paths.path_fields  # 設定檔目前寫的路徑欄位；與啟動時不同就要重新啟動
         self._settings_unreadable = False  # 第一輪 poll 就會重讀設定檔
         self._bindings = self._managed_dir / STATE_DIR / "bindings.json"
+        self._readings_file = self._managed_dir / STATE_DIR / "readings.json"
+        self._readings: Optional[dict] = None  # 帳號識別碼 → 最後一次歸屬給它的讀數；第一次用到才讀檔
+        self._oauth_account_id: Optional[str] = None  # 目前登入帳號的識別碼（oauthAccount），未納管帳號靠它歸屬讀數
         self._clock = clock
         self._mtime: Optional[int] = None
         self._reading: Optional[provider.UsageReading] = None
@@ -67,11 +78,13 @@ class Core:
     def poll(self) -> Board:
         self._refresh()
         self._reread_settings()
+        accounts = self._accounts()
+        self._remember(accounts)
         reading = self._reading
-        return Board(cards=(self._active_card(),),
+        return Board(cards=self._cards(accounts),
                      schema_changed=self._mismatch_rounds >= SCHEMA_CHANGE_ROUNDS,
                      last_reading_at=reading.observed_at if reading else None,
-                     managed_accounts=tuple(f"{provider.PROVIDER}:{label}" for label in self._labels()),
+                     managed_accounts=tuple(a.key for a in accounts),
                      wrong_location_suspected=self._source_missing and self._paths.claude_source is PathSource.DEFAULT,
                      restart_required=self._path_fields != self._paths.path_fields,
                      settings_unreadable=self._settings_unreadable)
@@ -83,14 +96,14 @@ class Core:
         except OSError:
             raise NoCredential() from None
         try:
-            uuid = provider.account_uuid(self._source.read_text(encoding="utf-8"))
+            account_id = provider.account_id(self._source.read_text(encoding="utf-8"))
         except OSError:
-            uuid = None
+            account_id = None
         fixed = self._mkdir_private(self._managed_dir)
         key = self._write_snapshot(self._snapshot(label), data)
         bindings = self._read_bindings()
-        if uuid:
-            bindings[key] = {"accountUuid": uuid}
+        if account_id:
+            bindings[key] = {"accountUuid": account_id}
         # 讀不到識別碼：同一憑證指紋原有的綁定仍然有效；沒有的話留給之後補學
         self._write_bindings(bindings)
         # 事後驗證：連同既有的憑證快照一起檢查，不符就修正並告警
@@ -132,9 +145,61 @@ class Core:
     def _write_bindings(self, bindings: dict) -> None:
         """綁定以憑證指紋為鍵；只留還有憑證快照對應的憑證指紋，重新納管換掉的舊憑證指紋一併清掉。"""
         live = {FileCredentialStore(self._snapshot(label)).fingerprint() for label in self._labels()}
-        self._mkdir_private(self._bindings.parent)
-        data = json.dumps({k: v for k, v in bindings.items() if k in live}, indent=2)
-        atomic.write_atomic(self._bindings, data.encode("utf-8"), before_replace=lambda tmp: _tighten(tmp, new=True))
+        kept = {k: v for k, v in bindings.items() if k in live}
+        self._write_state(self._bindings, kept)
+        stored = self._load_readings()
+        bound = {v.get("accountUuid") for v in kept.values() if isinstance(v, dict)}
+        if stored is not None and set(stored) - bound:  # 移除的帳號，它的讀數一併清掉
+            self._write_readings(stored, bound)
+
+    def _accounts(self) -> Tuple[_Account, ...]:
+        bindings = self._read_bindings()
+        accounts = []
+        for label in self._labels():
+            fingerprint = FileCredentialStore(self._snapshot(label)).fingerprint()
+            bound = bindings.get(fingerprint) if fingerprint else None
+            account_id = bound.get("accountUuid") if isinstance(bound, dict) else None
+            accounts.append(_Account(f"{provider.PROVIDER}:{label}", fingerprint,
+                                     account_id if isinstance(account_id, str) and account_id else None))
+        return tuple(accounts)
+
+    def _remember(self, accounts: Tuple[_Account, ...]) -> None:
+        """額度快取的讀數歸屬到某個納管帳號時存進工具狀態：它換成待命帳號、甚至重新啟動後仍看得到。
+        只留還有綁定的帳號；有變化才寫檔。"""
+        reading, stored = self._reading, self._load_readings()
+        bound = {a.account_id for a in accounts if a.account_id}
+        if reading is None or stored is None or reading.account_id not in bound:
+            return
+        if stored.get(reading.account_id) == reading:
+            return
+        stored[reading.account_id] = reading
+        self._write_readings(stored, bound)
+
+    def _load_readings(self) -> Optional[dict]:
+        """讀不到（例如防毒短暫鎖住）回傳 None，下一輪再讀；內容讀不懂就當成沒有。"""
+        if self._readings is None:
+            try:
+                raw = json.loads(self._readings_file.read_text(encoding="utf-8"))
+            except FileNotFoundError:
+                raw = {}
+            except OSError:
+                return None
+            except ValueError:
+                raw = {}
+            parsed = {k: provider.parse_cache(cache) for k, cache in raw.items()} if isinstance(raw, dict) else {}
+            self._readings = {k: r for k, r in parsed.items() if isinstance(r, provider.UsageReading)}
+        return self._readings
+
+    def _write_readings(self, readings: dict, bound: Set[str]) -> None:
+        """只留 bound 裡的帳號識別碼；存的是 cachedUsageUtilization 原文，讀回來時再解析。"""
+        self._readings = {k: r for k, r in readings.items() if k in bound}
+        self._write_state(self._readings_file, {k: r.source for k, r in self._readings.items()})
+
+    def _write_state(self, path: Path, data: dict) -> None:
+        """工具狀態一律原子寫入，暫存檔在替換前就收緊權限。"""
+        self._mkdir_private(path.parent)
+        atomic.write_atomic(path, json.dumps(data, indent=2).encode("utf-8"),
+                            before_replace=lambda tmp: _tighten(tmp, new=True))
 
     @staticmethod
     def _mkdir_private(path: Path) -> bool:
@@ -186,6 +251,7 @@ class Core:
             mtime = os.stat(self._source).st_mtime_ns
         except FileNotFoundError:
             self._mtime, self._result, self._source_missing = None, provider.NoReading(), True
+            self._oauth_account_id = None
             return self._result
         except OSError:
             return None
@@ -199,18 +265,44 @@ class Core:
             # 暫時不可讀不記修改時間：寫入中的檔案可能在同一個時間刻度內寫完，下一輪要重讀
             transient = isinstance(self._result, provider.TransientlyUnreadable)
             self._mtime = None if transient else mtime
+            if not transient:
+                self._oauth_account_id = provider.account_id(text)
         return self._result
 
-    def _active_card(self) -> Card:
+    def _cards(self, accounts: Tuple[_Account, ...]) -> Tuple[Card, ...]:
+        """使用中帳號在最前面，其餘納管帳號是待命帳號，依帳號鍵排序。
+        當前憑證的憑證指紋對不上任何憑證快照：使用中帳號是未納管帳號。"""
+        current = FileCredentialStore(self._credentials).fingerprint()
+        active = next((a for a in accounts if current and a.fingerprint == current), None)
+        if active:
+            first = self._active_card(active.key, Role.ACTIVE, active.account_id)
+        else:
+            first = self._active_card(None, Role.UNMANAGED, self._oauth_account_id)
+        return (first, *(self._standby_card(a) for a in accounts if a is not active))
+
+    def _active_card(self, key: Optional[str], role: Role, owner: Optional[str]) -> Card:
+        """額度快取的識別碼等於 owner 才歸屬；否則是別的帳號的讀數（例如剛切換），讀數待更新。"""
         reading = self._reading
         if reading is None:
-            return Card(None, Role.ACTIVE, ReadingState.NO_READING)
+            return Card(key, role, ReadingState.NO_READING)
+        if owner is None or reading.account_id != owner:
+            return Card(key, role, ReadingState.PENDING)
+        return self._reading_card(key, role, reading)
+
+    def _standby_card(self, account: _Account) -> Card:
+        stored = self._load_readings() or {}
+        reading = stored.get(account.account_id) if account.account_id else None
+        if reading is None:
+            return Card(account.key, Role.STANDBY, ReadingState.NO_READING)
+        return self._reading_card(account.key, Role.STANDBY, reading)
+
+    def _reading_card(self, key: Optional[str], role: Role, reading: provider.UsageReading) -> Card:
         now = self._clock()
         breakdown = reading.weekly_breakdown
         if breakdown and breakdown.ends_at and not _counting(breakdown.ends_at, now):
             breakdown = None  # 週窗口已重置，舊的用量去向不再屬於計時中的這一週
         return Card(
-            None, Role.ACTIVE, ReadingState.HAS_READING,
+            key, role, ReadingState.HAS_READING,
             reading_age=now - reading.observed_at,
             limits=_as_of(reading.limits, now),
             scoped_limits=_as_of(reading.scoped_limits, now),

@@ -5,7 +5,7 @@ from unittest import mock
 
 from cc_quota_tracker.board import ReadingState
 from cc_quota_tracker.render_text import render
-from tests.fakehome import NOW, HomeTestCase, usage_cache
+from tests.fakehome import NOW, HomeTestCase, claude_json, usage_cache
 
 OBSERVED = NOW - timedelta(minutes=10)
 
@@ -29,12 +29,12 @@ class ParseResilienceTest(HomeTestCase):
         os.utime(self.home / ".claude.json", ns=(1, self._mtime))
 
     def write_good(self, session=33):
-        self.write({"cachedUsageUtilization": usage_cache(fetched_at=OBSERVED, session=session)})
+        self.write(claude_json(usage_cache(fetched_at=OBSERVED, session=session)))
 
     def write_limits_not_a_list(self):
         cache = usage_cache()
         cache["utilization"]["limits"] = {"kind": "session"}
-        self.write({"cachedUsageUtilization": cache})
+        self.write(claude_json(cache))
 
     def test_schema_change_lights_on_third_round_with_last_reading(self):
         self.write_good(session=33)
@@ -64,7 +64,7 @@ class ParseResilienceTest(HomeTestCase):
         self.core.poll()
         cache = usage_cache()
         del cache["utilization"]["limits"][0]["kind"]
-        self.write({"cachedUsageUtilization": cache})
+        self.write(claude_json(cache))
         self.assertEqual([self.core.poll().schema_changed for _ in range(3)], [False, False, True])
 
     def test_occasional_mismatch_does_not_light_banner(self):
@@ -116,7 +116,7 @@ class ParseResilienceTest(HomeTestCase):
         self.write_text('{"cachedUsageUtil')
         self.core.poll()
         mtime = (self.home / ".claude.json").stat().st_mtime_ns
-        self.write_claude_json({"cachedUsageUtilization": usage_cache(session=55)})
+        self.write_claude_json(claude_json(usage_cache(session=55)))
         os.utime(self.home / ".claude.json", ns=(1, mtime))
         self.assertEqual(self.core.poll().cards[0].limits[0].percent, 55)
 
@@ -164,7 +164,7 @@ class ParseResilienceTest(HomeTestCase):
         self.write_good(session=33)
         self.core.poll()
         mtime = (self.home / ".claude.json").stat().st_mtime_ns
-        self.write_claude_json({"cachedUsageUtilization": usage_cache(session=55)})
+        self.write_claude_json(claude_json(usage_cache(session=55)))
         os.utime(self.home / ".claude.json", ns=(1, mtime))
         self.assertEqual(self.core.poll().cards[0].limits[0].percent, 33)
 

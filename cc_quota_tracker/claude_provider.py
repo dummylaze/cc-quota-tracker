@@ -1,6 +1,6 @@
 """Claude 供應商的解析層：唯一接觸 ~/.claude.json 原始 dict 的地方。"""
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Optional, Tuple, Union
 
@@ -26,7 +26,7 @@ _WARNING_AT, _CRITICAL_AT = 60, 85
 @dataclass(frozen=True)
 class UsageReading:
     observed_at: datetime
-    account_uuid: Optional[str]
+    account_id: Optional[str]
     limits: Tuple[Limit, ...] = ()
     scoped_limits: Tuple[Limit, ...] = ()
     other_limits: Tuple[Limit, ...] = ()
@@ -34,6 +34,8 @@ class UsageReading:
     weekly_breakdown: Optional[WeeklyBreakdown] = None
     extra_usage: Optional[ExtraUsage] = None
     spend: Optional[Spend] = None
+    # 解析來源的 cachedUsageUtilization 原文：待命帳號的讀數以它存進工具狀態，重新啟動後再解析回來
+    source: Optional[dict] = field(default=None, compare=False, repr=False)
 
 
 class TransientlyUnreadable:
@@ -58,19 +60,24 @@ def parse(text: str) -> ParseResult:
         return TransientlyUnreadable()
     if not isinstance(raw, dict) or "cachedUsageUtilization" not in raw:
         return NoReading()
+    return parse_cache(raw["cachedUsageUtilization"])
+
+
+def parse_cache(cache) -> Union[UsageReading, SchemaMismatch]:
+    """解析 cachedUsageUtilization 本身；工具狀態裡存的就是這一段。"""
     try:
-        return _to_reading(raw["cachedUsageUtilization"])
+        return _to_reading(cache)
     except (KeyError, TypeError, ValueError, AttributeError):
         return SchemaMismatch()
 
 
-def account_uuid(text: str) -> Optional[str]:
+def account_id(text: str) -> Optional[str]:
     """目前登入帳號的識別碼（oauthAccount.accountUuid）；oauthAccount 裡的其他欄位（含 email）一律不取。"""
     try:
-        uuid = json.loads(text)["oauthAccount"]["accountUuid"]
+        value = json.loads(text)["oauthAccount"]["accountUuid"]
     except (ValueError, KeyError, TypeError):
         return None
-    return uuid if isinstance(uuid, str) and uuid else None
+    return value if isinstance(value, str) and value else None
 
 
 def _to_reading(cache: dict) -> UsageReading:
@@ -97,7 +104,7 @@ def _to_reading(cache: dict) -> UsageReading:
     return UsageReading(
         observed, cache.get("accountUuid"), tuple(windows), tuple(scoped), tuple(others), locked,
         _breakdown(usage.get("seven_day_breakdown"), weekly_end),
-        _extra_usage(usage.get("extra_usage")), _spend(usage.get("spend")),
+        _extra_usage(usage.get("extra_usage")), _spend(usage.get("spend")), cache,
     )
 
 

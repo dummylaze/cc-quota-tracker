@@ -6,7 +6,7 @@ import unittest
 
 from cc_quota_tracker.core import AddWarning
 from cc_quota_tracker.settings import DEFAULTS
-from tests.fakehome import HomeTestCase, WindowsAclAssertions, usage_cache
+from tests.fakehome import HomeTestCase, WindowsAclAssertions, claude_json, usage_cache
 
 KEY_RT1 = "a33d8c625833429d"  # refreshToken "rt-1" 的憑證指紋，事先算好的字面值
 
@@ -27,7 +27,7 @@ class RelocatedDirectoriesTest(WindowsAclAssertions, HomeTestCase):
         bindings = json.loads((self.managed / ".state" / "bindings.json").read_text(encoding="utf-8"))
         self.assertEqual(bindings, {KEY_RT1: {"accountUuid": "acct-1"}})
         (self.claude_dir / ".claude.json").write_text(
-            json.dumps({"cachedUsageUtilization": usage_cache(weekly=61)}), encoding="utf-8")
+            json.dumps(claude_json(usage_cache(weekly=61))), encoding="utf-8")
         weekly = [lim for lim in self.core.poll().cards[0].limits if lim.kind == "weekly_all"]
         self.assertEqual(weekly[0].percent, 61)
 

@@ -2,9 +2,11 @@
 from datetime import datetime, timedelta
 from typing import Optional
 
-from .board import Board, Card, Limit, Money, ReadingState
+from . import COMMAND
+from .board import Board, Card, Limit, Money, ReadingState, Role
 
 _WINDOW_NAMES = {"session": "工作階段窗口", "weekly_all": "週窗口", "weekly_scoped": "週限額"}
+_UPDATES_SOON = "Claude Code 更新額度快取後就會出現"
 SETTINGS_UNREADABLE = "注意：設定檔無法讀取（不是合法的 JSON），裡面的設定都當成沒填；本工具不會覆寫它，請修正後再試。"
 
 
@@ -25,9 +27,25 @@ def render(board: Board) -> str:
 
 
 def _render_card(card: Card) -> str:
+    return "\n".join([_header(card)] + ["  " + line for line in _body(card)])
+
+
+def _header(card: Card) -> str:
+    if card.role is Role.UNMANAGED:
+        return f"[使用中] 未納管帳號（納管方法：在 Claude Code 登入這個帳號後執行 {COMMAND} add <帳號標籤>）"
+    label = card.account_key.split(":", 1)[1]  # 畫面上只顯示帳號標籤
+    return f"[{'使用中' if card.role is Role.ACTIVE else '待命'}] {label}"
+
+
+def _body(card: Card) -> list:
     if card.reading_state is ReadingState.NO_READING:
-        return "尚無讀數，Claude Code 更新額度快取後就會出現"
-    lines = ["讀數年齡：" + _age(card.reading_age)]
+        return ["尚無讀數" if card.role is Role.STANDBY else "尚無讀數，" + _UPDATES_SOON]
+    if card.reading_state is ReadingState.PENDING:
+        return ["讀數待更新，" + _UPDATES_SOON]
+    if card.role is Role.STANDBY:
+        lines = [f"最後觀測：{_age(card.reading_age)}（觀測值：觀測之後這個帳號沒再被用過才準確）"]
+    else:
+        lines = ["讀數年齡：" + _age(card.reading_age)]
     if card.locked_reason:
         lines.append("額度已鎖定：" + card.locked_reason)
     lines += [_limit_line(lim) for lim in card.limits + card.scoped_limits]
@@ -44,7 +62,7 @@ def _render_card(card: Card) -> str:
     if card.spend:
         s = card.spend
         lines.append(f"花費  {_money(s.used)} / {_money(s.limit)}")
-    return "\n".join(lines)
+    return lines
 
 
 def _limit_line(lim: Limit) -> str:

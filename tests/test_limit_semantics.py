@@ -3,7 +3,7 @@ from datetime import timedelta
 
 from cc_quota_tracker.board import Severity
 from cc_quota_tracker.render_text import render
-from tests.fakehome import MISSING, NOW, HomeTestCase, limit, limit_field, usage_cache
+from tests.fakehome import MISSING, NOW, HomeTestCase, claude_json, limit, limit_field, usage_cache
 
 SOON = NOW + timedelta(hours=1)
 
@@ -192,10 +192,10 @@ class ExpandedExtrasTest(HomeTestCase):
 
 class RenderTest(HomeTestCase):
     def test_render_limit_semantics(self):
-        self.write_claude_json({"cachedUsageUtilization": usage_cache(
+        self.write_claude_json(claude_json(usage_cache(
             limits=[limit("session", 0, resets_at=None), limit("weekly_all", 83, severity="warning")],
             five_hour=limit_field(100, None, locked_reason="session_limit_reached"),
-            nimbus_quill=limit_field(12, SOON))})
+            nimbus_quill=limit_field(12, SOON))))
         text = render(self.core.poll())
         self.assertIn("工作階段窗口  無計時中窗口  重置：未知", text)
         self.assertIn("週窗口  83%", text)
