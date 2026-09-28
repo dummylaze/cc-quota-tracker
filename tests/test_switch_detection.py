@@ -69,29 +69,29 @@ class SwitchLogTest(SwitchTestCase):
     def test_switch_to_a_managed_account_records_its_bound_id(self):
         self.clock.advance(minutes=5)
         lines = self.poll_after(lambda: self.log_in(refresh="rt-w", account_uuid="acct-w"))
-        self.assertEqual(lines, [{"at": self.clock.now.isoformat(), "accountUuid": "acct-w",
+        self.assertEqual(lines, [{"at": self.clock.now.isoformat(), "accountId": "acct-w",
                                   "source": "observed"}])
 
     def test_switch_matched_by_fingerprint_does_not_need_oauth_account(self):
         lines = self.poll_after(lambda: self.write_credentials(refresh="rt-w"))  # .claude.json 還沒跟上
-        self.assertEqual([line["accountUuid"] for line in lines], ["acct-w"])
+        self.assertEqual([line["accountId"] for line in lines], ["acct-w"])
 
     def test_renamed_snapshot_records_the_same_id(self):
         os.rename(self.home / ".claude-multi" / "work.json", self.home / ".claude-multi" / "office.json")
         lines = self.poll_after(lambda: self.log_in(refresh="rt-w", account_uuid="acct-w"))
-        self.assertEqual([line["accountUuid"] for line in lines], ["acct-w"])
+        self.assertEqual([line["accountId"] for line in lines], ["acct-w"])
         self.assertNotIn("office", json.dumps(self.switch_log()))
 
     def test_switch_to_an_unmanaged_account_records_the_oauth_id(self):
         lines = self.poll_after(lambda: self.log_in(refresh="rt-x", account_uuid="acct-x"))
-        self.assertEqual([line["accountUuid"] for line in lines], ["acct-x"])
+        self.assertEqual([line["accountId"] for line in lines], ["acct-x"])
 
     def test_switch_without_any_id_still_records_a_line(self):
         def log_in_without_claude_json():
             self.paths.claude_json.unlink()
             self.write_credentials(refresh="rt-x")
         lines = self.poll_after(log_in_without_claude_json)
-        self.assertEqual([(line["accountUuid"], line["source"]) for line in lines], [(None, "observed")])
+        self.assertEqual([(line["accountId"], line["source"]) for line in lines], [(None, "observed")])
 
     def test_switch_to_a_snapshot_without_binding_records_null(self):
         self.write_credentials(refresh="rt-s")
@@ -100,7 +100,7 @@ class SwitchLogTest(SwitchTestCase):
         self.log_in(refresh="rt-w", account_uuid="acct-w")
         self.core.poll()
         lines = self.poll_after(lambda: self.write_credentials(refresh="rt-s"))
-        self.assertEqual([line["accountUuid"] for line in lines], [None])
+        self.assertEqual([line["accountId"] for line in lines], [None])
 
     def test_log_is_append_only(self):
         self.poll_after(lambda: self.log_in(refresh="rt-w", account_uuid="acct-w"))
@@ -109,7 +109,7 @@ class SwitchLogTest(SwitchTestCase):
         self.poll_after(lambda: self.log_in(refresh="rt-h", account_uuid="acct-h"))
         after = path.read_bytes()
         self.assertTrue(after.startswith(before))
-        self.assertEqual([line["accountUuid"] for line in self.switch_log()[-2:]], ["acct-w", "acct-h"])
+        self.assertEqual([line["accountId"] for line in self.switch_log()[-2:]], ["acct-w", "acct-h"])
 
     def test_switch_is_on_the_board_in_the_same_round(self):
         self.log_in(refresh="rt-w", account_uuid="acct-w")
@@ -119,7 +119,7 @@ class SwitchLogTest(SwitchTestCase):
 class RestartTest(SwitchTestCase):
     def test_first_round_ever_records_the_active_account(self):
         self.manage("work", "rt-w", "acct-w")
-        self.assertEqual([line["accountUuid"] for line in self.poll_after()], ["acct-w"])
+        self.assertEqual([line["accountId"] for line in self.poll_after()], ["acct-w"])
 
     def test_restart_without_switch_records_nothing(self):
         self.manage("work", "rt-w", "acct-w")
@@ -133,7 +133,7 @@ class RestartTest(SwitchTestCase):
         self.core.poll()
         self.log_in(refresh="rt-w", account_uuid="acct-w")
         self.start()
-        self.assertEqual([line["accountUuid"] for line in self.poll_after()], ["acct-w"])
+        self.assertEqual([line["accountId"] for line in self.poll_after()], ["acct-w"])
 
 
 class RotationTest(SwitchTestCase):
@@ -180,7 +180,7 @@ class RotationTest(SwitchTestCase):
         self.rotate()
         self.core.poll()
         lines = self.poll_after(lambda: self.log_in(refresh="rt-w2", account_uuid="acct-x"))
-        self.assertEqual([line["accountUuid"] for line in lines], ["acct-x"])
+        self.assertEqual([line["accountId"] for line in lines], ["acct-x"])
         cards = self.cards()
         self.assertEqual(cards[None].role, Role.UNMANAGED)
         self.assertFalse(cards["claude:work"].snapshot_invalid)
@@ -189,12 +189,12 @@ class RotationTest(SwitchTestCase):
         self.rotate()
         self.core.poll()
         lines = self.poll_after(lambda: self.log_in(refresh="rt-h", account_uuid="acct-h"))
-        self.assertEqual([line["accountUuid"] for line in lines], ["acct-h"])
+        self.assertEqual([line["accountId"] for line in lines], ["acct-h"])
         self.assertFalse(self.cards()["claude:work"].snapshot_invalid)
 
     def test_different_oauth_account_is_a_switch_to_unmanaged(self):
         lines = self.poll_after(lambda: self.log_in(refresh="rt-x", account_uuid="acct-x"))
-        self.assertEqual([line["accountUuid"] for line in lines], ["acct-x"])
+        self.assertEqual([line["accountId"] for line in lines], ["acct-x"])
 
     def test_render_tells_how_to_manage_again(self):
         self.rotate()

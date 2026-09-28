@@ -25,7 +25,7 @@ class RelocatedDirectoriesTest(WindowsAclAssertions, HomeTestCase):
         self.assertTrue((self.managed / "work.json").is_file())
         self.assertFalse((self.home / ".claude-multi").exists())
         bindings = json.loads((self.managed / ".state" / "bindings.json").read_text(encoding="utf-8"))
-        self.assertEqual(bindings, {KEY_RT1: {"accountUuid": "acct-1"}})
+        self.assertEqual(bindings, {KEY_RT1: {"accountId": "acct-1"}})
         (self.claude_dir / ".claude.json").write_text(
             json.dumps(claude_json(usage_cache(weekly=61))), encoding="utf-8")
         weekly = [lim for lim in self.core.poll().cards[0].limits if lim.kind == "weekly_all"]

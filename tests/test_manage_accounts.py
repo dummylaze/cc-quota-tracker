@@ -33,7 +33,7 @@ class AddTest(ManageTestCase):
     def test_add_binds_fingerprint_to_account_id(self):
         self.log_in(refresh="rt-1", account_uuid="acct-1")
         self.core.add("work")
-        self.assertEqual(self.bindings(), {KEY_RT1: {"accountUuid": "acct-1"}})
+        self.assertEqual(self.bindings(), {KEY_RT1: {"accountId": "acct-1"}})
 
     def test_board_lists_managed_accounts_by_provider_prefixed_label(self):
         self.log_in()
@@ -49,8 +49,8 @@ class AddTest(ManageTestCase):
         self.core.add("work")
         self.log_in(refresh="rt-2", account_uuid="acct-2")
         self.core.add("home")
-        self.assertEqual(self.bindings(), {KEY_RT1: {"accountUuid": "acct-1"},
-                                           KEY_RT2: {"accountUuid": "acct-2"}})
+        self.assertEqual(self.bindings(), {KEY_RT1: {"accountId": "acct-1"},
+                                           KEY_RT2: {"accountId": "acct-2"}})
 
     def test_add_to_existing_label_remanages_it(self):
         self.log_in(refresh="rt-1", account_uuid="acct-1")
@@ -59,7 +59,7 @@ class AddTest(ManageTestCase):
         self.core.add("work")
         current = (self.home / ".claude" / ".credentials.json").read_bytes()
         self.assertEqual(self.snapshot("work").read_bytes(), current)
-        self.assertEqual(self.bindings(), {KEY_RT2: {"accountUuid": "acct-1"}})
+        self.assertEqual(self.bindings(), {KEY_RT2: {"accountId": "acct-1"}})
         self.assertEqual(self.core.poll().managed_accounts, ("claude:work",))
 
     def test_add_without_current_credential_writes_nothing(self):
@@ -76,7 +76,7 @@ class AddTest(ManageTestCase):
         with self.assertRaises(NoCredential):
             self.core.add("work")
         self.assertEqual(self.snapshot("work").read_bytes(), before)
-        self.assertEqual(self.bindings(), {KEY_RT1: {"accountUuid": "acct-1"}})
+        self.assertEqual(self.bindings(), {KEY_RT1: {"accountId": "acct-1"}})
 
     def test_add_without_account_id_keeps_snapshot_unbound_and_warns(self):
         self.write_credentials()  # 有憑證，但 ~/.claude.json 不存在
@@ -134,7 +134,7 @@ class RemoveTest(ManageTestCase):
         self.core.add("home")
         self.core.remove("work")
         self.assertFalse(self.snapshot("work").exists())
-        self.assertEqual(self.bindings(), {KEY_RT2: {"accountUuid": "acct-2"}})
+        self.assertEqual(self.bindings(), {KEY_RT2: {"accountId": "acct-2"}})
         self.assertEqual(self.core.poll().managed_accounts, ("claude:home",))
 
     def test_remove_unknown_label_is_rejected(self):

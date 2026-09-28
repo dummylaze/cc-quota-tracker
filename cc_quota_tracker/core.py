@@ -106,7 +106,7 @@ class Core:
         key = self._write_snapshot(self._snapshot(label), data)
         bindings = self._read_bindings()
         if account_id:
-            bindings[key] = {"accountUuid": account_id}
+            bindings[key] = {"accountId": account_id}
         # 讀不到識別碼：同一憑證指紋原有的綁定仍然有效；沒有的話留給之後補學
         self._write_bindings(bindings)
         # 事後驗證：連同既有的憑證快照一起檢查，不符就修正並告警
@@ -151,7 +151,7 @@ class Core:
         kept = {k: v for k, v in bindings.items() if k in live}
         self._write_state(self._bindings, kept)
         stored = self._load_readings()
-        bound = {v.get("accountUuid") for v in kept.values() if isinstance(v, dict)}
+        bound = {v.get("accountId") for v in kept.values() if isinstance(v, dict)}
         if stored is not None and set(stored) - bound:  # 移除的帳號，它的讀數一併清掉
             self._write_readings(stored, bound)
 
@@ -161,7 +161,7 @@ class Core:
         for label in self._labels():
             fingerprint = FileCredentialStore(self._snapshot(label)).fingerprint()
             bound = bindings.get(fingerprint) if fingerprint else None
-            account_id = bound.get("accountUuid") if isinstance(bound, dict) else None
+            account_id = bound.get("accountId") if isinstance(bound, dict) else None
             accounts.append(_Account(f"{provider.PROVIDER}:{label}", fingerprint,
                                      account_id if isinstance(account_id, str) and account_id else None))
         return tuple(accounts)
@@ -255,7 +255,7 @@ class Core:
     def _append_switch(self, account_id: Optional[str]) -> None:
         """切換紀錄只追加：時間、切到的帳號識別碼（拿不到為 null）、來源。不記帳號鍵（ADR-0009）。"""
         self._mkdir_state_dir()
-        line = json.dumps({"at": self._clock().isoformat(), "accountUuid": account_id, "source": "observed"})
+        line = json.dumps({"at": self._clock().isoformat(), "accountId": account_id, "source": "observed"})
         atomic.append(self._switch_log, (line + "\n").encode("utf-8"),
                       before_replace=lambda tmp: _tighten(tmp, new=True))
 
