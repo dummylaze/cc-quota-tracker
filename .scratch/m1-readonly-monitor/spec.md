@@ -129,10 +129,12 @@ Status: ready-for-agent
   - **暫時不可讀**（JSON 解析失敗，通常是讀到寫入中的檔案）→ 保留上一次的值，靜默重試，不告警。
   - **尚無讀數**（`cachedUsageUtilization` 不存在）→ 屬於正常狀態，不告警。
   - **結構不符**（有 `utilization`，但 `limits` 不是 list、元素缺 `kind` 之類）→ 連續 3 輪才亮結構變更橫幅。區分三類靠症狀；「連續 3 輪」只是保險，不是區分手段。
-- 限額以 `utilization.limits[]` 為主，用 `kind` 加上 `is_active` 判讀；`five_hour`／`seven_day` 只作交叉校驗。`is_active` 只存在於 `limits[]` 的元素裡。
+- 限額以 `utilization.limits[]` 為主，用 `kind` 判讀種類；`five_hour`／`seven_day` 的百分比只作交叉校驗，金額欄位與鎖定原因從它們取。
+- `is_active` 只存在於 `limits[]` 的元素裡，意思是**供應商挑的頭條列**（只能顯示一個數字時該顯示哪一列），**不代表窗口是否在計時**：實測計時中、63% 的工作階段限額也會是 `false`。看板把它當頭條旗標帶出，不拿來判定計時中窗口。
 - 不寫死限額種類：不認得的 `kind`，加上 `utilization` 底下「形狀含 `utilization` 鍵、非 null、不在已知清單內」的欄位，一律歸入其他限額，以原始名稱呈現。
-- `resets_at` 是 ISO 8601 字串。現在時間超過某限額自己的 `resets_at` 時，該限額判定為沒有計時中窗口，下次重置時間標為未知；不推算下一個重置時間。
-- 嚴重度以 `limits[].severity` 為主，不認得的值一律當 `normal`；欄位缺失時才退回百分比門檻。
+- 範圍週限額：`limits[]` 中 `kind` 為 `weekly_scoped` 的列，範圍名稱取 `scope.model` 或 `scope.surface` 的 `display_name`；沒有這種列時，才採用非 null 的 `seven_day_opus`／`seven_day_sonnet`，避免重複。
+- `resets_at` 是 ISO 8601 字串。`resets_at` 為 null，或現在時間已到某限額自己的 `resets_at` 時，該限額判定為沒有計時中窗口，下次重置時間標為未知；不推算下一個重置時間。這個判定每輪 poll 以當下時間重做，來源檔案沒變也會生效。
+- 嚴重度以 `limits[].severity` 為主（供應商的值域是 `normal`／`warning`／`critical`），不認得的值一律當 `normal`；欄位缺失或為 null 時才退回百分比門檻。
 - schema 判定在每一輪解析時都做，不只在啟動時做一次。解析耗時約 1 ms。
 
 ### 帳號身分與切換（ADR-0002）
@@ -244,7 +246,7 @@ Status: ready-for-agent
   - 刷新（只換 accessToken）不產生切換紀錄
   - 切換後第一輪就判對使用中帳號，並處於讀數待更新，直到額度快取的識別碼對上
   - 舊帳號的讀數不會歸屬給新帳號
-  - `is_active: false` 顯示為無計時中窗口；過了 `resets_at` 也顯示為無計時中窗口，重置時間標為未知
+  - `resets_at` 為 null 顯示為無計時中窗口；過了 `resets_at` 也顯示為無計時中窗口，重置時間標為未知；`is_active: false` 但重置時間在未來，照常顯示百分比
   - 移除 `cachedUsageUtilization` → 尚無讀數，不亮橫幅
   - 截斷的 JSON → 沿用上一次的值，不亮橫幅
   - 把 `limits` 改成錯誤型別 → 第 3 輪才亮橫幅，並帶出最後一次成功的讀數
@@ -290,7 +292,8 @@ Status: ready-for-agent
   - `claude login` 切換帳號後，憑證身分鍵、`oauthAccount` 識別碼、額度快取識別碼**在同一個取樣間隔內一起翻轉**：假設成立，切換偵測可照本文實作。
   - 額度快取的觀測時間落在翻轉前 2 秒內，且使用者**沒有發過 prompt**：登入動作本身就會更新額度快取。以這種方式切換時，「讀數待更新」實際持續時間小於 5 秒，不是「要等發 prompt」。
   - 不變的部分：「讀數待更新」狀態仍要保留（直接放進目錄的憑證快照、登入後快取更新失敗、之後由本工具寫回憑證的切換，都可能出現），但**文案不得再寫成「一定要發 prompt 才會出現」**。影響使用者故事 23、26 與 README 說明的措辭。
-  - 樣本中出現 `is_active: false` 但 `percent` 不為 0 的工作階段限額（63%），符合本文「`is_active: false` 顯示為無計時中窗口」的設計，票 03 以此當測試樣本。
+  - 樣本中出現 `is_active: false` 但 `percent` 不為 0 的工作階段限額（63%）。
+- **`is_active` 的語意更正（票 03，2026-09-28）**：本機 Claude Code 對同一組欄位的 schema 說明寫明 `is_active` 是「單值指示器該顯示哪一列」；實測當下工作階段限額 63%、重置時間在 1.5 小時後、`is_active: false`，週窗口 83%、`severity: warning`、`is_active: true`。原本「`is_active: false` 顯示為無計時中窗口」會把計時中的窗口誤顯示成無計時中窗口，已改為只看 `resets_at`（見〈資料來源與解析〉）。同一份 schema 也確認 `severity` 的值域與 `weekly_scoped` 的 `scope` 結構。
   - 未觀察到：refreshToken 輪替（兩次翻轉時 `oauthAccount` 都同步改變）。輪替判定仍是未驗證的假設。
 - 實測值（供設計參考）：額度快取在面板模式下會持續更新，量測當下的新鮮度是 13–20 分鐘；檔案約 0.1 MB，解析約 1 ms；週窗口固定 7 天。
 - 憑證快照的 refreshToken 壽命是 30 天，到期後一定要重新登入該帳號並重新納管。這是使用者一定會碰到的事，所以到期警示屬於第一版的必要功能，不是加分項。
