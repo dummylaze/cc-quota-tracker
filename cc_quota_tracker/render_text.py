@@ -1,9 +1,10 @@
 """把看板渲染成終端機文字；所有文案都在這一層套用。"""
-from datetime import timedelta
+from datetime import datetime, timedelta
+from typing import Optional
 
-from .board import Board, Card, ReadingState
+from .board import Board, Card, Limit, Money, ReadingState
 
-_WINDOW_NAMES = {"session": "工作階段窗口", "weekly_all": "週窗口"}
+_WINDOW_NAMES = {"session": "工作階段窗口", "weekly_all": "週窗口", "weekly_scoped": "週限額"}
 
 
 def render(board: Board) -> str:
@@ -14,10 +15,45 @@ def _render_card(card: Card) -> str:
     if card.reading_state is ReadingState.NO_READING:
         return "尚無讀數，Claude Code 更新額度快取後就會出現"
     lines = ["讀數年齡：" + _age(card.reading_age)]
-    for w in card.windows:
-        reset = w.resets_at.astimezone().strftime("%Y-%m-%d %H:%M") if w.resets_at else "未知"
-        lines.append(f"{_WINDOW_NAMES.get(w.kind, w.kind)}  {w.percent}%  重置：{reset}")
+    if card.locked_reason:
+        lines.append("額度已鎖定：" + card.locked_reason)
+    lines += [_limit_line(lim) for lim in card.limits + card.scoped_limits]
+    if card.other_limits:
+        lines.append("其他限額：")
+        lines += ["  " + _limit_line(lim) for lim in card.other_limits]
+    if card.weekly_breakdown:
+        b = card.weekly_breakdown
+        lines.append(f"本週用量去向（{_time(b.started_at)} ～ {_time(b.ends_at)}）：")
+        lines += [f"  {row.label}  {row.percent}%" for row in b.rows]
+    if card.extra_usage:
+        e = card.extra_usage
+        lines.append(f"額外用量  {_money(e.used)} / {_money(e.limit)}")
+    if card.spend:
+        s = card.spend
+        lines.append(f"花費  {_money(s.used)} / {_money(s.limit)}")
     return "\n".join(lines)
+
+
+def _limit_line(lim: Limit) -> str:
+    name = _WINDOW_NAMES.get(lim.kind, lim.kind)
+    if lim.scope:
+        name = f"{name}（{lim.scope}）"
+    value = "無計時中窗口" if lim.percent is None else f"{lim.percent}%"
+    line = f"{name}  {value}  重置：{_time(lim.resets_at)}"
+    if lim.dollars and lim.dollars.used is not None:
+        line += f"  已用 ${lim.dollars.used:g}"
+    return line
+
+
+def _time(value: Optional[datetime]) -> str:
+    return value.astimezone().strftime("%Y-%m-%d %H:%M") if value else "未知"
+
+
+def _money(value: Optional[Money]) -> str:
+    if value is None:
+        return "—"
+    amount = value.minor / 10 ** value.exponent
+    return f"{amount:.{value.exponent}f} {value.currency or ''}".rstrip()
 
 
 def _age(age: timedelta) -> str:

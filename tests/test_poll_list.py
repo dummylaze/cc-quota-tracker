@@ -2,7 +2,7 @@ import io
 import os
 import unittest
 from contextlib import redirect_stdout
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from unittest import mock
 
 from cc_quota_tracker.__main__ import main
@@ -19,7 +19,7 @@ class PollTest(HomeTestCase):
         card = self.core.poll().cards[0]
         self.assertEqual(card.role, Role.ACTIVE)
         self.assertEqual(card.reading_state, ReadingState.NO_READING)
-        self.assertEqual(card.windows, ())
+        self.assertEqual(card.limits, ())
 
     def test_missing_cached_usage_key_is_no_reading(self):
         self.write_claude_json({"oauthAccount": {}})
@@ -29,15 +29,15 @@ class PollTest(HomeTestCase):
         self.write_claude_json({"cachedUsageUtilization": usage_cache(session=12, weekly=75)})
         card = self.core.poll().cards[0]
         self.assertEqual(card.reading_state, ReadingState.HAS_READING)
-        self.assertEqual({w.kind: w.percent for w in card.windows}, {"session": 12, "weekly_all": 75})
-        self.assertEqual(card.windows[0].resets_at, NOW + timedelta(days=3))
+        self.assertEqual({w.kind: w.percent for w in card.limits}, {"session": 12, "weekly_all": 75})
+        self.assertEqual(card.limits[0].resets_at, NOW + timedelta(days=3))
 
     def test_reset_time_with_z_suffix_is_read_as_utc(self):
         cache = usage_cache()
         for limit in cache["utilization"]["limits"]:
             limit["resets_at"] = "2026-01-04T12:00:00Z"
         self.write_claude_json({"cachedUsageUtilization": cache})
-        self.assertEqual(self.core.poll().cards[0].windows[0].resets_at, NOW + timedelta(days=3))
+        self.assertEqual(self.core.poll().cards[0].limits[0].resets_at, NOW + timedelta(days=3))
 
     def test_reading_age_follows_clock(self):
         self.write_claude_json({"cachedUsageUtilization": usage_cache(fetched_at=NOW - timedelta(minutes=15))})
@@ -50,7 +50,7 @@ class PollTest(HomeTestCase):
         self.core.poll()
         self.write_claude_json({"cachedUsageUtilization": usage_cache(session=2)})
         self.bump_mtime()
-        self.assertEqual(self.core.poll().cards[0].windows[0].percent, 2)
+        self.assertEqual(self.core.poll().cards[0].limits[0].percent, 2)
 
     def test_truncated_json_keeps_previous_reading(self):
         self.write_claude_json({"cachedUsageUtilization": usage_cache(session=33)})
@@ -59,7 +59,7 @@ class PollTest(HomeTestCase):
         self.bump_mtime()
         card = self.core.poll().cards[0]
         self.assertEqual(card.reading_state, ReadingState.HAS_READING)
-        self.assertEqual(card.windows[0].percent, 33)
+        self.assertEqual(card.limits[0].percent, 33)
 
     def test_poll_does_not_modify_claude_json(self):
         self.write_claude_json({"cachedUsageUtilization": usage_cache()})
@@ -80,7 +80,9 @@ class ListTest(HomeTestCase):
         self.assertIn("週窗口  75%", text)
 
     def test_list_command_prints_board(self):
-        self.write_claude_json({"cachedUsageUtilization": usage_cache(weekly=61)})
+        # list 用真實時鐘：重置時間要落在真實的未來，否則會正確地顯示為無計時中窗口
+        later = datetime.now(timezone.utc) + timedelta(days=3)
+        self.write_claude_json({"cachedUsageUtilization": usage_cache(weekly=61, resets_at=later)})
         out = io.StringIO()
         with mock.patch("pathlib.Path.home", return_value=self.home), redirect_stdout(out):
             self.assertEqual(main(["list"]), 0)
