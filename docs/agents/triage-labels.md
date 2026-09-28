@@ -13,3 +13,15 @@ The skills speak in terms of five canonical triage roles. This file maps those r
 When a skill mentions a role (e.g. "apply the AFK-ready triage label"), use the corresponding label string from this table.
 
 Edit the right-hand column to match whatever vocabulary you actually use.
+
+## Completion state (local convention)
+
+The five roles above have no "done" state, and `/implement` does not mark tickets finished
+(upstream: mattpocock/skills#508, #795). This repo adds one lifecycle value:
+
+| Value      | Meaning                                                           | Set by / when                                                                                |
+| ---------- | ----------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| `resolved` | Implemented, tests pass, committed; unblocks tickets that list it | The agent that ran `/implement`, after the full test suite passes and the work is committed |
+
+Tick the acceptance criteria that were verified in the same edit.
+Revisit this section if upstream settles on a different vocabulary (#795 proposes `resolved`, #508 proposes `done`).
