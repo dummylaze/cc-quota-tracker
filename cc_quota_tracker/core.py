@@ -91,7 +91,7 @@ class Core:
         bindings = self._read_bindings()
         if uuid:
             bindings[key] = {"accountUuid": uuid}
-        # 讀不到識別碼：同一身分鍵原有的綁定仍然有效；沒有的話留給之後補學
+        # 讀不到識別碼：同一憑證指紋原有的綁定仍然有效；沒有的話留給之後補學
         self._write_bindings(bindings)
         # 事後驗證：連同既有的憑證快照一起檢查，不符就修正並告警
         checked = [self._bindings.parent, self._bindings] + [self._snapshot(l) for l in self._labels()]
@@ -110,11 +110,11 @@ class Core:
         self._write_bindings(self._read_bindings())
 
     def _write_snapshot(self, snapshot: Path, data: bytes) -> str:
-        """替換前先驗證暫存檔讀得出身分鍵：讀到寫到一半的憑證時，既有的憑證快照維持原樣。"""
+        """替換前先驗證暫存檔讀得出憑證指紋：讀到寫到一半的憑證時，既有的憑證快照維持原樣。"""
         keys = []
 
         def check(tmp: Path) -> None:
-            key = FileCredentialStore(tmp).identity_key()
+            key = FileCredentialStore(tmp).fingerprint()
             if key is None:
                 raise NoCredential()
             _tighten(tmp, new=True)
@@ -130,8 +130,8 @@ class Core:
         return bindings if isinstance(bindings, dict) else {}
 
     def _write_bindings(self, bindings: dict) -> None:
-        """綁定以身分鍵為鍵；只留還有憑證快照對應的身分鍵，重新納管換掉的舊身分鍵一併清掉。"""
-        live = {FileCredentialStore(self._snapshot(label)).identity_key() for label in self._labels()}
+        """綁定以憑證指紋為鍵；只留還有憑證快照對應的憑證指紋，重新納管換掉的舊憑證指紋一併清掉。"""
+        live = {FileCredentialStore(self._snapshot(label)).fingerprint() for label in self._labels()}
         self._mkdir_private(self._bindings.parent)
         data = json.dumps({k: v for k, v in bindings.items() if k in live}, indent=2)
         atomic.write_atomic(self._bindings, data.encode("utf-8"), before_replace=lambda tmp: _tighten(tmp, new=True))

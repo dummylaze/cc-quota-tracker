@@ -8,7 +8,7 @@ from cc_quota_tracker.core import AddWarning
 from cc_quota_tracker.settings import DEFAULTS
 from tests.fakehome import HomeTestCase, WindowsAclAssertions, usage_cache
 
-KEY_RT1 = "a33d8c625833429d"  # refreshToken "rt-1" 的身分鍵，事先算好的字面值
+KEY_RT1 = "a33d8c625833429d"  # refreshToken "rt-1" 的憑證指紋，事先算好的字面值
 
 
 class RelocatedDirectoriesTest(WindowsAclAssertions, HomeTestCase):

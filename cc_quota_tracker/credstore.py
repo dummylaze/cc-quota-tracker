@@ -22,8 +22,8 @@ class CredentialStore(Protocol):
 
     def read(self) -> Optional[Credential]: ...
 
-    def identity_key(self) -> Optional[str]:
-        """帳號身分：refreshToken 的 SHA-256 前 16 個十六進位字元。刷新只換 accessToken，身分鍵不變。"""
+    def fingerprint(self) -> Optional[str]:
+        """憑證指紋：refreshToken 的 SHA-256 前 16 個十六進位字元。刷新只換 accessToken，指紋不變；它不代表帳號。"""
 
     def content_hash(self) -> Optional[str]:
         """實質內容：排除 accessToken 與到期時間之後的欄位；絕不對整份檔案雜湊，否則每次刷新都算變更。"""
@@ -43,7 +43,7 @@ class FileCredentialStore:
         valid = isinstance(expires, (int, float)) and not isinstance(expires, bool)
         return Credential(datetime.fromtimestamp(expires / 1000, timezone.utc) if valid else None)
 
-    def identity_key(self) -> Optional[str]:
+    def fingerprint(self) -> Optional[str]:
         oauth = self._oauth()
         token = oauth.get("refreshToken") if oauth else None
         if not isinstance(token, str) or not token:

@@ -30,7 +30,7 @@ class AddTest(ManageTestCase):
         current = (self.home / ".claude" / ".credentials.json").read_bytes()
         self.assertEqual(self.snapshot("work").read_bytes(), current)
 
-    def test_add_binds_identity_key_to_account_id(self):
+    def test_add_binds_fingerprint_to_account_id(self):
         self.log_in(refresh="rt-1", account_uuid="acct-1")
         self.core.add("work")
         self.assertEqual(self.bindings(), {KEY_RT1: {"accountUuid": "acct-1"}})
