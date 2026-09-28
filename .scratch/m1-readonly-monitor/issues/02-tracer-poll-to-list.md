@@ -4,7 +4,7 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [x] 核心只提供 poll、add、remove 三個操作；本票只需 poll 有實作
 - [x] 解析層是唯一接觸原始資料的地方，對外回傳用量讀數或三類解析結果之一

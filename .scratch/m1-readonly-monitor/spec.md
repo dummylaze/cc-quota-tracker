@@ -280,7 +280,7 @@ Status: ready-for-agent
 - 任何以額度為觸發條件的自動化（ADR-0005）。
 - 修改 Claude Code 的設定、掛 statusLine 或 hooks（ADR-0006）。
 - 顯示或儲存 email，以及自訂顯示名稱。
-- 「立即更新」按鈕：資料每 5 秒從本機檔案重讀一次，按了數字也不會變；只有在 Claude Code 發出 prompt 才會讓額度快取更新。
+- 「立即更新」按鈕：資料每 5 秒從本機檔案重讀一次，按了數字也不會變；額度快取只由 Claude Code 自己更新（登入、使用中的面板、發出 prompt 時）。
 - 可調整的輪詢間隔，以及上述各項固定值。
 
 ## 補充說明（Further Notes）
