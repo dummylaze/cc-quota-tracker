@@ -94,6 +94,9 @@ class Card:
     extra_usage: Optional[ExtraUsage] = None
     spend: Optional[Spend] = None
     snapshot_invalid: bool = False  # 憑證被輪替：這張卡片的憑證快照已失效，需要重新納管
+    # 憑證快照的 refreshToken 還剩幾天到期（不足一天算一天，≤ 0 為已過期）；未納管帳號或快照沒寫到期時間為 None
+    snapshot_days_left: Optional[int] = None
+    snapshot_expiring: bool = False  # 剩餘時間 ≤ 7 天（含已過期）：要在該帳號下重新登入，再對同一標籤重新 add
 
 
 @dataclass(frozen=True)

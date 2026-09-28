@@ -1,9 +1,10 @@
 """核心：接收解析後的路徑與時鐘，對外只有 poll、add、remove。"""
 import json
+import math
 import os
 import re
 from dataclasses import dataclass, replace
-from datetime import datetime
+from datetime import datetime, timedelta
 from enum import Enum
 from pathlib import Path
 from typing import Callable, FrozenSet, Optional, Set, Tuple
@@ -21,6 +22,7 @@ _ILLEGAL_IN_NAME = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 _RESERVED_NAMES = {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 10)),
                    *(f"LPT{i}" for i in range(1, 10))}
 SCHEMA_CHANGE_ROUNDS = 3  # 結構不符連續這麼多輪才判定為結構變更；偶發一次不亮橫幅
+EXPIRY_WARNING = timedelta(days=7)  # 憑證快照剩這麼久以內就發出到期警示（固定值）
 
 
 class AddWarning(Enum):
@@ -31,10 +33,11 @@ class AddWarning(Enum):
 
 @dataclass(frozen=True)
 class _Account:
-    """納管帳號：帳號鍵、憑證快照的憑證指紋、綁定的帳號識別碼（沒有綁定為 None）。"""
+    """納管帳號：帳號鍵、憑證快照的憑證指紋、綁定的帳號識別碼（沒有綁定為 None）、refreshToken 的到期時間。"""
     key: str
     fingerprint: Optional[str]
     account_id: Optional[str]
+    expires_at: Optional[datetime] = None
 
 
 @dataclass(frozen=True)
@@ -159,11 +162,13 @@ class Core:
         bindings = self._read_bindings()
         accounts = []
         for label in self._labels():
-            fingerprint = FileCredentialStore(self._snapshot(label)).fingerprint()
+            snapshot = FileCredentialStore(self._snapshot(label))
+            fingerprint, credential = snapshot.fingerprint(), snapshot.read()
             bound = bindings.get(fingerprint) if fingerprint else None
             account_id = bound.get("accountId") if isinstance(bound, dict) else None
             accounts.append(_Account(f"{provider.PROVIDER}:{label}", fingerprint,
-                                     account_id if isinstance(account_id, str) and account_id else None))
+                                     account_id if isinstance(account_id, str) and account_id else None,
+                                     credential.refresh_token_expires_at if credential else None))
         return tuple(accounts)
 
     def _remember(self, accounts: Tuple[_Account, ...]) -> None:
@@ -345,7 +350,16 @@ class Core:
             first = replace(self._active_card(active.key, Role.ACTIVE, active.account_id), snapshot_invalid=invalid)
         else:
             first = self._active_card(None, Role.UNMANAGED, self._oauth_account_id)
-        return (first, *(self._standby_card(a) for a in accounts if a is not active))
+        return (self._with_expiry(first, active),
+                *(self._with_expiry(self._standby_card(a), a) for a in accounts if a is not active))
+
+    def _with_expiry(self, card: Card, account: Optional[_Account]) -> Card:
+        """剩餘天數不足一天算一天，與「剩餘時間 ≤ 7 天」的警示同一條界線；每輪以當下時間重算。"""
+        if account is None or account.expires_at is None:
+            return card
+        left = account.expires_at - self._clock()
+        return replace(card, snapshot_days_left=math.ceil(left / timedelta(days=1)),
+                       snapshot_expiring=left <= EXPIRY_WARNING)
 
     def _active_card(self, key: Optional[str], role: Role, owner: Optional[str]) -> Card:
         """額度快取的識別碼等於 owner 才歸屬；否則是別的帳號的讀數（例如剛切換），讀數待更新。"""

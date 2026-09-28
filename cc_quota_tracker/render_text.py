@@ -28,8 +28,14 @@ def render(board: Board) -> str:
 
 def _render_card(card: Card) -> str:
     body = _body(card)
+    days = card.snapshot_days_left
+    label = card.account_key.split(":", 1)[1] if card.account_key else None
+    if card.snapshot_expiring:
+        when = "已過期" if days <= 0 else f"剩 {days} 天到期"
+        body.insert(0, f"憑證快照{when}：在 Claude Code 重新登入這個帳號，再執行 {COMMAND} add {label}")
+    elif days is not None:
+        body.append(f"憑證快照剩 {days} 天到期")
     if card.snapshot_invalid:
-        label = card.account_key.split(":", 1)[1]
         body.insert(0, f"憑證快照已失效，請重新納管：Claude Code 目前登入的就是這個帳號，執行 {COMMAND} add {label}")
     return "\n".join([_header(card)] + ["  " + line for line in body])
 
