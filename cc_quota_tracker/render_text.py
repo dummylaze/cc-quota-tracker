@@ -8,7 +8,12 @@ _WINDOW_NAMES = {"session": "工作階段窗口", "weekly_all": "週窗口", "we
 
 
 def render(board: Board) -> str:
-    return "\n".join(_render_card(c) for c in board.cards)
+    lines = [_render_card(c) for c in board.cards]
+    if board.schema_changed:
+        shown = (f"以下是最後一次成功的讀數（{_time(board.last_reading_at)}）" if board.last_reading_at
+                 else "目前沒有成功的讀數")
+        lines.insert(0, f"注意：額度快取結構已變更，本工具讀不懂新的結構；{shown}")
+    return "\n".join(lines)
 
 
 def _render_card(card: Card) -> str:

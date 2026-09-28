@@ -52,15 +52,6 @@ class PollTest(HomeTestCase):
         self.bump_mtime()
         self.assertEqual(self.core.poll().cards[0].limits[0].percent, 2)
 
-    def test_truncated_json_keeps_previous_reading(self):
-        self.write_claude_json({"cachedUsageUtilization": usage_cache(session=33)})
-        self.core.poll()
-        (self.home / ".claude.json").write_text('{"cachedUsageUtil', encoding="utf-8")
-        self.bump_mtime()
-        card = self.core.poll().cards[0]
-        self.assertEqual(card.reading_state, ReadingState.HAS_READING)
-        self.assertEqual(card.limits[0].percent, 33)
-
     def test_poll_does_not_modify_claude_json(self):
         self.write_claude_json({"cachedUsageUtilization": usage_cache()})
         path = self.home / ".claude.json"

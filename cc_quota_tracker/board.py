@@ -97,4 +97,7 @@ class Card:
 
 @dataclass(frozen=True)
 class Board:
+    """schema_changed：額度快取結構變更，卡片沿用最後一次成功的讀數；last_reading_at 是它的觀測時間。"""
     cards: Tuple[Card, ...]
+    schema_changed: bool = False
+    last_reading_at: Optional[datetime] = None
