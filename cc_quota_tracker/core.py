@@ -13,7 +13,7 @@ from . import claude_provider as provider
 from .board import Board, Card, CountdownFormat, Limit, ReadingState, Role, Severity
 from .credstore import FileCredentialStore
 from .permissions import is_private, make_private
-from .settings import COUNTDOWN_FORMAT_FIELD, PathSource, ResolvedPaths, path_fields, read_settings
+from .settings import COUNTDOWN_FORMAT_FIELD, PROVIDERS_FIELD, PathSource, ResolvedPaths, path_fields, read_settings
 
 STATE_DIR = ".state"  # 納管目錄底下放工具狀態的子目錄，與憑證快照分開
 _EMAIL = re.compile(r"[^@\s]+@[^@\s]+\.[A-Za-z]{2,}")
@@ -21,7 +21,6 @@ _ILLEGAL_IN_NAME = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 _RESERVED_NAMES = {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 10)),
                    *(f"LPT{i}" for i in range(1, 10))}
 SCHEMA_CHANGE_ROUNDS = 3  # 結構不符連續這麼多輪才判定為結構變更；偶發一次不亮橫幅
-EXPIRY_WARNING = timedelta(days=7)  # 憑證快照剩不到這麼久就發出到期警示（固定值）
 
 
 class AddWarning(Enum):
@@ -68,6 +67,7 @@ class Core:
         self._path_fields = paths.path_fields  # 設定檔目前寫的路徑欄位；與啟動時不同就要重新啟動
         self._settings_unreadable = False  # 第一輪 poll 就會重讀設定檔
         self._countdown_format = CountdownFormat.TWO_UNITS
+        self._provider_settings = provider.ProviderSettings()  # 設定檔的 providers.claude
         self._bindings = self._managed_dir / STATE_DIR / "bindings.json"
         self._readings_file = self._managed_dir / STATE_DIR / "readings.json"
         self._switch_log = self._managed_dir / STATE_DIR / "switches.jsonl"
@@ -310,6 +310,7 @@ class Core:
         except FileNotFoundError:
             self._settings_mtime, self._path_fields, self._settings_unreadable = None, (None, None), False
             self._countdown_format = CountdownFormat.TWO_UNITS
+            self._provider_settings = provider.ProviderSettings()
             return
         except OSError:
             return
@@ -320,6 +321,7 @@ class Core:
         if fields is not None:
             self._settings_mtime, self._path_fields = mtime, path_fields(fields)
             self._countdown_format = _countdown_format(fields.get(COUNTDOWN_FORMAT_FIELD))
+            self._provider_settings = provider.read_settings(fields.get(PROVIDERS_FIELD))
 
     def _read(self) -> Optional[provider.ParseResult]:
         """來源檔案沒變時不重新解析，沿用上一次的解析結果，結構判定仍算一輪。
@@ -357,11 +359,13 @@ class Core:
                 *(self._with_expiry(self._standby_card(a), a) for a in accounts if a is not active))
 
     def _with_expiry(self, card: Card, account: Optional[_Account]) -> Card:
-        """剩不到 7 天才警示：畫面的倒數一律捨去，顯示「7天0小時」時不警示、「6天23小時」起才警示。每輪以當下時間重算。"""
+        """剩不到設定的天數（預設 7 天）才警示：畫面的倒數一律捨去，門檻 7 天時顯示「7天0小時」不警示、
+        「6天23小時」起才警示。每輪以當下時間與設定檔目前的值重算。"""
         if account is None or account.expires_at is None:
             return card
+        warning = timedelta(days=self._provider_settings.expiry_warning_days)
         return replace(card, snapshot_expires_at=account.expires_at,
-                       snapshot_expiring=account.expires_at - self._clock() < EXPIRY_WARNING)
+                       snapshot_expiring=account.expires_at - self._clock() < warning)
 
     def _active_card(self, key: Optional[str], role: Role, owner: Optional[str]) -> Card:
         """額度快取的識別碼等於 owner 才歸屬；否則是別的帳號的讀數（例如剛切換），讀數待更新。"""
@@ -387,14 +391,21 @@ class Core:
         return Card(
             key, role, ReadingState.HAS_READING,
             reading_age=now - reading.observed_at,
-            limits=_as_of(reading.limits, now),
-            scoped_limits=_as_of(reading.scoped_limits, now),
-            other_limits=_as_of(reading.other_limits, now),
+            limits=_as_of(self._graded(reading.limits), now),
+            scoped_limits=_as_of(self._graded(reading.scoped_limits), now),
+            other_limits=_as_of(self._graded(reading.other_limits), now),
             locked_reason=reading.locked_reason,
             weekly_breakdown=breakdown,
             extra_usage=reading.extra_usage,
-            spend=reading.spend,
+            spend=reading.spend and replace(reading.spend, severity=self._grade(reading.spend.severity,
+                                                                                 reading.spend.percent)),
         )
+
+    def _graded(self, limits: Tuple[Limit, ...]) -> Tuple[Limit, ...]:
+        return tuple(replace(lim, severity=self._grade(lim.severity, lim.percent)) for lim in limits)
+
+    def _grade(self, severity: Optional[Severity], percent: Optional[int]) -> Severity:
+        return provider.grade(severity, percent, self._provider_settings)
 
 
 def _check_label(label: str) -> None:

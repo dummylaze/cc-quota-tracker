@@ -20,7 +20,21 @@ MODEL_WEEKLY_FIELDS = ("seven_day_opus", "seven_day_sonnet")
 KNOWN_FIELDS = frozenset(WINDOW_FIELDS.values()) | set(MODEL_WEEKLY_FIELDS) | {"extra_usage"}
 
 _SEVERITIES = {s.value: s for s in Severity}
-_WARNING_AT, _CRITICAL_AT = 60, 85
+
+
+@dataclass(frozen=True)
+class ProviderSettings:
+    """設定檔 providers.claude 底下的值；缺少或不合法時用這裡的預設。百分比門檻只在供應商沒給嚴重度時使用。
+    目前只有設定檔的格式按供應商分開；程式只認得 Claude，第二家供應商時再抽介面（spec〈範圍外〉）。"""
+    expiry_warning_days: int = 7  # 憑證快照剩不到這麼多天就發出到期警示
+    warning_percent: int = 60
+    critical_percent: int = 85
+
+
+_DEFAULT = ProviderSettings()
+# 第一次啟動時寫進設定檔的 providers.claude
+SETTINGS_DEFAULTS = {"expiryWarningDays": _DEFAULT.expiry_warning_days,
+                     "warningPercent": _DEFAULT.warning_percent, "criticalPercent": _DEFAULT.critical_percent}
 
 
 @dataclass(frozen=True)
@@ -71,6 +85,27 @@ def parse_cache(cache) -> Union[UsageReading, SchemaMismatch]:
         return SchemaMismatch()
 
 
+def read_settings(providers) -> ProviderSettings:
+    """providers 是設定檔的 providers 欄位。個別欄位不合法就用預設；兩個門檻不是由小到大時兩個都用預設。"""
+    fields = providers.get(PROVIDER) if isinstance(providers, dict) else None
+    fields = fields if isinstance(fields, dict) else {}
+    days = _whole(fields.get("expiryWarningDays"), 1, None) or _DEFAULT.expiry_warning_days
+    warning = _whole(fields.get("warningPercent"), 1, 100) or _DEFAULT.warning_percent
+    critical = _whole(fields.get("criticalPercent"), 1, 100) or _DEFAULT.critical_percent
+    if warning >= critical:
+        warning, critical = _DEFAULT.warning_percent, _DEFAULT.critical_percent
+    return ProviderSettings(days, warning, critical)
+
+
+def grade(severity: Optional[Severity], percent: Optional[int], settings: ProviderSettings) -> Severity:
+    """供應商給了嚴重度就以它為準；沒給才以百分比門檻推定。每輪以設定檔目前的門檻重算。"""
+    if severity is not None:
+        return severity
+    if percent is None or percent < settings.warning_percent:
+        return Severity.NORMAL
+    return Severity.WARNING if percent < settings.critical_percent else Severity.CRITICAL
+
+
 def account_id(text: str) -> Optional[str]:
     """目前登入帳號的識別碼（oauthAccount.accountUuid）；oauthAccount 裡的其他欄位（含 email）一律不取。"""
     try:
@@ -114,22 +149,26 @@ def _is_limit_field(value) -> bool:
 
 def _limit_row(item: dict, scope: Optional[str] = None, dollars: Optional[Dollars] = None) -> Limit:
     percent = int(item["percent"])
-    return Limit(item["kind"], percent, _severity(item.get("severity"), percent),
+    return Limit(item["kind"], percent, _severity(item.get("severity")),
                  _parse_time(item.get("resets_at")), bool(item.get("is_active")), scope, dollars)
 
 
 def _field_limit(name: str, field: dict) -> Limit:
     percent = None if field["utilization"] is None else int(field["utilization"])
-    return Limit(name, percent, _severity(None, percent), _parse_time(field.get("resets_at")),
+    return Limit(name, percent, None, _parse_time(field.get("resets_at")),
                  dollars=_dollars(field))
 
 
-def _severity(raw: Optional[str], percent: Optional[int]) -> Severity:
-    if raw is not None:
-        return _SEVERITIES.get(raw, Severity.NORMAL)
-    if percent is None or percent < _WARNING_AT:
-        return Severity.NORMAL
-    return Severity.WARNING if percent < _CRITICAL_AT else Severity.CRITICAL
+def _severity(raw: Optional[str]) -> Optional[Severity]:
+    """供應商沒給為 None，由核心依門檻推定；不認得的值當 normal。"""
+    return None if raw is None else _SEVERITIES.get(raw, Severity.NORMAL)
+
+
+def _whole(value, low: int, high: Optional[int]) -> Optional[int]:
+    """設定檔裡的正整數；布林、小數、字串都不算。"""
+    if isinstance(value, bool) or not isinstance(value, int) or value < low or (high is not None and value > high):
+        return None
+    return value
 
 
 def _scope_name(scope: Optional[dict]) -> Optional[str]:
@@ -171,7 +210,7 @@ def _spend(raw: Optional[dict]) -> Optional[Spend]:
     percent = raw.get("percent")
     percent = None if percent is None else int(percent)
     return Spend(_money(raw.get("used")), _money(raw.get("limit")), percent,
-                 _severity(raw.get("severity"), percent))
+                 _severity(raw.get("severity")))
 
 
 def _money(raw: Optional[dict]) -> Optional[Money]:

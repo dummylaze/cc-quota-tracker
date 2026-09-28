@@ -7,17 +7,20 @@ from pathlib import Path
 from typing import Any, Mapping, Optional, Tuple
 
 from . import atomic
+from . import claude_provider
 
 MANAGED_DIR = ".claude-multi"  # 納管目錄的 home 預設
 SETTINGS_DIR = "cc-quota-tracker"  # 在 %APPDATA% 底下；不放進納管目錄，因為納管目錄的位置寫在設定檔裡
 SETTINGS_FILE = "settings.json"
 CLAUDE_DIR_FIELD, MANAGED_DIR_FIELD = "claudeConfigDir", "managedDir"  # 設定檔裡的兩個路徑欄位
+PROVIDERS_FIELD = "providers"  # 按供應商分開的設定：{"claude": {...}}，預設值由各供應商帶入
 COUNTDOWN_FORMAT_FIELD = "countdownFormat"  # 倒數格式：twoUnits（天＋時）或 decimalDays（天數到小數第 1 位）
 CLAUDE_CONFIG_DIR = "CLAUDE_CONFIG_DIR"  # Claude Code 自己的環境變數；空字串當成沒設
-# 第一次啟動時整份寫出：七項偏好的預設值，加上兩個路徑欄位（null＝沒填）。欄位說明在 README，JSON 不能寫註解
+# 第一次啟動時整份寫出：七項偏好與各供應商設定的預設值，加上兩個路徑欄位（null＝沒填）。欄位說明在 README，JSON 不能寫註解
 DEFAULTS = {
     "layout": "cards", "alwaysOnTop": True, "mode": "compact",
     "language": "system", "theme": "system", "opacity": 100, "countdownFormat": "twoUnits",
+    "providers": {claude_provider.PROVIDER: claude_provider.SETTINGS_DEFAULTS},
     "claudeConfigDir": None, "managedDir": None,
 }
 

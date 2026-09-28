@@ -46,10 +46,11 @@ class Dollars:
 
 @dataclass(frozen=True)
 class Limit:
-    """percent 為 None：無計時中窗口（reset 為 True 時是週窗口已重置）；resets_at 為 None：重置時間未知。"""
+    """percent 為 None：無計時中窗口（reset 為 True 時是週窗口已重置）；resets_at 為 None：重置時間未知。
+    severity 在看板上一定有值；解析層遇到供應商沒給時先留 None，由核心依設定的百分比門檻補上。"""
     kind: str
     percent: Optional[int]
-    severity: Severity
+    severity: Optional[Severity]
     resets_at: Optional[datetime]
     headline: bool = False
     scope: Optional[str] = None
@@ -83,7 +84,7 @@ class Spend:
     used: Optional[Money]
     limit: Optional[Money]
     percent: Optional[int]
-    severity: Severity
+    severity: Optional[Severity]  # 同 Limit.severity：看板上一定有值
 
 
 @dataclass(frozen=True)
