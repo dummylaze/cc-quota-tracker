@@ -12,7 +12,7 @@ def render(board: Board) -> str:
 
 def _render_card(card: Card) -> str:
     if card.reading_state is ReadingState.NO_READING:
-        return "尚無讀數，請在該帳號下發一次 prompt"
+        return "尚無讀數，Claude Code 更新額度快取後就會出現"
     lines = ["讀數年齡：" + _age(card.reading_age)]
     for w in card.windows:
         reset = w.resets_at.astimezone().strftime("%Y-%m-%d %H:%M") if w.resets_at else "未知"
