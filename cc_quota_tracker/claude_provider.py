@@ -57,4 +57,7 @@ def _to_reading(cache: dict) -> UsageReading:
 
 
 def _parse_time(value: Optional[str]) -> Optional[datetime]:
-    return None if value is None else datetime.fromisoformat(value)
+    if value is None:
+        return None
+    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))  # 3.9 不吃結尾的 Z
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)

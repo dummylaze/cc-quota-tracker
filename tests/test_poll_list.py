@@ -32,6 +32,13 @@ class PollTest(HomeTestCase):
         self.assertEqual({w.kind: w.percent for w in card.windows}, {"session": 12, "weekly_all": 75})
         self.assertEqual(card.windows[0].resets_at, NOW + timedelta(days=3))
 
+    def test_reset_time_with_z_suffix_is_read_as_utc(self):
+        cache = usage_cache()
+        for limit in cache["utilization"]["limits"]:
+            limit["resets_at"] = "2026-01-04T12:00:00Z"
+        self.write_claude_json({"cachedUsageUtilization": cache})
+        self.assertEqual(self.core.poll().cards[0].windows[0].resets_at, NOW + timedelta(days=3))
+
     def test_reading_age_follows_clock(self):
         self.write_claude_json({"cachedUsageUtilization": usage_cache(fetched_at=NOW - timedelta(minutes=15))})
         self.assertEqual(self.core.poll().cards[0].reading_age, timedelta(minutes=15))
