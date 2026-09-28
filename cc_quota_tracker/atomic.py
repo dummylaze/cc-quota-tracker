@@ -32,6 +32,20 @@ def write_atomic(path: Path, data: bytes, before_replace: Optional[Callable[[Pat
         raise
 
 
+def append(path: Path, data: bytes, before_replace: Optional[Callable[[Path], None]] = None) -> None:
+    """只追加：檔案不存在時以原子寫入建立（before_replace 同 write_atomic），之後接在檔尾，不改既有內容。"""
+    if not path.exists():
+        write_atomic(path, data, before_replace)
+        return
+
+    def write() -> None:
+        with open(path, "ab") as f:
+            f.write(data)
+            f.flush()
+            os.fsync(f.fileno())
+    _retrying(write)
+
+
 def remove(path: Path) -> None:
     """刪檔也會撞上短暫鎖定，同樣重試。"""
     _retrying(lambda: os.unlink(path))

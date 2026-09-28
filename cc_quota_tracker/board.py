@@ -93,6 +93,7 @@ class Card:
     weekly_breakdown: Optional[WeeklyBreakdown] = None
     extra_usage: Optional[ExtraUsage] = None
     spend: Optional[Spend] = None
+    snapshot_invalid: bool = False  # 憑證被輪替：這張卡片的憑證快照已失效，需要重新納管
 
 
 @dataclass(frozen=True)

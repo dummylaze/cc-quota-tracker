@@ -27,7 +27,11 @@ def render(board: Board) -> str:
 
 
 def _render_card(card: Card) -> str:
-    return "\n".join([_header(card)] + ["  " + line for line in _body(card)])
+    body = _body(card)
+    if card.snapshot_invalid:
+        label = card.account_key.split(":", 1)[1]
+        body.insert(0, f"憑證快照已失效，請重新納管：Claude Code 目前登入的就是這個帳號，執行 {COMMAND} add {label}")
+    return "\n".join([_header(card)] + ["  " + line for line in body])
 
 
 def _header(card: Card) -> str:

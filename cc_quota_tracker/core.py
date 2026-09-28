@@ -67,6 +67,8 @@ class Core:
         self._settings_unreadable = False  # 第一輪 poll 就會重讀設定檔
         self._bindings = self._managed_dir / STATE_DIR / "bindings.json"
         self._readings_file = self._managed_dir / STATE_DIR / "readings.json"
+        self._switch_log = self._managed_dir / STATE_DIR / "switches.jsonl"
+        self._observed = self._managed_dir / STATE_DIR / "observed.json"  # 最後運作時間與上一輪的觀測
         self._readings: Optional[dict] = None  # 帳號識別碼 → 最後一次歸屬給它的讀數；第一次用到才讀檔
         self._oauth_account_id: Optional[str] = None  # 目前登入帳號的識別碼（oauthAccount），未納管帳號靠它歸屬讀數
         self._clock = clock
@@ -80,8 +82,9 @@ class Core:
         self._reread_settings()
         accounts = self._accounts()
         self._remember(accounts)
+        active, invalid = self._observe(accounts)
         reading = self._reading
-        return Board(cards=self._cards(accounts),
+        return Board(cards=self._cards(accounts, active, invalid),
                      schema_changed=self._mismatch_rounds >= SCHEMA_CHANGE_ROUNDS,
                      last_reading_at=reading.observed_at if reading else None,
                      managed_accounts=tuple(a.key for a in accounts),
@@ -195,11 +198,77 @@ class Core:
         self._readings = {k: r for k, r in readings.items() if k in bound}
         self._write_state(self._readings_file, {k: r.source for k, r in self._readings.items()})
 
+    def _observe(self, accounts: Tuple[_Account, ...]) -> Tuple[Optional[_Account], bool]:
+        """每輪的切換偵測。回傳使用中的納管帳號（未納管為 None），以及它的憑證快照是否已失效。
+        上一輪的憑證指紋與失效標記存在工具狀態，重新啟動後接著比對；第一次運作也算一次切換。
+        讀不到當前憑證（寫到一半、登出）時不動：不記錄，也不覆蓋上一輪的憑證指紋。"""
+        current = FileCredentialStore(self._credentials).fingerprint()
+        by_fp = {a.fingerprint: a for a in accounts if a.fingerprint}
+        state = self._read_observed()
+        if state is None:  # 讀不到上一輪的觀測（例如短暫鎖住）：這一輪不判定
+            return by_fp.get(current), False
+        previous, invalid_snapshot = _text(state.get("fingerprint")), _text(state.get("invalidSnapshot"))
+        switched, account_id = False, None
+        if current is not None and current != previous:
+            previous_account = by_fp.get(previous) or by_fp.get(invalid_snapshot)  # 前一個使用中的納管帳號
+            if current in by_fp:
+                switched, account_id = True, by_fp[current].account_id
+            elif previous_account and previous_account.account_id \
+                    and self._oauth_account_id == previous_account.account_id:
+                invalid_snapshot = previous_account.fingerprint  # 憑證被輪替：同一個帳號，不算切換（ADR-0002）
+            else:
+                switched, account_id = True, self._oauth_account_id
+        elif current is not None and invalid_snapshot:
+            flagged = by_fp.get(invalid_snapshot)
+            if flagged is None:  # 憑證快照已移除或重新納管
+                invalid_snapshot = None
+            elif self._oauth_account_id not in (None, flagged.account_id):
+                # Claude Code 先寫憑證、後寫 oauthAccount：上一輪看起來像輪替，其實是切到未納管帳號
+                switched, account_id = True, self._oauth_account_id
+        if switched or current in by_fp:
+            invalid_snapshot = None
+        try:
+            if switched:
+                self._append_switch(account_id)
+            # 紀錄寫成、這裡寫失敗時，下一輪會再記一次同一個帳號；重複的一行不影響歸屬
+            self._write_state(self._observed, {"lastRunAt": self._clock().isoformat(),
+                                               "fingerprint": current or previous, "invalidSnapshot": invalid_snapshot})
+        except OSError:
+            pass  # 不推進上一輪的觀測，下一輪重試
+        if current in by_fp:
+            return by_fp[current], False
+        flagged = by_fp.get(invalid_snapshot) if current is not None and invalid_snapshot else None
+        return flagged, flagged is not None
+
+    def _read_observed(self) -> Optional[dict]:
+        """讀不到回傳 None；不存在或讀不懂就當成沒有上一輪。"""
+        try:
+            state = json.loads(self._observed.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            return {}
+        except OSError:
+            return None
+        except ValueError:
+            return {}
+        return state if isinstance(state, dict) else {}
+
+    def _append_switch(self, account_id: Optional[str]) -> None:
+        """切換紀錄只追加：時間、切到的帳號識別碼（拿不到為 null）、來源。不記帳號鍵（ADR-0009）。"""
+        self._mkdir_state_dir()
+        line = json.dumps({"at": self._clock().isoformat(), "accountUuid": account_id, "source": "observed"})
+        atomic.append(self._switch_log, (line + "\n").encode("utf-8"),
+                      before_replace=lambda tmp: _tighten(tmp, new=True))
+
     def _write_state(self, path: Path, data: dict) -> None:
         """工具狀態一律原子寫入，暫存檔在替換前就收緊權限。"""
-        self._mkdir_private(path.parent)
+        self._mkdir_state_dir()
         atomic.write_atomic(path, json.dumps(data, indent=2).encode("utf-8"),
                             before_replace=lambda tmp: _tighten(tmp, new=True))
+
+    def _mkdir_state_dir(self) -> None:
+        """poll 在還沒納管任何帳號時也會寫工具狀態，納管目錄可能還不存在。"""
+        self._mkdir_private(self._managed_dir)
+        self._mkdir_private(self._managed_dir / STATE_DIR)
 
     @staticmethod
     def _mkdir_private(path: Path) -> bool:
@@ -269,13 +338,11 @@ class Core:
                 self._oauth_account_id = provider.account_id(text)
         return self._result
 
-    def _cards(self, accounts: Tuple[_Account, ...]) -> Tuple[Card, ...]:
+    def _cards(self, accounts: Tuple[_Account, ...], active: Optional[_Account], invalid: bool) -> Tuple[Card, ...]:
         """使用中帳號在最前面，其餘納管帳號是待命帳號，依帳號鍵排序。
-        當前憑證的憑證指紋對不上任何憑證快照：使用中帳號是未納管帳號。"""
-        current = FileCredentialStore(self._credentials).fingerprint()
-        active = next((a for a in accounts if current and a.fingerprint == current), None)
+        active 為 None：當前憑證對不上任何憑證快照，使用中帳號是未納管帳號。"""
         if active:
-            first = self._active_card(active.key, Role.ACTIVE, active.account_id)
+            first = replace(self._active_card(active.key, Role.ACTIVE, active.account_id), snapshot_invalid=invalid)
         else:
             first = self._active_card(None, Role.UNMANAGED, self._oauth_account_id)
         return (first, *(self._standby_card(a) for a in accounts if a is not active))
@@ -329,6 +396,10 @@ def _tighten(path: Path, new: bool = False) -> bool:
     if not is_private(path):
         raise PermissionError(f"無法把權限收緊到只有目前使用者：{path.name}")
     return not new
+
+
+def _text(value) -> Optional[str]:
+    return value if isinstance(value, str) and value else None
 
 
 def _counting(resets_at: Optional[datetime], now: datetime) -> bool:
