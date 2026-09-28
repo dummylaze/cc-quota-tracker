@@ -4,10 +4,10 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-human
+**Status:** resolved
 
-- [ ] 切換帳號前後各記錄一次：憑證身分鍵、`oauthAccount` 識別碼、額度快取識別碼、各限額狀態，全部只輸出雜湊前綴
-- [ ] 切換後每分鐘記錄一次，直到額度快取的識別碼翻轉
-- [ ] 結論寫回 spec〈補充說明〉：`claude login` 是否立刻更新 `oauthAccount`；「讀數待更新」實際持續多久
-- [ ] 若假設不成立，明確列出對 ticket 06、07 的影響，再開始那兩張
-- [ ] 取樣紀錄不進 git（含任何可識別身分的值）
+- [x] 切換帳號前後各記錄一次：憑證身分鍵、`oauthAccount` 識別碼、額度快取識別碼、各限額狀態，全部只輸出雜湊前綴
+- [x] 切換後每分鐘記錄一次，直到額度快取的識別碼翻轉
+- [x] 結論寫回 spec〈補充說明〉：`claude login` 是否立刻更新 `oauthAccount`；「讀數待更新」實際持續多久
+- [x] 若假設不成立，明確列出對 ticket 06、07 的影響，再開始那兩張
+- [x] 取樣紀錄不進 git（含任何可識別身分的值）
