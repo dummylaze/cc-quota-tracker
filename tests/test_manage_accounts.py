@@ -1,14 +1,13 @@
 import json
 import os
 import stat
-import subprocess
 import sys
 import unittest
 from pathlib import Path
 from unittest import mock
 
 from cc_quota_tracker.core import AddWarning, InvalidLabel, NoCredential, UnknownLabel
-from tests.fakehome import HomeTestCase
+from tests.fakehome import HomeTestCase, WindowsAclAssertions
 
 # SHA-256 前 16 個十六進位字元，事先算好的字面值
 KEY_RT1 = "a33d8c625833429d"  # refreshToken "rt-1"
@@ -208,36 +207,11 @@ class AtomicWriteTest(ManageTestCase):
         self.assertFalse(self.snapshot("work").exists())
 
 
-def acl_entries(path):
-    """icacls 列出的 ACE：只取第一個空行之前，第一行去掉開頭的路徑。"""
-    out = subprocess.run(["icacls", str(path)], capture_output=True, text=True, errors="replace").stdout
-    entries = []
-    for i, line in enumerate(out.splitlines()):
-        if not line.strip():
-            break
-        entries.append((line[len(str(path)):] if i == 0 else line).strip())
-    return entries
-
-
 @unittest.skipUnless(sys.platform == "win32", "Windows ACL")
-class WindowsPermissionTest(ManageTestCase):
-    """在 Windows 真實暫存目錄上驗證：不繼承、只授權目前使用者。"""
-
-    def setUp(self):
-        super().setUp()
-        self.user = subprocess.run(["whoami"], capture_output=True, text=True).stdout.strip().lower()
-
+class WindowsPermissionTest(WindowsAclAssertions, ManageTestCase):
     def managed_paths(self):
         state = self.home / ".claude-multi" / ".state"
         return [self.home / ".claude-multi", self.snapshot("work"), state, state / "bindings.json"]
-
-    def assert_private(self, path):
-        entries = acl_entries(path)
-        self.assertEqual(len(entries), 1, (path.name, entries))
-        entry = entries[0].lower()
-        self.assertTrue(entry.startswith(self.user + ":"), (path.name, entries))
-        self.assertIn("(f)", entry)
-        self.assertNotIn("(i)", entry)  # 不是繼承來的
 
     def test_add_tightens_new_directory_and_files(self):
         self.log_in()

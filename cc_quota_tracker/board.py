@@ -98,8 +98,14 @@ class Card:
 @dataclass(frozen=True)
 class Board:
     """schema_changed：額度快取結構變更，卡片沿用最後一次成功的讀數；last_reading_at 是它的觀測時間。
-    managed_accounts：所有納管帳號的帳號鍵（「供應商:帳號標籤」），依帳號鍵排序。"""
+    managed_accounts：所有納管帳號的帳號鍵（「供應商:帳號標籤」），依帳號鍵排序。
+    wrong_location_suspected：Claude Code 目錄沒有指定、home 預設位置也沒有額度快取檔，可能讀錯位置。
+    restart_required：執行中設定檔的路徑欄位改了；路徑只在啟動時解析，重新啟動才生效。
+    settings_unreadable：設定檔不是合法的 JSON 物件；本工具不覆寫它，等使用者修好。"""
     cards: Tuple[Card, ...]
     schema_changed: bool = False
     last_reading_at: Optional[datetime] = None
     managed_accounts: Tuple[str, ...] = ()
+    wrong_location_suspected: bool = False
+    restart_required: bool = False
+    settings_unreadable: bool = False

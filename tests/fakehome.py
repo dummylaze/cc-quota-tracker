@@ -1,11 +1,16 @@
 """假 home 與可控時鐘：所有核心測試共用的骨架。"""
+import contextlib
 import json
+import os
+import subprocess
 import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from unittest import mock
 
 from cc_quota_tracker.core import Core
+from cc_quota_tracker.settings import DEFAULTS, resolve_paths
 
 NOW = datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc)
 
@@ -66,15 +71,49 @@ class HomeTestCase(unittest.TestCase):
         self.addCleanup(tmp.cleanup)
         self.home = Path(tmp.name)
         self.clock = FakeClock()
-        self.core = Core(self.home, self.clock)
+        # 環境變數一律由測試給定：不讀真實的 CLAUDE_CONFIG_DIR，設定檔也寫在暫存目錄裡
+        self.env = {"APPDATA": str(self.home / "appdata-from-env")}  # 刻意與缺少 APPDATA 時的預設不同
+        self.start()
+
+    def start(self, **env):
+        """啟動核心：路徑只在這時解析一次。env 會疊加在測試的環境變數上。"""
+        self.env.update(env)
+        self.paths = resolve_paths(self.home, self.env)
+        self.core = Core(self.paths, self.clock)
+
+    @contextlib.contextmanager
+    def cli_environment(self):
+        """命令列入口讀真實的 home 與環境變數：兩者都換成這個假 home。"""
+        with mock.patch("pathlib.Path.home", return_value=self.home), \
+                mock.patch.dict(os.environ, self.env, clear=True):
+            yield
+
+    def settings_file(self):
+        return self.home / "appdata-from-env" / "cc-quota-tracker" / "settings.json"
+
+    def write_settings(self, **fields):
+        """像使用者手改那樣，把預設設定檔改掉其中幾個欄位。"""
+        self.write_settings_text(json.dumps(dict(DEFAULTS, **fields)))
+
+    def write_settings_text(self, text):
+        """每次都把修改時間往後推 1 秒：連續兩次寫入可能落在同一個時間刻度，修改時間不變，核心就不會重讀。"""
+        path = self.settings_file()
+        mtime = path.stat().st_mtime_ns + 1_000_000_000
+        path.write_text(text, encoding="utf-8")
+        os.utime(path, ns=(mtime, mtime))
+
+    def make_dir(self, name):
+        path = self.home / name
+        path.mkdir(parents=True)
+        return path
 
     def write_claude_json(self, data):
-        (self.home / ".claude.json").write_text(json.dumps(data), encoding="utf-8")
+        self.paths.claude_json.write_text(json.dumps(data), encoding="utf-8")
 
     def write_credentials(self, refresh="rt-1", access="at-1", expires_at=NOW + timedelta(hours=8),
                           refresh_expires_at=NOW + timedelta(days=30)):
-        """Claude Code 維護的當前憑證；到期時間是毫秒時間戳。"""
-        path = self.home / ".claude" / ".credentials.json"
+        """Claude Code 維護的當前憑證，寫在解析出的 Claude Code 目錄；到期時間是毫秒時間戳。"""
+        path = self.paths.claude_dir / ".credentials.json"
         path.parent.mkdir(exist_ok=True)
         oauth = {"accessToken": access, "refreshToken": refresh,
                  "expiresAt": int(expires_at.timestamp() * 1000),
@@ -92,3 +131,27 @@ class HomeTestCase(unittest.TestCase):
     def poll_card(self, **cache):
         self.write_claude_json({"cachedUsageUtilization": usage_cache(**cache)})
         return self.core.poll().cards[0]
+
+
+def acl_entries(path):
+    """icacls 列出的 ACE：只取第一個空行之前，第一行去掉開頭的路徑。"""
+    out = subprocess.run(["icacls", str(path)], capture_output=True, text=True, errors="replace").stdout
+    entries = []
+    for i, line in enumerate(out.splitlines()):
+        if not line.strip():
+            break
+        entries.append((line[len(str(path)):] if i == 0 else line).strip())
+    return entries
+
+
+class WindowsAclAssertions:
+    """在 Windows 真實暫存目錄上驗證：不繼承、只授權目前使用者。以 icacls 與 whoami 當獨立的驗證來源。"""
+
+    def assert_private(self, path):
+        user = subprocess.run(["whoami"], capture_output=True, text=True).stdout.strip().lower()
+        entries = acl_entries(path)
+        self.assertEqual(len(entries), 1, (path.name, entries))
+        entry = entries[0].lower()
+        self.assertTrue(entry.startswith(user + ":"), (path.name, entries))
+        self.assertIn("(f)", entry)
+        self.assertNotIn("(i)", entry)  # 不是繼承來的

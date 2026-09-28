@@ -1,4 +1,4 @@
-"""核心：接收 home 目錄與時鐘，對外只有 poll、add、remove。"""
+"""核心：接收解析後的路徑與時鐘，對外只有 poll、add、remove。"""
 import json
 import os
 import re
@@ -13,8 +13,8 @@ from . import claude_provider as provider
 from .board import Board, Card, Limit, ReadingState, Role, Severity
 from .credstore import FileCredentialStore
 from .permissions import is_private, make_private
+from .settings import PathSource, ResolvedPaths, path_fields, read_settings
 
-MANAGED_DIR = ".claude-multi"  # 本工具自己的狀態目錄；憑證快照直接放在這一層
 STATE_DIR = ".state"  # 納管目錄底下放工具狀態的子目錄，與憑證快照分開
 _EMAIL = re.compile(r"[^@\s]+@[^@\s]+\.[A-Za-z]{2,}")
 _ILLEGAL_IN_NAME = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
@@ -48,10 +48,15 @@ class UnknownLabel(LookupError):
 
 
 class Core:
-    def __init__(self, home: Path, clock: Callable[[], datetime]):
-        self._source = Path(home) / ".claude.json"
-        self._credentials = Path(home) / provider.CREDENTIALS
-        self._managed_dir = Path(home) / MANAGED_DIR
+    def __init__(self, paths: ResolvedPaths, clock: Callable[[], datetime]):
+        self._source = paths.claude_json
+        self._credentials = paths.claude_dir / provider.CREDENTIALS
+        self._managed_dir = paths.managed_dir  # 憑證快照直接放在這一層
+        self._paths = paths
+        self._source_missing = False
+        self._settings_mtime: Optional[int] = None
+        self._path_fields = paths.path_fields  # 設定檔目前寫的路徑欄位；與啟動時不同就要重新啟動
+        self._settings_unreadable = False  # 第一輪 poll 就會重讀設定檔
         self._bindings = self._managed_dir / STATE_DIR / "bindings.json"
         self._clock = clock
         self._mtime: Optional[int] = None
@@ -61,11 +66,15 @@ class Core:
 
     def poll(self) -> Board:
         self._refresh()
+        self._reread_settings()
         reading = self._reading
         return Board(cards=(self._active_card(),),
                      schema_changed=self._mismatch_rounds >= SCHEMA_CHANGE_ROUNDS,
                      last_reading_at=reading.observed_at if reading else None,
-                     managed_accounts=tuple(f"{provider.PROVIDER}:{label}" for label in self._labels()))
+                     managed_accounts=tuple(f"{provider.PROVIDER}:{label}" for label in self._labels()),
+                     wrong_location_suspected=self._source_missing and self._paths.claude_source is PathSource.DEFAULT,
+                     restart_required=self._path_fields != self._paths.path_fields,
+                     settings_unreadable=self._settings_unreadable)
 
     def add(self, label: str) -> AddResult:
         _check_label(label)
@@ -154,16 +163,33 @@ class Core:
             self._mismatch_rounds += 1
         # 暫時不可讀、偶發讀取失敗：沿用上一次的值，也不動結構不符的累計
 
+    def _reread_settings(self) -> None:
+        """設定檔改了才重讀。讀不懂時不記修改時間，下一輪再讀；路徑欄位沿用上一次讀到的值。"""
+        try:
+            mtime = os.stat(self._paths.settings_file).st_mtime_ns
+        except FileNotFoundError:
+            self._settings_mtime, self._path_fields, self._settings_unreadable = None, (None, None), False
+            return
+        except OSError:
+            return
+        if mtime == self._settings_mtime:
+            return
+        fields = read_settings(self._paths.settings_file)
+        self._settings_unreadable = fields is None
+        if fields is not None:
+            self._settings_mtime, self._path_fields = mtime, path_fields(fields)
+
     def _read(self) -> Optional[provider.ParseResult]:
         """來源檔案沒變時不重新解析，沿用上一次的解析結果，結構判定仍算一輪。
         偶發讀取失敗回傳 None，下一輪重試。"""
         try:
             mtime = os.stat(self._source).st_mtime_ns
         except FileNotFoundError:
-            self._mtime, self._result = None, provider.NoReading()
+            self._mtime, self._result, self._source_missing = None, provider.NoReading(), True
             return self._result
         except OSError:
             return None
+        self._source_missing = False
         if mtime != self._mtime:
             try:
                 text = self._source.read_text(encoding="utf-8")

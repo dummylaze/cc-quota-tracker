@@ -2,14 +2,13 @@
 import json
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Optional, Tuple, Union
 
 from .board import (BreakdownRow, Dollars, ExtraUsage, Limit, Money, Severity, Spend,
                     WeeklyBreakdown)
 
 PROVIDER = "claude"  # 帳號鍵的供應商前綴
-CREDENTIALS = Path(".claude") / ".credentials.json"  # 相對 home；Claude Code 維護的當前憑證
+CREDENTIALS = ".credentials.json"  # Claude Code 目錄裡的當前憑證
 WEEKLY_KIND = "weekly_all"
 WINDOW_KINDS = ("session", WEEKLY_KIND)
 SCOPED_KIND = "weekly_scoped"

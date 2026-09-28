@@ -3,7 +3,6 @@ import os
 import unittest
 from contextlib import redirect_stdout
 from datetime import datetime, timedelta, timezone
-from unittest import mock
 
 from cc_quota_tracker.__main__ import main
 from cc_quota_tracker.board import ReadingState, Role
@@ -75,7 +74,7 @@ class ListTest(HomeTestCase):
         later = datetime.now(timezone.utc) + timedelta(days=3)
         self.write_claude_json({"cachedUsageUtilization": usage_cache(weekly=61, resets_at=later)})
         out = io.StringIO()
-        with mock.patch("pathlib.Path.home", return_value=self.home), redirect_stdout(out):
+        with self.cli_environment(), redirect_stdout(out):
             self.assertEqual(main(["list"]), 0)
         self.assertIn("週窗口  61%", out.getvalue())
 

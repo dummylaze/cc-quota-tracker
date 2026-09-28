@@ -1,11 +1,13 @@
 """命令列：納管帳號的操作都交給核心，這裡只負責參數與文案。"""
+import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
 from . import COMMAND
 from .core import AddWarning, Core, InvalidLabel, NoCredential, UnknownLabel
-from .render_text import render
+from .render_text import SETTINGS_UNREADABLE, render
+from .settings import InvalidPathSetting, PathProblem, resolve_paths
 
 USAGE = f"""用法：
   {COMMAND} add <帳號標籤>     納管 Claude Code 目前登入的帳號；標籤已存在就重新納管
@@ -21,6 +23,13 @@ _WARNINGS = {
                           "該帳號成為使用中帳號之前只會顯示「讀數待更新」。可以稍後再執行一次 add。",
 }
 
+_PATH_PROBLEMS = {
+    PathProblem.NOT_ABSOLUTE: "設定檔的 {field} 必須是完整的絕對路徑；不指定請寫 null。",
+    PathProblem.NOT_A_DIRECTORY: "設定檔的 {field} 指向的目錄不存在。本工具不會改用預設位置，以免讀到另一組帳號。",
+    PathProblem.INSIDE_CLAUDE_DIR: "納管目錄不能放在 Claude Code 的目錄裡面（本工具不寫入 Claude Code 的目錄）；"
+                                   "請在設定檔的 {field} 指定別的位置。",
+}
+
 
 def main(argv=None) -> int:
     args = sys.argv[1:] if argv is None else argv
@@ -28,11 +37,19 @@ def main(argv=None) -> int:
     if (command, len(params)) not in {("add", 1), ("remove", 1), ("list", 0)}:
         print(USAGE, file=sys.stderr)
         return 2
-    core = Core(Path.home(), lambda: datetime.now(timezone.utc))
+    try:
+        paths = resolve_paths(Path.home(), os.environ)
+    except InvalidPathSetting as e:
+        print(_PATH_PROBLEMS[e.problem].format(field=e.field), file=sys.stderr)
+        print(f"設定檔位置：{e.settings_file}", file=sys.stderr)
+        return 1
+    core = Core(paths, lambda: datetime.now(timezone.utc))
     if command == "list":
         print(render(core.poll()))
         return 0
     label = params[0]
+    if paths.settings_unreadable:  # list 由看板帶出這個提示
+        print(SETTINGS_UNREADABLE, file=sys.stderr)
     try:
         if command == "add":
             result = core.add(label)
