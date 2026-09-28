@@ -2,7 +2,7 @@
 
 **What to build:** 架設者可以執行一個檢查指令，確認工具依賴的欄位路徑在自己機器的額度快取裡仍然存在、型別正確，並列出 `utilization` 底下新出現的未知欄位，用來在 Claude Code 改版後快速判斷相容性。
 
-**Blocked by:** 03
+**Blocked by:** 03, 21
 
 **Status:** ready-for-agent
 
@@ -11,3 +11,8 @@
 - [ ] 列出 `utilization` 底下不在已知清單內的欄位
 - [ ] 輸出不含帳號識別碼或 email
 - [ ] 唯讀，不寫入任何 Claude Code 維護的檔案
+- [ ] 印出實際使用的 Claude Code 目錄與納管目錄，各自註明來自設定檔、環境變數或預設值
+
+## Comments
+
+- 2026-09-28：依 ADR-0008 新增最後一條，並加上被 21 阻擋（路徑解析在 21）。
