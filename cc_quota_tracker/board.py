@@ -40,7 +40,7 @@ class Dollars:
 
 @dataclass(frozen=True)
 class Limit:
-    """percent 為 None：無計時中窗口；resets_at 為 None：重置時間未知。"""
+    """percent 為 None：無計時中窗口（reset 為 True 時是週窗口已重置）；resets_at 為 None：重置時間未知。"""
     kind: str
     percent: Optional[int]
     severity: Severity
@@ -48,6 +48,7 @@ class Limit:
     headline: bool = False
     scope: Optional[str] = None
     dollars: Optional[Dollars] = None
+    reset: bool = False
 
 
 @dataclass(frozen=True)

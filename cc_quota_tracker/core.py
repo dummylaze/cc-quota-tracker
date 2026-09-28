@@ -72,9 +72,11 @@ def _counting(resets_at: Optional[datetime], now: datetime) -> bool:
 
 
 def _as_of(limits: Tuple[Limit, ...], now: datetime) -> Tuple[Limit, ...]:
-    """沒有重置時間或已過重置時間：無計時中窗口，重置時間未知，不推算下一次。"""
+    """沒有重置時間或已過重置時間：無計時中窗口，重置時間未知，不推算下一次。
+    週窗口固定 7 天，過了重置時間代表新的一週已開始，標為已重置。"""
     return tuple(
         lim if _counting(lim.resets_at, now)
-        else replace(lim, percent=None, resets_at=None, severity=Severity.NORMAL)
+        else replace(lim, percent=None, resets_at=None, severity=Severity.NORMAL,
+                     reset=lim.resets_at is not None and lim.kind == provider.WEEKLY_KIND)
         for lim in limits
     )

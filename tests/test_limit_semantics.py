@@ -35,6 +35,20 @@ class OpenWindowTest(HomeTestCase):
         self.assertIsNone(session.resets_at)
         self.assertEqual(session.severity, Severity.NORMAL)
 
+    def test_weekly_window_past_reset_is_marked_reset(self):
+        # 週窗口固定 7 天：舊的一週結束時新的一週已開始，只是用量與下次重置時間未知
+        self.poll_card(limits=[limit("session", 70, SOON), limit("weekly_all", 83, SOON)])
+        self.clock.advance(hours=2)
+        limits = by_kind(self.core.poll().cards[0].limits)
+        self.assertEqual((limits["weekly_all"].percent, limits["weekly_all"].resets_at, limits["weekly_all"].reset),
+                         (None, None, True))
+        self.assertFalse(limits["session"].reset)
+
+    def test_weekly_window_without_reset_time_is_not_marked_reset(self):
+        weekly = self.poll_card(limits=[limit("weekly_all", 0, resets_at=None)]).limits[0]
+        self.assertIsNone(weekly.percent)
+        self.assertFalse(weekly.reset)
+
     def test_reset_exactly_now_is_no_open_window(self):
         self.poll_card(limits=[limit("session", 70, SOON)])
         self.clock.advance(hours=1)
@@ -187,6 +201,11 @@ class RenderTest(HomeTestCase):
         self.assertIn("週窗口  83%", text)
         self.assertIn("nimbus_quill  12%", text)
         self.assertIn("session_limit_reached", text)
+
+    def test_render_weekly_reset(self):
+        self.poll_card(limits=[limit("weekly_all", 83, SOON)])
+        self.clock.advance(hours=2)
+        self.assertIn("週窗口  已重置，下次重置時間未知", render(self.core.poll()))
 
 
 if __name__ == "__main__":

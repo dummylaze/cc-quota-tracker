@@ -7,7 +7,8 @@ from typing import Optional, Tuple, Union
 from .board import (BreakdownRow, Dollars, ExtraUsage, Limit, Money, Severity, Spend,
                     WeeklyBreakdown)
 
-WINDOW_KINDS = ("session", "weekly_all")
+WEEKLY_KIND = "weekly_all"
+WINDOW_KINDS = ("session", WEEKLY_KIND)
 SCOPED_KIND = "weekly_scoped"
 # limits[] 各種類在 utilization 底下的對應欄位：數字以 limits[] 為準，這裡只取金額與鎖定原因
 WINDOW_FIELDS = {"session": "five_hour", "weekly_all": "seven_day"}
@@ -81,7 +82,7 @@ def _to_reading(cache: dict) -> UsageReading:
     others += [_field_limit(name, value) for name, value in limit_fields.items() if name not in KNOWN_FIELDS]
     locked = next((q["locked_reason"] for q in limit_fields.values() if q.get("locked_reason")), None)
     observed = datetime.fromtimestamp(cache["fetchedAtMs"] / 1000, tz=timezone.utc)
-    weekly_end = next((lim.resets_at for lim in windows if lim.kind == "weekly_all"), None)
+    weekly_end = next((lim.resets_at for lim in windows if lim.kind == WEEKLY_KIND), None)
     return UsageReading(
         observed, cache.get("accountUuid"), tuple(windows), tuple(scoped), tuple(others), locked,
         _breakdown(usage.get("seven_day_breakdown"), weekly_end),

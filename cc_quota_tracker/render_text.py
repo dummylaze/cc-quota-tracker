@@ -38,6 +38,8 @@ def _limit_line(lim: Limit) -> str:
     name = _WINDOW_NAMES.get(lim.kind, lim.kind)
     if lim.scope:
         name = f"{name}（{lim.scope}）"
+    if lim.reset:
+        return f"{name}  已重置，下次重置時間未知"
     value = "無計時中窗口" if lim.percent is None else f"{lim.percent}%"
     line = f"{name}  {value}  重置：{_time(lim.resets_at)}"
     if lim.dollars and lim.dollars.used is not None:
