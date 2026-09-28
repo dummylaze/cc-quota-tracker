@@ -1,6 +1,5 @@
 """核心：接收解析後的路徑與時鐘，對外只有 poll、add、remove。"""
 import json
-import math
 import os
 import re
 from dataclasses import dataclass, replace
@@ -11,10 +10,10 @@ from typing import Callable, FrozenSet, Optional, Set, Tuple
 
 from . import atomic
 from . import claude_provider as provider
-from .board import Board, Card, Limit, ReadingState, Role, Severity
+from .board import Board, Card, CountdownFormat, Limit, ReadingState, Role, Severity
 from .credstore import FileCredentialStore
 from .permissions import is_private, make_private
-from .settings import PathSource, ResolvedPaths, path_fields, read_settings
+from .settings import COUNTDOWN_FORMAT_FIELD, PathSource, ResolvedPaths, path_fields, read_settings
 
 STATE_DIR = ".state"  # 納管目錄底下放工具狀態的子目錄，與憑證快照分開
 _EMAIL = re.compile(r"[^@\s]+@[^@\s]+\.[A-Za-z]{2,}")
@@ -22,7 +21,7 @@ _ILLEGAL_IN_NAME = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 _RESERVED_NAMES = {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 10)),
                    *(f"LPT{i}" for i in range(1, 10))}
 SCHEMA_CHANGE_ROUNDS = 3  # 結構不符連續這麼多輪才判定為結構變更；偶發一次不亮橫幅
-EXPIRY_WARNING = timedelta(days=7)  # 憑證快照剩這麼久以內就發出到期警示（固定值）
+EXPIRY_WARNING = timedelta(days=7)  # 憑證快照剩不到這麼久就發出到期警示（固定值）
 
 
 class AddWarning(Enum):
@@ -68,6 +67,7 @@ class Core:
         self._settings_mtime: Optional[int] = None
         self._path_fields = paths.path_fields  # 設定檔目前寫的路徑欄位；與啟動時不同就要重新啟動
         self._settings_unreadable = False  # 第一輪 poll 就會重讀設定檔
+        self._countdown_format = CountdownFormat.TWO_UNITS
         self._bindings = self._managed_dir / STATE_DIR / "bindings.json"
         self._readings_file = self._managed_dir / STATE_DIR / "readings.json"
         self._switch_log = self._managed_dir / STATE_DIR / "switches.jsonl"
@@ -93,7 +93,8 @@ class Core:
                      managed_accounts=tuple(a.key for a in accounts),
                      wrong_location_suspected=self._source_missing and self._paths.claude_source is PathSource.DEFAULT,
                      restart_required=self._path_fields != self._paths.path_fields,
-                     settings_unreadable=self._settings_unreadable)
+                     settings_unreadable=self._settings_unreadable,
+                     as_of=self._clock(), countdown_format=self._countdown_format)
 
     def add(self, label: str) -> AddResult:
         _check_label(label)
@@ -308,6 +309,7 @@ class Core:
             mtime = os.stat(self._paths.settings_file).st_mtime_ns
         except FileNotFoundError:
             self._settings_mtime, self._path_fields, self._settings_unreadable = None, (None, None), False
+            self._countdown_format = CountdownFormat.TWO_UNITS
             return
         except OSError:
             return
@@ -317,6 +319,7 @@ class Core:
         self._settings_unreadable = fields is None
         if fields is not None:
             self._settings_mtime, self._path_fields = mtime, path_fields(fields)
+            self._countdown_format = _countdown_format(fields.get(COUNTDOWN_FORMAT_FIELD))
 
     def _read(self) -> Optional[provider.ParseResult]:
         """來源檔案沒變時不重新解析，沿用上一次的解析結果，結構判定仍算一輪。
@@ -354,12 +357,11 @@ class Core:
                 *(self._with_expiry(self._standby_card(a), a) for a in accounts if a is not active))
 
     def _with_expiry(self, card: Card, account: Optional[_Account]) -> Card:
-        """剩餘天數不足一天算一天，與「剩餘時間 ≤ 7 天」的警示同一條界線；每輪以當下時間重算。"""
+        """剩不到 7 天才警示：畫面的倒數一律捨去，顯示「7天0小時」時不警示、「6天23小時」起才警示。每輪以當下時間重算。"""
         if account is None or account.expires_at is None:
             return card
-        left = account.expires_at - self._clock()
-        return replace(card, snapshot_days_left=math.ceil(left / timedelta(days=1)),
-                       snapshot_expiring=left <= EXPIRY_WARNING)
+        return replace(card, snapshot_expires_at=account.expires_at,
+                       snapshot_expiring=account.expires_at - self._clock() < EXPIRY_WARNING)
 
     def _active_card(self, key: Optional[str], role: Role, owner: Optional[str]) -> Card:
         """額度快取的識別碼等於 owner 才歸屬；否則是別的帳號的讀數（例如剛切換），讀數待更新。"""
@@ -410,6 +412,14 @@ def _tighten(path: Path, new: bool = False) -> bool:
     if not is_private(path):
         raise PermissionError(f"無法把權限收緊到只有目前使用者：{path.name}")
     return not new
+
+
+def _countdown_format(value) -> CountdownFormat:
+    """不認得的值用預設的「天＋時」。"""
+    try:
+        return CountdownFormat(value)
+    except ValueError:
+        return CountdownFormat.TWO_UNITS
 
 
 def _text(value) -> Optional[str]:

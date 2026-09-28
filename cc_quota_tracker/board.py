@@ -17,6 +17,12 @@ class ReadingState(Enum):
     NO_READING = "no_reading"
 
 
+class CountdownFormat(Enum):
+    """倒數的顯示格式（設定檔的 countdownFormat）。兩者不足的部分一律捨去，不進位；剩不到一天時都顯示「時＋分」。"""
+    TWO_UNITS = "twoUnits"  # 「天＋時」
+    DECIMAL_DAYS = "decimalDays"  # 天數到小數第 1 位
+
+
 class Severity(Enum):
     NORMAL = "normal"
     WARNING = "warning"
@@ -94,9 +100,9 @@ class Card:
     extra_usage: Optional[ExtraUsage] = None
     spend: Optional[Spend] = None
     snapshot_invalid: bool = False  # 憑證被輪替：這張卡片的憑證快照已失效，需要重新納管
-    # 憑證快照的 refreshToken 還剩幾天到期（不足一天算一天，≤ 0 為已過期）；未納管帳號或快照沒寫到期時間為 None
-    snapshot_days_left: Optional[int] = None
-    snapshot_expiring: bool = False  # 剩餘時間 ≤ 7 天（含已過期）：要在該帳號下重新登入，再對同一標籤重新 add
+    # 憑證快照的 refreshToken 到期時間；未納管帳號或快照沒寫到期時間（暫當無效資料）為 None
+    snapshot_expires_at: Optional[datetime] = None
+    snapshot_expiring: bool = False  # 剩不到 7 天（含已過期）：要在該帳號下重新登入，再對同一標籤重新 add
 
 
 @dataclass(frozen=True)
@@ -105,7 +111,8 @@ class Board:
     managed_accounts：所有納管帳號的帳號鍵（「供應商:帳號標籤」），依帳號鍵排序。
     wrong_location_suspected：Claude Code 目錄沒有指定、home 預設位置也沒有額度快取檔，可能讀錯位置。
     restart_required：執行中設定檔的路徑欄位改了；路徑只在啟動時解析，重新啟動才生效。
-    settings_unreadable：設定檔不是合法的 JSON 物件；本工具不覆寫它，等使用者修好。"""
+    settings_unreadable：設定檔不是合法的 JSON 物件；本工具不覆寫它，等使用者修好。
+    as_of：這一輪的時間，畫面層以它算倒數。countdown_format：設定檔目前的倒數格式。"""
     cards: Tuple[Card, ...]
     schema_changed: bool = False
     last_reading_at: Optional[datetime] = None
@@ -113,3 +120,5 @@ class Board:
     wrong_location_suspected: bool = False
     restart_required: bool = False
     settings_unreadable: bool = False
+    as_of: Optional[datetime] = None
+    countdown_format: CountdownFormat = CountdownFormat.TWO_UNITS
