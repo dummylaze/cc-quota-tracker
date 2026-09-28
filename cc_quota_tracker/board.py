@@ -97,7 +97,9 @@ class Card:
 
 @dataclass(frozen=True)
 class Board:
-    """schema_changed：額度快取結構變更，卡片沿用最後一次成功的讀數；last_reading_at 是它的觀測時間。"""
+    """schema_changed：額度快取結構變更，卡片沿用最後一次成功的讀數；last_reading_at 是它的觀測時間。
+    managed_accounts：所有納管帳號的帳號鍵（「供應商:帳號標籤」），依帳號鍵排序。"""
     cards: Tuple[Card, ...]
     schema_changed: bool = False
     last_reading_at: Optional[datetime] = None
+    managed_accounts: Tuple[str, ...] = ()

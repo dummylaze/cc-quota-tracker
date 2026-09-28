@@ -2,11 +2,14 @@
 import json
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Optional, Tuple, Union
 
 from .board import (BreakdownRow, Dollars, ExtraUsage, Limit, Money, Severity, Spend,
                     WeeklyBreakdown)
 
+PROVIDER = "claude"  # 帳號鍵的供應商前綴
+CREDENTIALS = Path(".claude") / ".credentials.json"  # 相對 home；Claude Code 維護的當前憑證
 WEEKLY_KIND = "weekly_all"
 WINDOW_KINDS = ("session", WEEKLY_KIND)
 SCOPED_KIND = "weekly_scoped"
@@ -60,6 +63,15 @@ def parse(text: str) -> ParseResult:
         return _to_reading(raw["cachedUsageUtilization"])
     except (KeyError, TypeError, ValueError, AttributeError):
         return SchemaMismatch()
+
+
+def account_uuid(text: str) -> Optional[str]:
+    """目前登入帳號的識別碼（oauthAccount.accountUuid）；oauthAccount 裡的其他欄位（含 email）一律不取。"""
+    try:
+        uuid = json.loads(text)["oauthAccount"]["accountUuid"]
+    except (ValueError, KeyError, TypeError):
+        return None
+    return uuid if isinstance(uuid, str) and uuid else None
 
 
 def _to_reading(cache: dict) -> UsageReading:

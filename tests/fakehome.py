@@ -71,6 +71,24 @@ class HomeTestCase(unittest.TestCase):
     def write_claude_json(self, data):
         (self.home / ".claude.json").write_text(json.dumps(data), encoding="utf-8")
 
+    def write_credentials(self, refresh="rt-1", access="at-1", expires_at=NOW + timedelta(hours=8),
+                          refresh_expires_at=NOW + timedelta(days=30)):
+        """Claude Code 維護的當前憑證；到期時間是毫秒時間戳。"""
+        path = self.home / ".claude" / ".credentials.json"
+        path.parent.mkdir(exist_ok=True)
+        oauth = {"accessToken": access, "refreshToken": refresh,
+                 "expiresAt": int(expires_at.timestamp() * 1000),
+                 "refreshTokenExpiresAt": int(refresh_expires_at.timestamp() * 1000),
+                 "scopes": ["user:inference"], "subscriptionType": "max", "rateLimitTier": "tier"}
+        path.write_text(json.dumps({"claudeAiOauth": oauth}), encoding="utf-8")
+        return path
+
+    def log_in(self, refresh="rt-1", account_uuid="acct-1"):
+        """模擬在 Claude Code 登入某帳號：當前憑證與 oauthAccount 一起換。"""
+        self.write_credentials(refresh=refresh)
+        self.write_claude_json({"oauthAccount": {"accountUuid": account_uuid,
+                                                 "emailAddress": "someone@example.com"}})
+
     def poll_card(self, **cache):
         self.write_claude_json({"cachedUsageUtilization": usage_cache(**cache)})
         return self.core.poll().cards[0]

@@ -13,6 +13,8 @@ def render(board: Board) -> str:
         shown = (f"以下是最後一次成功的讀數（{_time(board.last_reading_at)}）" if board.last_reading_at
                  else "目前沒有成功的讀數")
         lines.insert(0, f"注意：額度快取結構已變更，本工具讀不懂新的結構；{shown}")
+    labels = [key.split(":", 1)[1] for key in board.managed_accounts]  # 畫面上只顯示帳號標籤
+    lines.append("納管帳號：" + "、".join(labels) if labels else "尚未納管任何帳號")
     return "\n".join(lines)
 
 
