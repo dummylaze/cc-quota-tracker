@@ -83,7 +83,7 @@ class AttributionTest(AttributionTestCase):
     def test_active_account_without_binding_stays_pending(self):
         self.write_credentials(refresh="rt-w")  # ~/.claude.json 不存在：納管了，但沒有綁定
         self.core.add("work")
-        self.switch_to("rt-w", oauth="acct-w", cache_owner="acct-other")  # 快取不是它的：不補學（票 09）
+        self.switch_to("rt-w", oauth="acct-w", cache_owner="acct-other")  # 快取不是它的：不補學
         self.assertEqual(self.cards()["claude:work"].reading_state, ReadingState.PENDING)
 
     def test_active_account_without_usage_cache_has_no_reading(self):

@@ -84,6 +84,24 @@ class LearnBindingTest(BindingTestCase):
                          (Role.ACTIVE, ReadingState.PENDING))
         self.assertEqual(self.bindings(), {KEY_RT1: {"accountId": "acct-1"}})
 
+    def test_a_snapshot_that_already_has_a_binding_is_never_relearned(self):
+        self.log_in(refresh="rt-1", account_uuid="acct-stale")
+        self.core.add("work")
+        self.log_in(refresh="rt-1", account_uuid="acct-new")  # 同一份憑證，oauthAccount 之後才變成別的識別碼
+        self.write_cache(oauth="acct-new", account_uuid="acct-new")
+        self.assertEqual(self.card("claude:work").reading_state, ReadingState.PENDING)
+        self.assertEqual(self.bindings(), {KEY_RT1: {"accountId": "acct-stale"}})
+
+    def test_learning_does_not_drop_the_binding_of_a_snapshot_that_cannot_be_read(self):
+        self.log_in(refresh="rt-1", account_uuid="acct-1")
+        self.core.add("work")
+        self.snapshot("work").write_text('{"claudeAiOauth": {"acc', encoding="utf-8")  # 寫到一半或被防毒鎖住
+        self.log_in(refresh="rt-2", account_uuid="acct-2")
+        self.drop_in("home")
+        self.write_cache(oauth="acct-2", account_uuid="acct-2")
+        self.core.poll()
+        self.assertEqual(self.bindings(), {KEY_RT1: {"accountId": "acct-1"}})
+
     def test_unreadable_bindings_file_is_not_overwritten_by_learning(self):
         self.log_in(refresh="rt-1", account_uuid="acct-1")
         self.core.add("work")

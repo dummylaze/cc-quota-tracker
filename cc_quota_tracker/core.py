@@ -182,33 +182,33 @@ class Core:
 
     def _maintain_bindings(self, accounts: Tuple[_Account, ...]) -> Tuple[_Account, ...]:
         """不經過 add 的綁定維護：直接放進目錄的憑證快照補學綁定，快照被刪掉的孤兒綁定清掉。
-        寫不成或綁定檔讀不到時這一輪不動，下一輪再試。"""
+        綁定檔讀不到、有憑證快照讀不出憑證指紋（寫到一半、被鎖住）、或寫不成時，這一輪什麼都不動：
+        寫綁定會依現有的憑證指紋過濾，讀不出來的那份快照的綁定會被一起洗掉。"""
         bindings = self._load_bindings()
-        if bindings is None:
+        if bindings is None or not all(a.fingerprint for a in accounts):
             return accounts
-        learn = self._learnable(accounts)
-        # 有讀不出憑證指紋的快照（寫到一半、被鎖住）時不清孤兒：它的綁定這一輪對不上，不代表被刪了
-        orphans = all(a.fingerprint for a in accounts) and set(bindings) - {a.fingerprint for a in accounts}
-        if learn is None and not orphans:
+        target = self._snapshot_to_bind(accounts)
+        has_orphans = bool(set(bindings) - {a.fingerprint for a in accounts})
+        if target is None and not has_orphans:
             return accounts
-        if learn:
-            bindings[learn.fingerprint] = {"accountId": self._oauth_account_id}
+        if target:
+            bindings[target.fingerprint] = {"accountId": self._oauth_account_id}
         try:
             self._write_bindings(bindings)
         except OSError:
             return accounts
         return self._accounts()
 
-    def _learnable(self, accounts: Tuple[_Account, ...]) -> Optional[_Account]:
-        """三個條件同時成立才補學，缺一就不猜：它是使用中帳號、額度快取的識別碼等於 oauthAccount 的識別碼、
-        該識別碼還沒綁給其他帳號。"""
+    def _snapshot_to_bind(self, accounts: Tuple[_Account, ...]) -> Optional[_Account]:
+        """要補學綁定的憑證快照，沒有就是 None。這份快照本身還沒有綁定，而且三個條件同時成立才補學，缺一就不猜：
+        它是使用中帳號、額度快取的識別碼等於 oauthAccount 的識別碼、該識別碼還沒綁給其他帳號。"""
         reading, account_id = self._reading, self._oauth_account_id
         if reading is None or account_id is None or reading.account_id != account_id:
             return None
         if any(a.account_id == account_id for a in accounts):
             return None
         current = FileCredentialStore(self._credentials).fingerprint()
-        return next((a for a in accounts if a.fingerprint and a.fingerprint == current), None)
+        return next((a for a in accounts if a.fingerprint == current and a.account_id is None), None)
 
     def _remember(self, accounts: Tuple[_Account, ...]) -> None:
         """額度快取的讀數歸屬到某個納管帳號時存進工具狀態：它換成待命帳號、甚至重新啟動後仍看得到。
