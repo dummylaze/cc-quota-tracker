@@ -23,6 +23,13 @@ class ReadPreferencesTest(HomeTestCase):
                          Preferences(layout="table", always_on_top=False, mode="expanded", language="en", theme="dark",
                                      opacity=70))
 
+    def test_every_layout_is_a_valid_value(self):
+        for layout in ("cards", "table", "ring"):
+            with self.subTest(layout=layout):
+                self.write_settings(layout=layout)
+                board = self.core.poll()
+                self.assertEqual((board.preferences.layout, board.invalid_settings), (layout, ()))
+
     def test_invalid_value_falls_back_for_that_field_only_and_is_named(self):
         self.write_settings(mode="huge", opacity=50, theme="dark", alwaysOnTop=1, countdownFormat="weeks", layout="rings")
         board = self.core.poll()

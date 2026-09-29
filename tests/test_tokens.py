@@ -114,6 +114,7 @@ class RadiusTest(unittest.TestCase):
         # 外層圓角＝內層圓角＋兩者之間的內距
         self.assertEqual(RADIUS["panel"], RADIUS["card"] + SPACE["panel_pad"])
         self.assertEqual(RADIUS["card"], RADIUS["row"] + SPACE["row_inset"])  # 版面 B 使用中列的底色
+        self.assertEqual(RADIUS["card"], RADIUS["cell"] + SPACE["row_inset"])  # 版面 C 使用中格的外框
 
 
 if __name__ == "__main__":

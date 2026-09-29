@@ -169,16 +169,32 @@ class LayoutSwitchTest(WidgetTestCase):
         self.assertEqual(self.layout_items("layout-a"), ())
         self.assertTrue(self.layout_items("layout-b"))
 
+    def test_switching_to_ring_is_remembered(self):
+        self.widget.set_preference("layout", "ring")
+        self.assertEqual(self.settings()["layout"], "ring")
+        self.assertEqual(self.widget.menu_state().layout, "ring")
+        self.assertEqual(self.layout_items("layout-a"), ())
+        self.assertTrue(self.layout_items("layout-c"))
+        self.widget.set_preference("layout", "table")
+        self.assertEqual(self.layout_items("layout-c"), ())  # 舊版面整批銷毀
+
     def test_switching_layouts_back_and_forth_returns_to_the_same_item_count(self):
+        layouts = ("cards", "table", "ring")
         counts = {}
-        for i in range(12):
-            layout, mode = ("cards", "table")[i % 2], ("compact", "expanded")[i // 2 % 2]
+        for i in range(36):
+            layout, mode = layouts[i % 3], ("compact", "expanded")[i // 3 % 2]
+            theme = ("light", "dark")[i // 6 % 2]
+            self.widget.set_preference("theme", theme)
             self.widget.set_preference("mode", mode)
             self.widget.set_preference("layout", layout)
-            counts.setdefault((layout, mode), set()).add(len(self.widget.canvas.find_all()))
+            counts.setdefault((layout, mode, theme), set()).add(len(self.widget.canvas.find_all()))
         for key, seen in counts.items():
             self.assertEqual(len(seen), 1, key)
         self.assertEqual(len(self.pending_after()), 1)
+
+    def test_menu_offers_the_three_layouts(self):
+        layouts = self.widget._menu.nametowidget(self.widget._menu.entrycget(0, "menu"))
+        self.assertEqual([layouts.entrycget(i, "label") for i in range(3)], ["卡片列表", "密集表格／單行條", "環形儀表"])
 
     def test_close_destroys_the_current_layout(self):
         self.widget.set_preference("layout", "table")

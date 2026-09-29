@@ -18,6 +18,7 @@ from .board import Board, Preferences
 from .core import STATE_DIR, AddWarning, InvalidLabel, NoCredential
 from .layout_a import CLICKABLE_TAG, LayoutA
 from .layout_b import LayoutB
+from .layout_c import LayoutC
 from .permissions import make_private
 from .fmt import account_label
 from .render_text import ADD_NOT_BOUND, ADD_WARNINGS, IMPORT_NOT_BOUND, INVALID_LABEL, NO_CREDENTIAL, NOT_A_CREDENTIAL_FILE
@@ -29,8 +30,8 @@ DEFAULT_POSITION = (40, 40)  # 主螢幕上的位置：第一次啟動，或上�
 _GRIP = 20  # 判斷位置在不在螢幕內時，看視窗左上角往內這麼多的那一點：要拖得到視窗才算在螢幕內
 _TITLE = "cc-quota-tracker"
 _ATTRS = {field: attr for field, (attr, _) in PREFERENCE_FIELDS.items()}
-_LAYOUTS = {"cards": LayoutA, "table": LayoutB}
-_LAYOUT_NAMES = (("卡片列表", "cards"), ("密集表格／單行條", "table"))  # 合法值與 settings.PREFERENCE_FIELDS 一致
+_LAYOUTS = {"cards": LayoutA, "table": LayoutB, "ring": LayoutC}
+_LAYOUT_NAMES = (("卡片列表", "cards"), ("密集表格／單行條", "table"), ("環形儀表", "ring"))  # 合法值與 settings.PREFERENCE_FIELDS 一致
 _MODES = (("精簡", "compact"), ("展開", "expanded"))
 _THEMES = (("跟隨系統", "system"), ("淺色", "light"), ("深色", "dark"))
 _OPACITIES = PREFERENCE_FIELDS["opacity"][1]

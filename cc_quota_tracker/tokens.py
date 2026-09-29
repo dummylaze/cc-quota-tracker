@@ -46,8 +46,8 @@ FONTS = {
 # 多行文字的行高（行距 ÷ 字級像素）。tk 的 canvas 文字沒有行距選項，版面把多行文字拆成逐行 item 自己排
 LINE_HEIGHT = 1.5
 
-# 巢狀圓角同心：外層圓角＝內層圓角＋兩者之間的內距（panel 對 card 隔著 panel_pad；card 對版面 B 的列底色隔著 row_inset）
-RADIUS = {"panel": 18, "card": 6, "chip": 9, "row": 2}
+# 巢狀圓角同心：外層圓角＝內層圓角＋兩者之間的內距（panel 對 card 隔著 panel_pad；card 對版面 B 的列底色、版面 C 使用中格的外框隔著 row_inset）
+RADIUS = {"panel": 18, "card": 6, "chip": 9, "row": 2, "cell": 2}  # cell：版面 C 使用中帳號那一格的外框
 
 SPACE = {
     "panel_pad": 12,  # 視窗邊緣到卡片
@@ -73,5 +73,12 @@ SPACE = {
     "cell_gap": 6,  # 同一段內：窗口名稱、進度條、百分比之間
     "cell_bar_width": 64,  # 單行條與表格裡的小進度條
     "row_pad_y": 8,  # 表格每一列（連同它的提示）上下的內距
-    "row_inset": 4,  # 列底色與卡片邊緣的距離
+    "row_inset": 4,  # 版面 B 的列底色、版面 C 使用中格的外框，與卡片邊緣的距離
+    # 版面 C：環形儀表。一個帳號一格，展開模式每列三格
+    "ring_size": 84,  # 外圈的外徑
+    "ring_stroke": 8,  # 圈的線寬
+    "ring_gap": 3,  # 外圈與內圈之間
+    "ring_cell_width": 104,  # 一格的寬度（使用中帳號的外框就框住這一格）
+    "ring_cell_pad": 8,  # 格內上下左右的內距
+    "ring_compact_width": 256,  # 精簡模式格子區的寬度：一格置中，提示在它的內距之內折行
 }
