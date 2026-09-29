@@ -83,7 +83,7 @@ class Core:
     def poll(self) -> Board:
         self._refresh()
         self._reread_settings()
-        accounts = self._accounts()
+        accounts = self._maintain_bindings(self._accounts())
         self._remember(accounts)
         active, invalid = self._observe(accounts)
         reading = self._reading
@@ -143,9 +143,17 @@ class Core:
         return keys[0]
 
     def _read_bindings(self) -> dict:
+        return self._load_bindings() or {}
+
+    def _load_bindings(self) -> Optional[dict]:
+        """讀不到（例如防毒短暫鎖住）回傳 None，不同於沒有或讀不懂的空綁定：後者才可以放心寫回。"""
         try:
             bindings = json.loads(self._bindings.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
+        except FileNotFoundError:
+            return {}
+        except OSError:
+            return None
+        except ValueError:
             return {}
         return bindings if isinstance(bindings, dict) else {}
 
@@ -171,6 +179,36 @@ class Core:
                                      account_id if isinstance(account_id, str) and account_id else None,
                                      credential.refresh_token_expires_at if credential else None))
         return tuple(accounts)
+
+    def _maintain_bindings(self, accounts: Tuple[_Account, ...]) -> Tuple[_Account, ...]:
+        """不經過 add 的綁定維護：直接放進目錄的憑證快照補學綁定，快照被刪掉的孤兒綁定清掉。
+        寫不成或綁定檔讀不到時這一輪不動，下一輪再試。"""
+        bindings = self._load_bindings()
+        if bindings is None:
+            return accounts
+        learn = self._learnable(accounts)
+        # 有讀不出憑證指紋的快照（寫到一半、被鎖住）時不清孤兒：它的綁定這一輪對不上，不代表被刪了
+        orphans = all(a.fingerprint for a in accounts) and set(bindings) - {a.fingerprint for a in accounts}
+        if learn is None and not orphans:
+            return accounts
+        if learn:
+            bindings[learn.fingerprint] = {"accountId": self._oauth_account_id}
+        try:
+            self._write_bindings(bindings)
+        except OSError:
+            return accounts
+        return self._accounts()
+
+    def _learnable(self, accounts: Tuple[_Account, ...]) -> Optional[_Account]:
+        """三個條件同時成立才補學，缺一就不猜：它是使用中帳號、額度快取的識別碼等於 oauthAccount 的識別碼、
+        該識別碼還沒綁給其他帳號。"""
+        reading, account_id = self._reading, self._oauth_account_id
+        if reading is None or account_id is None or reading.account_id != account_id:
+            return None
+        if any(a.account_id == account_id for a in accounts):
+            return None
+        current = FileCredentialStore(self._credentials).fingerprint()
+        return next((a for a in accounts if a.fingerprint and a.fingerprint == current), None)
 
     def _remember(self, accounts: Tuple[_Account, ...]) -> None:
         """額度快取的讀數歸屬到某個納管帳號時存進工具狀態：它換成待命帳號、甚至重新啟動後仍看得到。
