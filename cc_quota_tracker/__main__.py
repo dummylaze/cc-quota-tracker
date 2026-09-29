@@ -78,7 +78,11 @@ def gui(paths: ResolvedPaths) -> int:
     enable_dpi_awareness()
     root = tk.Tk()
     core = Core(paths, lambda: datetime.now(timezone.utc))
-    Widget(root, core, paths)
+    autostart = None
+    if sys.platform == "win32":  # 開機自動啟動寫的是 Windows 登錄
+        from .autostart import RegistryAutostart
+        autostart = RegistryAutostart()
+    Widget(root, core, paths, autostart=autostart)
     root.mainloop()
     return 0
 

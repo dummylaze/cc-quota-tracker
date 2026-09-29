@@ -25,6 +25,26 @@ class CountingCore:
         return getattr(self.core, name)
 
 
+class FakeAutostart:
+    """登錄的替身：狀態只存在這裡；fail 設成例外就讓寫入失敗。"""
+
+    def __init__(self):
+        self.enabled, self.fail = False, None
+
+    def is_enabled(self):
+        return self.enabled
+
+    def enable(self):
+        if self.fail:
+            raise self.fail
+        self.enabled = True
+
+    def disable(self):
+        if self.fail:
+            raise self.fail
+        self.enabled = False
+
+
 class WidgetTestCase(HomeTestCase):
     def setUp(self):
         super().setUp()
@@ -40,8 +60,9 @@ class WidgetTestCase(HomeTestCase):
 
     def open_widget(self):
         self.counting = CountingCore(self.core)
+        self.autostart = FakeAutostart()
         self.widget = Widget(self.root, self.counting, self.paths, on_screen=lambda x, y: self.on_screen(x, y),
-                             system_theme=lambda: self.system_theme)
+                             system_theme=lambda: self.system_theme, autostart=self.autostart)
 
     def destroy_root(self):
         try:
@@ -146,7 +167,51 @@ class PreferenceTest(WidgetTestCase):
 
     def test_menu_offers_settings_and_actions(self):
         self.assertEqual(self.widget.menu_labels(),
-                         ["版面", "置頂", "模式", "主題", "透明度", "納管目前登入的帳號…", "匯入憑證檔…", "開啟納管目錄", "結束"])
+                         ["版面", "置頂", "模式", "主題", "透明度", "開機自動啟動", "納管目前登入的帳號…", "匯入憑證檔…", "開啟納管目錄", "結束"])
+
+
+class AutostartTest(WidgetTestCase):
+    def click_autostart(self):
+        self.widget.sync_autostart()  # 使用者按右鍵時選單會先對一次登錄
+        menu = self.widget._menu
+        labels = [menu.entrycget(i, "label") if menu.type(i) != "separator" else None for i in range(menu.index("end") + 1)]
+        menu.invoke(labels.index("開機自動啟動"))
+
+    def test_off_by_default_and_toggling_writes_the_registry(self):
+        self.assertFalse(self.widget.autostart_shown())
+        self.click_autostart()
+        self.assertTrue(self.autostart.enabled)
+        self.assertTrue(self.widget.autostart_shown())
+        self.click_autostart()
+        self.assertFalse(self.autostart.enabled)
+        self.assertFalse(self.widget.autostart_shown())
+
+    def test_shown_state_follows_the_registry_not_a_stored_copy(self):
+        self.autostart.enabled = True  # 上一次執行時開的，或別的工具寫的
+        self.widget.sync_autostart()
+        self.assertTrue(self.widget.autostart_shown())
+        self.autostart.enabled = False  # 使用者在登錄編輯器裡自己刪掉
+        self.widget.sync_autostart()
+        self.assertFalse(self.widget.autostart_shown())
+
+    def test_is_not_stored_in_the_settings_file(self):
+        self.click_autostart()
+        self.assertNotIn("autostart", json.dumps(self.settings()).lower())
+
+    def test_failed_write_tells_the_user_and_shows_the_real_state(self):
+        self.autostart.fail = PermissionError("登錄被鎖住")
+        with mock.patch("cc_quota_tracker.widget.messagebox.showerror") as showerror:
+            self.click_autostart()
+        showerror.assert_called_once()
+        self.assertIn("登錄被鎖住", showerror.call_args.args[1])
+        self.assertFalse(self.widget.autostart_shown())  # 沒寫成功，勾選不能停在「開」
+
+    def test_no_menu_entry_when_the_platform_has_no_autostart(self):
+        window = tk.Toplevel(self.root)  # 不另開一個 Tk：多個 Tk 直譯器同時銷毀時 ttk 會吐一堆錯誤訊息
+        window.withdraw()
+        widget = Widget(window, self.core, self.paths, on_screen=lambda x, y: True, autostart=None)
+        self.assertNotIn("開機自動啟動", widget.menu_labels())
+        widget.close()
 
 
 class LayoutSwitchTest(WidgetTestCase):

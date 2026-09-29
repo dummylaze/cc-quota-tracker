@@ -2,7 +2,7 @@
 同一時間只建立目前選用的版面；換版面時舊版面的 item 整批銷毀、再建新的。
 右鍵選單調整偏好與納管帳號。偏好每輪取自看板（核心依設定檔的修改時間重讀），GUI 的改動合併寫回設定檔；
 主題選「跟隨系統」時每輪讀一次 Windows 的應用程式深淺色；
-視窗位置存在納管目錄的工具狀態，不進設定檔。"""
+視窗位置存在納管目錄的工具狀態，不進設定檔。開機自動啟動的開關狀態每次開選單時問登錄，不存在設定檔也不另存一份。"""
 import json
 import os
 import subprocess
@@ -77,11 +77,13 @@ def windows_app_theme() -> str:
 class Widget:
     def __init__(self, root: tk.Tk, core, paths: ResolvedPaths,
                  on_screen: Optional[Callable[[int, int], bool]] = None,
-                 system_theme: Callable[[], str] = windows_app_theme):
+                 system_theme: Callable[[], str] = windows_app_theme, autostart=None):
         """core 提供 poll、add、import_snapshot；paths 是啟動時解析的路徑，設定檔與納管目錄都取自它。
-        system_theme 回傳系統目前的深淺色，主題選「跟隨系統」時每次渲染都問一次。"""
+        system_theme 回傳系統目前的深淺色，主題選「跟隨系統」時每次渲染都問一次。
+        autostart 提供 is_enabled、enable、disable；None 表示這個平台沒有開機自動啟動，選單就不放這一項。"""
         self.root = root
         self._core = core
+        self._autostart = autostart
         self._paths = paths
         self._system_theme = system_theme
         self._position_file = paths.managed_dir / STATE_DIR / "window.json"
@@ -111,12 +113,13 @@ class Widget:
 
     def _build_menu(self):
         """選單不能變長：只放常切換的偏好。變數建一次，每輪只改值，不累積。"""
-        self._menu = menu = tk.Menu(self.root, tearoff=0)
+        self._menu = menu = tk.Menu(self.root, tearoff=0, postcommand=self.sync_autostart)
         self._layout_var = tk.StringVar(self.root)
         self._topmost_var = tk.BooleanVar(self.root)
         self._mode_var = tk.StringVar(self.root)
         self._theme_var = tk.StringVar(self.root)
         self._opacity_var = tk.IntVar(self.root)
+        self._autostart_var = tk.BooleanVar(self.root)
         layouts = tk.Menu(menu, tearoff=0)
         for label, value in _LAYOUT_NAMES:
             layouts.add_radiobutton(label=label, value=value, variable=self._layout_var,
@@ -139,6 +142,8 @@ class Widget:
             opacities.add_radiobutton(label=f"{value}%", value=value, variable=self._opacity_var,
                                       command=lambda: self.set_preference("opacity", self._opacity_var.get()))
         menu.add_cascade(label="透明度", menu=opacities)
+        if self._autostart is not None:
+            menu.add_checkbutton(label="開機自動啟動", variable=self._autostart_var, command=self._toggle_autostart)
         menu.add_separator()
         menu.add_command(label="納管目前登入的帳號…", command=self.add_current_account)
         menu.add_command(label="匯入憑證檔…", command=self.import_credential_file)
@@ -153,6 +158,21 @@ class Widget:
     def menu_state(self) -> Preferences:
         return replace(self._prefs, layout=self._layout_var.get(), always_on_top=self._topmost_var.get(), mode=self._mode_var.get(),
                        theme=self._theme_var.get(), opacity=self._opacity_var.get())
+
+    def sync_autostart(self):
+        """勾選狀態以登錄的實際值為準：每次開選單前對一次，使用者自己在別處刪掉啟動項時才不會不同步。"""
+        if self._autostart is not None:
+            self._autostart_var.set(self._autostart.is_enabled())
+
+    def autostart_shown(self) -> bool:
+        return self._autostart_var.get()
+
+    def _toggle_autostart(self):
+        try:
+            (self._autostart.enable if self._autostart_var.get() else self._autostart.disable)()
+        except OSError as e:
+            messagebox.showerror(_TITLE, f"無法變更開機自動啟動：{e}", parent=self.root)
+        self.sync_autostart()  # 寫不進去時勾選不能停在使用者剛點的那一邊
 
     def refresh(self):
         """poll 一次並渲染，再排下一輪；排程永遠只有一個。這一輪出錯也照樣排下一輪，視窗才不會就此凍結。"""
