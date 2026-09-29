@@ -1,7 +1,7 @@
-"""懸浮視窗骨架：無邊框、以透明色鍵挖出圓角、拖動任何位置可移動、預設置頂；每 5 秒 poll 一次交給版面渲染。"""
+"""懸浮視窗骨架：無邊框、以透明色鍵挖出圓角、拖動任何位置可移動、預設置頂、雙擊切換精簡／展開；每 5 秒 poll 一次交給版面渲染。"""
 import sys
 import tkinter as tk
-from typing import Callable
+from typing import Callable, Optional
 
 from .board import Board
 from .layout_a import LayoutA
@@ -26,6 +26,8 @@ class Widget:
         self.root = root
         self._poll = poll
         self._theme = theme
+        self._expanded = False
+        self._board: Optional[Board] = None
         self._after = None
         root.overrideredirect(True)
         root.attributes("-topmost", True)
@@ -42,6 +44,7 @@ class Widget:
         root.bind("<ButtonPress-1>", self._press)
         root.bind("<B1-Motion>", self._drag)
         root.bind("<Button-3>", lambda e: self._menu.tk_popup(e.x_root, e.y_root))
+        root.bind("<Double-Button-1>", lambda e: self.toggle_mode())
         self.refresh()
 
     def refresh(self):
@@ -49,9 +52,16 @@ class Widget:
         if self._after is not None:
             self.root.after_cancel(self._after)
         try:
-            self.layout.render(self._poll(), self._theme)
+            self._board = self._poll()
+            self.layout.render(self._board, self._theme, self._expanded)
         finally:
             self._after = self.root.after(POLL_MS, self.refresh)
+
+    def toggle_mode(self):
+        """精簡／展開互換，以上一輪的看板立即重畫；不另外 poll，也不動排程。"""
+        self._expanded = not self._expanded
+        if self._board is not None:
+            self.layout.render(self._board, self._theme, self._expanded)
 
     def close(self):
         if self._after is not None:

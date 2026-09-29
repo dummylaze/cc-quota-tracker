@@ -3,8 +3,8 @@ from datetime import datetime
 from typing import Optional
 
 from . import COMMAND
-from .board import Board, Card, Limit, Money, ReadingState, Role
-from .fmt import absolute, account_label, age, countdown, until
+from .board import Board, Card, Limit, ReadingState, Role
+from .fmt import absolute, account_label, age, countdown, money, until
 
 _WINDOW_NAMES = {"session": "工作階段窗口", "weekly_all": "週窗口", "weekly_scoped": "週限額"}
 _UPDATES_SOON = "Claude Code 更新額度快取後就會出現"
@@ -76,10 +76,10 @@ def _body(card: Card, board: Board) -> list:
         lines += [f"  {row.label}  {row.percent}%" for row in b.rows]
     if card.extra_usage:
         e = card.extra_usage
-        lines.append(f"額外用量  {_money(e.used)} / {_money(e.limit)}")
+        lines.append(f"額外用量  {money(e.used)} / {money(e.limit)}")
     if card.spend:
         s = card.spend
-        lines.append(f"花費  {_money(s.used)} / {_money(s.limit)}")
+        lines.append(f"花費  {money(s.used)} / {money(s.limit)}")
     return lines
 
 
@@ -98,11 +98,4 @@ def _limit_line(lim: Limit, board: Board) -> str:
 
 def _time(value: Optional[datetime]) -> str:
     return value.astimezone().strftime("%Y-%m-%d %H:%M") if value else "未知"
-
-
-def _money(value: Optional[Money]) -> str:
-    if value is None:
-        return "—"
-    amount = value.minor / 10 ** value.exponent
-    return f"{amount:.{value.exponent}f} {value.currency or ''}".rstrip()
 

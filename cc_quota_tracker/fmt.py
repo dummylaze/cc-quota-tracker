@@ -1,7 +1,8 @@
-"""帳號標籤、倒數、絕對時間、讀數年齡的格式：終端機與視窗兩個畫面層共用。"""
+"""帳號標籤、倒數、絕對時間、讀數年齡、金額的格式：終端機與視窗兩個畫面層共用。"""
 from datetime import datetime, timedelta
+from typing import Optional
 
-from .board import CountdownFormat
+from .board import CountdownFormat, Money
 
 
 def account_label(account_key: str) -> str:
@@ -40,3 +41,10 @@ def age(value: timedelta) -> str:
     if minutes < 60 * 24:
         return f"{minutes // 60} 小時前"
     return f"{minutes // (60 * 24)} 天前"
+
+
+def money(value: Optional[Money]) -> str:
+    if value is None:
+        return "—"
+    amount = value.minor / 10 ** value.exponent
+    return f"{amount:.{value.exponent}f} {value.currency or ''}".rstrip()

@@ -11,12 +11,14 @@ THEMES = {
         "fg": "#1d1d1f", "sub": "#6b6b70", "track": "#e1e1dd",
         "accent": "#3b6fd8", "chip_fg": "#ffffff",
         "normal": "#2e9d5b", "warning": "#c99500", "critical": "#d64545",
+        "banner": "#fbecc8", "banner_fg": "#5c4300",
     },
     "dark": {
         "panel": "#1d1d21", "card": "#26262a", "shadow": "#101013",
         "fg": "#ececec", "sub": "#9a9aa2", "track": "#3a3a40",
         "accent": "#6d9bff", "chip_fg": "#0f1420",
         "normal": "#4cc47f", "warning": "#f0c030", "critical": "#ff6b6b",
+        "banner": "#3d3218", "banner_fg": "#f5dc9a",
     },
 }
 
@@ -38,6 +40,9 @@ SPACE = {
     "card_pad_top": 14,
     "card_pad_bottom": 10,
     "shadow_offset": 2,
+    "card_gap": 10,  # 展開模式卡片之間
+    "highlight": 2,  # 使用中帳號卡片的外框線寬
+    "banner_pad": 10,
     "chip_gap": 10,  # 帳號標籤與狀態標籤之間
     "chip_pad_x": 7,
     "chip_height": 18,

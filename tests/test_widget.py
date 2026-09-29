@@ -42,6 +42,15 @@ class WidgetTest(unittest.TestCase):
         self.assertEqual(len(self.pending_after()), 1)
         self.assertEqual(len(self.widget.canvas.find_all()), items)
 
+    def test_toggle_mode_redraws_the_last_board_without_polling(self):
+        compact = len(self.widget.canvas.find_all())
+        for _ in range(9):
+            self.widget.toggle_mode()
+        self.assertEqual(self.polls, 1)
+        self.assertEqual(len(self.pending_after()), 1)
+        self.widget.toggle_mode()  # 來回偶數次，回到精簡模式
+        self.assertEqual(len(self.widget.canvas.find_all()), compact)
+
     def test_close_cancels_the_pending_after(self):
         self.widget.close()
         self.assertEqual(self.pending_after(), ())
