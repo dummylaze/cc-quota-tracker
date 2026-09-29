@@ -6,8 +6,8 @@ from pathlib import Path
 
 from . import COMMAND, claude_provider
 from .claude_provider import FieldStatus, NoReading, SchemaCheck
-from .core import AddWarning, Core, InvalidLabel, NoCredential, UnknownLabel
-from .render_text import SETTINGS_UNREADABLE, render
+from .core import Core, InvalidLabel, NoCredential, UnknownLabel
+from .render_text import ADD_WARNINGS, INVALID_LABEL, NO_CREDENTIAL, SETTINGS_UNREADABLE, render
 from .settings import (CLAUDE_CONFIG_DIR, CLAUDE_DIR_FIELD, MANAGED_DIR_FIELD, InvalidPathSetting, PathProblem,
                        PathSource, ResolvedPaths, resolve_paths)
 
@@ -17,15 +17,6 @@ USAGE = f"""用法：
   {COMMAND} list               列出看板
   {COMMAND} check              檢查 Claude Code 的額度快取結構是否仍與本工具相容，並列出實際使用的目錄
   {COMMAND} gui                開啟懸浮視窗；改用 pythonw 執行就不會出現主控台視窗"""
-
-_WARNINGS = {
-    AddWarning.LABEL_LOOKS_LIKE_EMAIL: "注意：這個帳號標籤看起來像 email，它會顯示在畫面上。"
-                                       "不想顯示的話，可以用別的標籤重新納管，或直接改憑證快照的檔名。",
-    AddWarning.PERMISSIONS_FIXED: "警告：納管目錄或其中檔案的權限不符預期（其他人可存取，或沿用上層目錄的設定），"
-                                  "已修正為只有目前使用者能存取。",
-    AddWarning.NOT_BOUND: "警告：讀不到 Claude Code 目前登入帳號的識別碼，這份憑證快照暫時沒有綁定帳號；"
-                          "該帳號成為使用中帳號之前只會顯示「讀數待更新」。可以稍後再執行一次 add。",
-}
 
 _PATH_PROBLEMS = {
     PathProblem.NOT_ABSOLUTE: "設定檔的 {field} 必須是完整的絕對路徑；不指定請寫 null。",
@@ -65,16 +56,15 @@ def main(argv=None) -> int:
             result = core.add(label)
             print(f"已納管「{label}」")
             for warning in sorted(result.warnings, key=lambda w: w.value):
-                print(_WARNINGS[warning], file=sys.stderr)
+                print(ADD_WARNINGS[warning], file=sys.stderr)
         else:
             core.remove(label)
             print(f"已移除「{label}」")
     except InvalidLabel:
-        print(f"帳號標籤「{label}」不能當檔名：不可空白、不可以點開頭或結尾，"
-              "也不能含 < > : \" / \\ | ? * 或裝置名稱（如 CON、NUL）", file=sys.stderr)
+        print(INVALID_LABEL.format(label=label), file=sys.stderr)
         return 2
     except NoCredential:
-        print("讀不到目前登入的憑證。請先在 Claude Code 登入要納管的帳號，再執行一次。", file=sys.stderr)
+        print(NO_CREDENTIAL, file=sys.stderr)
         return 1
     except UnknownLabel:
         print(f"沒有帳號標籤為「{label}」的納管帳號。", file=sys.stderr)
@@ -88,7 +78,7 @@ def gui(paths: ResolvedPaths) -> int:
     enable_dpi_awareness()
     root = tk.Tk()
     core = Core(paths, lambda: datetime.now(timezone.utc))
-    Widget(root, core.poll)
+    Widget(root, core, paths)
     root.mainloop()
     return 0
 

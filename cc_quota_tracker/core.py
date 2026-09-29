@@ -10,10 +10,11 @@ from typing import Callable, FrozenSet, NamedTuple, Optional, Set, Tuple
 
 from . import atomic
 from . import claude_provider as provider
-from .board import Board, Card, CountdownFormat, Limit, ReadingState, Role, Severity
+from .board import Board, Card, CountdownFormat, Limit, Preferences, ReadingState, Role, Severity
 from .credstore import FileCredentialStore
 from .permissions import is_private, make_private
-from .settings import COUNTDOWN_FORMAT_FIELD, PROVIDERS_FIELD, PathSource, ResolvedPaths, path_fields, read_settings
+from .settings import (COUNTDOWN_FORMAT_FIELD, PROVIDERS_FIELD, PathSource, ResolvedPaths, path_fields,
+                       read_preferences, read_settings)
 
 STATE_DIR = ".state"  # 納管目錄底下放工具狀態的子目錄，與憑證快照分開
 _EMAIL = re.compile(r"[^@\s]+@[^@\s]+\.[A-Za-z]{2,}")
@@ -79,6 +80,7 @@ class Core:
         self._settings_unreadable = False  # 第一輪 poll 就會重讀設定檔
         self._countdown_format = CountdownFormat.TWO_UNITS
         self._provider_settings = provider.ProviderSettings()  # 設定檔的 providers.claude
+        self._preferences, self._invalid_settings = Preferences(), ()
         self._bindings = self._managed_dir / STATE_DIR / "bindings.json"
         self._readings_file = self._managed_dir / STATE_DIR / "readings.json"
         self._switch_log = self._managed_dir / STATE_DIR / "switches.jsonl"
@@ -105,7 +107,8 @@ class Core:
                      wrong_location_suspected=self._source_missing and self._paths.claude_source is PathSource.DEFAULT,
                      restart_required=self._path_fields != self._paths.path_fields,
                      settings_unreadable=self._settings_unreadable,
-                     as_of=self._clock(), countdown_format=self._countdown_format)
+                     as_of=self._clock(), countdown_format=self._countdown_format,
+                     preferences=self._preferences, invalid_settings=self._invalid_settings)
 
     def add(self, label: str) -> AddResult:
         _check_label(label)
@@ -117,12 +120,25 @@ class Core:
             account_id = provider.account_id(self._source.read_text(encoding="utf-8"))
         except OSError:
             account_id = None
+        return self._store(label, data, account_id)
+
+    def import_snapshot(self, source: Path, label: str) -> AddResult:
+        """把一份憑證檔複製進納管目錄成為憑證快照，權限與 add 一樣收緊。不決定綁定：
+        同一憑證指紋原有的綁定仍然有效，沒有的話由 poll 依直接放檔的補學規則處理。讀不出憑證就丟 NoCredential。"""
+        _check_label(label)
+        try:
+            data = Path(source).read_bytes()
+        except OSError:
+            raise NoCredential() from None
+        return self._store(label, data, None)
+
+    def _store(self, label: str, data: bytes, account_id: Optional[str]) -> AddResult:
         fixed = self._mkdir_private(self._managed_dir)
         key = self._write_snapshot(self._snapshot(label), data)
         bindings = self._read_bindings()
         if account_id:
             bindings[key] = {"accountId": account_id}
-        # 讀不到識別碼：同一憑證指紋原有的綁定仍然有效；沒有的話留給之後補學
+        # 沒有識別碼：同一憑證指紋原有的綁定仍然有效；沒有的話留給之後補學。照樣寫回，順帶清掉被換掉的舊憑證指紋
         self._write_bindings(bindings)
         # 事後驗證：連同既有的憑證快照一起檢查，不符就修正並告警
         checked = [self._bindings.parent, self._bindings] + [self._snapshot(l) for l in self._labels()]
@@ -353,13 +369,12 @@ class Core:
         # 暫時不可讀、偶發讀取失敗：沿用上一次的值，也不動結構不符的累計
 
     def _reread_settings(self) -> None:
-        """設定檔改了才重讀。讀不懂時不記修改時間，下一輪再讀；路徑欄位沿用上一次讀到的值。"""
+        """設定檔改了才重讀。讀不懂時全部用預設，且不記修改時間，下一輪再讀；路徑欄位沿用上一次讀到的值。"""
         try:
             mtime = os.stat(self._paths.settings_file).st_mtime_ns
         except FileNotFoundError:
             self._settings_mtime, self._path_fields, self._settings_unreadable = None, (None, None), False
-            self._countdown_format = CountdownFormat.TWO_UNITS
-            self._provider_settings = provider.ProviderSettings()
+            self._apply_settings({})
             return
         except OSError:
             return
@@ -367,10 +382,14 @@ class Core:
             return
         fields = read_settings(self._paths.settings_file)
         self._settings_unreadable = fields is None
+        self._apply_settings(fields or {})
         if fields is not None:
             self._settings_mtime, self._path_fields = mtime, path_fields(fields)
-            self._countdown_format = _countdown_format(fields.get(COUNTDOWN_FORMAT_FIELD))
-            self._provider_settings = provider.read_settings(fields.get(PROVIDERS_FIELD))
+
+    def _apply_settings(self, fields: dict) -> None:
+        self._countdown_format = _countdown_format(fields.get(COUNTDOWN_FORMAT_FIELD))
+        self._provider_settings = provider.read_settings(fields.get(PROVIDERS_FIELD))
+        self._preferences, self._invalid_settings = read_preferences(fields)
 
     def _read(self) -> Optional[provider.ParseResult]:
         """來源檔案沒變時不重新解析，沿用上一次的解析結果，結構判定仍算一輪。

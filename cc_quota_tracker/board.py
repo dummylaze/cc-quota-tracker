@@ -108,13 +108,25 @@ class Card:
 
 
 @dataclass(frozen=True)
+class Preferences:
+    """設定檔的偏好，值與設定檔相同；供畫面層套用。倒數格式另放在 Board.countdown_format。"""
+    layout: str = "cards"
+    always_on_top: bool = True
+    mode: str = "compact"  # compact／expanded
+    language: str = "system"  # system／zh-TW／en
+    theme: str = "system"  # system／light／dark
+    opacity: int = 100  # 100／85／70
+
+
+@dataclass(frozen=True)
 class Board:
     """schema_changed：額度快取結構變更，卡片沿用最後一次成功的讀數；last_reading_at 是它的觀測時間。
     managed_accounts：所有納管帳號的帳號鍵（「供應商:帳號標籤」），依帳號鍵排序。
     wrong_location_suspected：Claude Code 目錄沒有指定、home 預設位置也沒有額度快取檔，可能讀錯位置。
     restart_required：執行中設定檔的路徑欄位改了；路徑只在啟動時解析，重新啟動才生效。
     settings_unreadable：設定檔不是合法的 JSON 物件；本工具不覆寫它，等使用者修好。
-    as_of：這一輪的時間，畫面層以它算倒數。countdown_format：設定檔目前的倒數格式。"""
+    as_of：這一輪的時間，畫面層以它算倒數。countdown_format：設定檔目前的倒數格式。
+    preferences：設定檔目前的偏好。invalid_settings：值不合法、改用預設的設定檔欄位名稱，依名稱排序。"""
     cards: Tuple[Card, ...]
     schema_changed: bool = False
     last_reading_at: Optional[datetime] = None
@@ -124,3 +136,5 @@ class Board:
     settings_unreadable: bool = False
     as_of: Optional[datetime] = None
     countdown_format: CountdownFormat = CountdownFormat.TWO_UNITS
+    preferences: Preferences = Preferences()
+    invalid_settings: Tuple[str, ...] = ()

@@ -12,10 +12,12 @@ from typing import Optional
 from . import COMMAND
 from .board import Board, Card, Limit, ReadingState, Role
 from .fmt import absolute, account_label, age, countdown, money, until
+from .render_text import INVALID_SETTINGS
 from .tokens import FONTS, RADIUS, SPACE, THEMES
 
 TAG = "layout-a"
 EXPANDED_TAG = "layout-a-expanded"  # 展開專用的 item
+CLICKABLE_TAG = "clickable"  # 自己處理點擊的 item：視窗的雙擊切換模式在它上面不作用
 _WINDOWS = (("session", "工作階段窗口"), ("weekly_all", "週窗口"))  # 兩種模式都固定顯示這兩個窗口
 _UPDATES_SOON = "Claude Code 更新額度快取後就會出現"
 _HOW_TO_MANAGE = (f"這個帳號還沒納管：在 Claude Code 登入它之後執行 {COMMAND} add <帳號標籤>，"
@@ -165,7 +167,7 @@ class _Extras(_Group):
         self.breakdown = _Pool(lambda: _Pair(p, t))
         self.extra = _Row(p, t)
         self.spend = _Row(p, t)
-        self.others_title = cv.create_text(0, 0, anchor="nw", font=f["body"], tags=t)
+        self.others_title = cv.create_text(0, 0, anchor="nw", font=f["body"], tags=(*t, CLICKABLE_TAG))
         cv.tag_bind(self.others_title, "<Button-1>", lambda e: on_toggle_others())
         self.others = _Pool(lambda: _Row(p, t))
 
@@ -398,6 +400,8 @@ def _banner_lines(board: Board):
     lines = []
     if board.settings_unreadable:
         lines.append("設定檔無法讀取（不是合法的 JSON），裡面的設定都當成沒填；本工具不會覆寫它，請修正後再試。")
+    if board.invalid_settings:
+        lines.append(INVALID_SETTINGS.format(fields="、".join(board.invalid_settings)))
     if board.restart_required:
         lines.append("設定檔的路徑欄位改了；路徑只在啟動時讀取，重新啟動本工具後才生效。")
     if board.wrong_location_suspected:

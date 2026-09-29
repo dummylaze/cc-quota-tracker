@@ -145,6 +145,58 @@ class RemoveTest(ManageTestCase):
         self.assertTrue(self.snapshot("work").exists())
 
 
+class ImportTest(ManageTestCase):
+    """匯入憑證檔：複製進納管目錄並收緊權限；綁定不在這裡決定，沿用直接放檔的補學規則。"""
+
+    def credential_file(self, name="work.json", refresh="rt-1"):
+        path = self.home / "Downloads" / name
+        path.parent.mkdir(exist_ok=True)
+        path.write_bytes(self.write_credentials(refresh=refresh).read_bytes())
+        return path
+
+    def test_copies_the_file_as_a_snapshot_under_the_label(self):
+        source = self.credential_file()
+        result = self.core.import_snapshot(source, "work")
+        self.assertEqual(result.account_key, "claude:work")
+        self.assertEqual(self.snapshot("work").read_bytes(), source.read_bytes())
+        self.assertTrue(source.exists())
+        self.assertEqual(self.core.poll().managed_accounts, ("claude:work",))
+
+    def test_does_not_bind_and_says_so(self):
+        # 補學由 poll 依三個條件決定；匯入時連 oauthAccount 都不看
+        self.log_in(refresh="rt-9", account_uuid="acct-9")
+        result = self.core.import_snapshot(self.credential_file(refresh="rt-1"), "work")
+        self.assertIn(AddWarning.NOT_BOUND, result.warnings)
+        self.assertNotIn(KEY_RT1, self.bindings())
+
+    def test_learns_binding_later_by_the_drop_in_rule(self):
+        source = self.credential_file(refresh="rt-1")
+        self.log_in(refresh="rt-1", account_uuid="acct-1")
+        self.core.import_snapshot(source, "work")
+        self.write_cache(oauth="acct-1", account_uuid="acct-1")
+        self.core.poll()
+        self.assertEqual(self.bindings(), {KEY_RT1: {"accountId": "acct-1"}})
+
+    def test_keeps_an_existing_binding_for_the_same_credential(self):
+        self.log_in(refresh="rt-1", account_uuid="acct-1")
+        self.core.add("old-name")
+        result = self.core.import_snapshot(self.credential_file(refresh="rt-1"), "work")
+        self.assertNotIn(AddWarning.NOT_BOUND, result.warnings)
+
+    def test_file_that_is_not_a_credential_writes_nothing(self):
+        source = self.home / "notes.json"
+        source.write_text('{"hello": 1}', encoding="utf-8")
+        with self.assertRaises(NoCredential):
+            self.core.import_snapshot(source, "notes")
+        self.assertFalse(self.snapshot("notes").exists())
+
+    def test_label_rules_and_email_hint_match_add(self):
+        with self.assertRaises(InvalidLabel):
+            self.core.import_snapshot(self.credential_file(), "../escape")
+        result = self.core.import_snapshot(self.credential_file(), "me@example.com")
+        self.assertIn(AddWarning.LABEL_LOOKS_LIKE_EMAIL, result.warnings)
+
+
 class AtomicWriteTest(ManageTestCase):
     """工具狀態一律原子寫入：暫存檔建在目標同一目錄、帶工具前綴，權限錯誤重試，失敗清掉殘留。"""
 
@@ -227,6 +279,13 @@ class WindowsPermissionTest(WindowsAclAssertions, ManageTestCase):
         for path in self.managed_paths():
             self.assert_private(path)
         self.assertIn(AddWarning.PERMISSIONS_FIXED, result.warnings)
+
+    def test_import_tightens_the_snapshot(self):
+        source = self.home / "work.json"
+        source.write_bytes(self.write_credentials().read_bytes())
+        self.core.import_snapshot(source, "work")
+        for path in self.managed_paths():
+            self.assert_private(path)
 
     def test_add_fixes_snapshot_dropped_in_directly_and_warns(self):
         self.log_in()

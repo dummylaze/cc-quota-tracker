@@ -4,11 +4,31 @@ from typing import Optional
 
 from . import COMMAND
 from .board import Board, Card, Limit, ReadingState, Role
+from .core import AddWarning
 from .fmt import absolute, account_label, age, countdown, money, until
 
 _WINDOW_NAMES = {"session": "工作階段窗口", "weekly_all": "週窗口", "weekly_scoped": "週限額"}
 _UPDATES_SOON = "Claude Code 更新額度快取後就會出現"
+INVALID_SETTINGS = "設定檔的 {fields} 值不合法，這幾項改用預設值；請參考 README 的欄位說明修正。"
 SETTINGS_UNREADABLE = "注意：設定檔無法讀取（不是合法的 JSON），裡面的設定都當成沒填；本工具不會覆寫它，請修正後再試。"
+
+# 納管帳號的結果：命令列與視窗共用
+ADD_WARNINGS = {
+    AddWarning.LABEL_LOOKS_LIKE_EMAIL: "注意：這個帳號標籤看起來像 email，它會顯示在畫面上。"
+                                       "不想顯示的話，可以用別的標籤重新納管，或直接改憑證快照的檔名。",
+    AddWarning.PERMISSIONS_FIXED: "警告：納管目錄或其中檔案的權限不符預期（其他人可存取，或沿用上層目錄的設定），"
+                                  "已修正為只有目前使用者能存取。",
+    AddWarning.NOT_BOUND: "警告：讀不到 Claude Code 目前登入帳號的識別碼，這份憑證快照暫時沒有綁定帳號；"
+                          "該帳號成為使用中帳號之前只會顯示「讀數待更新」。可以稍後再執行一次 add。",
+}
+ADD_NOT_BOUND = ("讀不到 Claude Code 目前登入帳號的識別碼，這份憑證快照暫時沒有綁定帳號；"
+                 "該帳號成為使用中帳號之前只會顯示「讀數待更新」。可以稍後再從右鍵選單「納管目前登入的帳號…」做一次。")
+# 匯入的憑證檔本來就不帶帳號識別碼，沒有綁定是常態，不是讀取失敗
+IMPORT_NOT_BOUND = "這份憑證快照還沒有綁定帳號：在 Claude Code 登入這個帳號、成為使用中帳號之後，本工具會自動補上；在那之前只會顯示「讀數待更新」。"
+INVALID_LABEL = ("帳號標籤「{label}」不能當檔名：不可空白、不可以點開頭或結尾，"
+                 "也不能含 < > : \" / \\ | ? * 或裝置名稱（如 CON、NUL）")
+NO_CREDENTIAL = "讀不到目前登入的憑證。請先在 Claude Code 登入要納管的帳號，再執行一次。"
+NOT_A_CREDENTIAL_FILE = "這個檔案不是 Claude Code 的憑證檔（讀不出 claudeAiOauth 的 refreshToken），沒有匯入。"
 
 
 def render(board: Board) -> str:
@@ -20,6 +40,8 @@ def render(board: Board) -> str:
     if board.wrong_location_suspected:
         lines.insert(0, "注意：預設位置找不到 Claude Code 的額度快取，可能讀錯位置。"
                         "Claude Code 目錄若不在 home（例如設了 CLAUDE_CONFIG_DIR），請在設定檔的 claudeConfigDir 指定。")
+    if board.invalid_settings:
+        lines.insert(0, "注意：" + INVALID_SETTINGS.format(fields="、".join(board.invalid_settings)))
     if board.settings_unreadable:
         lines.insert(0, SETTINGS_UNREADABLE)
     labels = [account_label(key) for key in board.managed_accounts]

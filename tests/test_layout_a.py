@@ -225,6 +225,10 @@ class LayoutAExpandedTest(unittest.TestCase):
         self.assertIn("結構已變更", shown)
         self.assertIn(absolute(NOW - timedelta(hours=2), NOW), shown)
 
+    def test_banner_names_invalid_settings_fields(self):
+        shown = "\n".join(self.shown(Board(cards=(ACTIVE,), as_of=NOW, invalid_settings=("mode", "opacity"))))
+        self.assertIn("mode、opacity", shown)
+
     def test_compact_mode_creates_no_expanded_items(self):
         self.layout.render(EXPANDED_BOARDS[0], "light")
         self.assertEqual(self.canvas.find_withtag(EXPANDED_TAG), ())

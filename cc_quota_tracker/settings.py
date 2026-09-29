@@ -8,6 +8,7 @@ from typing import Any, Mapping, Optional, Tuple
 
 from . import atomic
 from . import claude_provider
+from .board import CountdownFormat, Preferences
 
 MANAGED_DIR = ".claude-multi"  # 納管目錄的 home 預設
 SETTINGS_DIR = "cc-quota-tracker"  # 在 %APPDATA% 底下；不放進納管目錄，因為納管目錄的位置寫在設定檔裡
@@ -23,6 +24,18 @@ DEFAULTS = {
     "providers": {claude_provider.PROVIDER: claude_provider.SETTINGS_DEFAULTS},
     "claudeConfigDir": None, "managedDir": None,
 }
+
+
+# 設定檔的偏好欄位 → (Preferences 的屬性, 合法值)。第一個合法值不一定是預設；預設以 Preferences 為準
+PREFERENCE_FIELDS = {
+    "layout": ("layout", ("cards",)),  # 版面 B、C 由各自的票加入
+    "alwaysOnTop": ("always_on_top", (True, False)),
+    "mode": ("mode", ("compact", "expanded")),
+    "language": ("language", ("system", "zh-TW", "en")),
+    "theme": ("theme", ("system", "light", "dark")),
+    "opacity": ("opacity", (100, 85, 70)),
+}
+_COUNTDOWN_FORMATS = tuple(f.value for f in CountdownFormat)
 
 
 class PathSource(Enum):
@@ -103,6 +116,40 @@ def read_settings(settings_file: Path) -> Optional[dict]:
     except (OSError, ValueError):
         return None
     return fields if isinstance(fields, dict) else None
+
+
+def read_preferences(fields: dict) -> Tuple[Preferences, Tuple[str, ...]]:
+    """回傳偏好，以及值不合法的欄位名稱（含倒數格式）。缺少的欄位用預設、不算不合法；不合法的只那一欄用預設。"""
+    values, invalid = {}, []
+    for field, (attr, allowed) in PREFERENCE_FIELDS.items():
+        if field in fields:
+            if _allowed(fields[field], allowed):
+                values[attr] = fields[field]
+            else:
+                invalid.append(field)
+    if COUNTDOWN_FORMAT_FIELD in fields and not _allowed(fields[COUNTDOWN_FORMAT_FIELD], _COUNTDOWN_FORMATS):
+        invalid.append(COUNTDOWN_FORMAT_FIELD)
+    return Preferences(**values), tuple(sorted(invalid))
+
+
+def _allowed(value, allowed: tuple) -> bool:
+    # 型別也要相同：JSON 的 true 等於 1、100.0 等於 100，只比值會放過型別不對的值
+    return any(type(value) is type(a) and value == a for a in allowed)
+
+
+def write_preference(settings_file: Path, field: str, value) -> bool:
+    """GUI 改一項偏好：先重讀設定檔、只改那一欄，再原子寫入，不蓋掉使用者剛手改的內容。
+    設定檔不是合法的 JSON 物件時不寫，回傳 False，改動只在記憶體生效；設定檔不見了就以預設值重建。"""
+    if settings_file.exists():
+        fields = read_settings(settings_file)
+        if fields is None:
+            return False
+    else:
+        settings_file.parent.mkdir(parents=True, exist_ok=True)
+        fields = dict(DEFAULTS)
+    fields[field] = value
+    atomic.write_atomic(settings_file, json.dumps(fields, indent=2, ensure_ascii=False).encode("utf-8"))
+    return True
 
 
 def _dir_field(settings_file: Path, fields: dict, field: str) -> Optional[Path]:
