@@ -1,6 +1,7 @@
 """視窗骨架：每輪 poll 一次交給版面渲染，after() 不重複註冊；偏好來自看板，GUI 的改動合併寫回設定檔；視窗位置存在工具狀態。"""
 import json
 import tkinter as tk
+import tkinter.font as tkfont
 import unittest
 from unittest import mock
 
@@ -8,7 +9,7 @@ from cc_quota_tracker.board import Preferences
 from cc_quota_tracker.tokens import THEMES
 from cc_quota_tracker.widget import DEFAULT_POSITION, Widget
 from tests.fakehome import HomeTestCase
-from tests.test_layout_a import BOARDS
+from tests.test_layout_a import BOARDS, visible_texts
 
 
 class CountingCore:
@@ -266,6 +267,77 @@ class LayoutSwitchTest(WidgetTestCase):
         with mock.patch.object(self.widget.layout, "destroy", wraps=self.widget.layout.destroy) as destroy:
             self.widget.close()
         destroy.assert_called_once_with()
+
+
+class FontTest(WidgetTestCase):
+    MISSING = "NoSuchFontFamilyXYZ"
+
+    def system_family(self):
+        return tkfont.Font(self.root, name="TkDefaultFont", exists=True).actual("family").casefold()
+
+    def families_in_use(self):
+        canvas = self.widget.canvas
+        return {tkfont.Font(self.root, font=canvas.itemcget(i, "font")).actual("family").casefold()
+                for i in canvas.find_all() if canvas.type(i) == "text" and canvas.itemcget(i, "state") != "hidden"}
+
+    def other_installed_family(self):
+        others = [f for f in sorted(tkfont.families(self.root))
+                  if f.casefold() != self.system_family() and not f.startswith("@")]
+        if not others:
+            self.skipTest("沒有第二個字型可換")
+        return others[0]
+
+    def shown(self):
+        return "\n".join(visible_texts(self.widget.canvas))
+
+    def test_hand_edited_font_applies_on_next_round_and_null_goes_back(self):
+        family = self.other_installed_family()
+        self.write_settings(font=family)
+        self.widget.refresh()
+        self.assertEqual(self.families_in_use(), {family.casefold()})
+        self.write_settings(font=None)
+        self.widget.refresh()
+        self.assertNotIn(family.casefold(), self.families_in_use())
+
+    def test_font_survives_a_layout_switch(self):
+        family = self.other_installed_family()
+        self.write_settings(font=family)
+        self.widget.refresh()
+        for layout in ("table", "ring", "cards"):
+            self.widget.set_preference("layout", layout)
+            self.assertEqual(self.families_in_use(), {family.casefold()}, layout)
+
+    def test_font_is_read_from_the_settings_file_at_startup(self):
+        family = self.other_installed_family()
+        self.write_settings(font=family)
+        self.root.update()
+        self.widget.close()
+        self.root = tk.Tk()
+        self.root.withdraw()
+        self.open_widget()
+        self.assertEqual(self.families_in_use(), {family.casefold()})
+
+    def test_a_missing_font_is_hinted_on_the_board_and_the_hint_goes_away_with_it(self):
+        self.write_settings(font=self.MISSING)
+        self.widget.refresh()
+        self.assertIn(self.MISSING, self.shown())
+        self.assertEqual(self.families_in_use(), {self.system_family()})
+        self.write_settings(font=None)
+        self.widget.refresh()
+        self.assertNotIn(self.MISSING, self.shown())
+
+    def test_a_font_that_is_not_a_string_is_named_as_an_invalid_setting(self):
+        self.write_settings(font=12)
+        self.widget.refresh()
+        self.assertIn("font", self.shown())
+
+    def test_font_is_not_in_the_context_menu_and_gui_changes_keep_it(self):
+        self.assertFalse([label for label in self.widget.menu_labels() if "字型" in label])
+        family = self.other_installed_family()
+        self.write_settings(font=family)
+        self.widget.refresh()
+        self.widget.set_preference("opacity", 70)
+        self.assertEqual(self.settings()["font"], family)
 
 
 class ThemeTest(WidgetTestCase):

@@ -12,7 +12,7 @@ class SettingsFileTest(HomeTestCase):
         resolve_paths(self.home, self.env)
         self.assertEqual(json.loads(self.settings_file().read_text(encoding="utf-8")), {
             "layout": "cards", "alwaysOnTop": True, "mode": "compact",
-            "language": "system", "theme": "system", "opacity": 100, "countdownFormat": "twoUnits",
+            "language": "system", "theme": "system", "opacity": 100, "countdownFormat": "twoUnits", "font": None,
             "providers": {"claude": {"expiryWarningDays": 7, "warningPercent": 60, "criticalPercent": 85}},
             "claudeConfigDir": None, "managedDir": None,
         })

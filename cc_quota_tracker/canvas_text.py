@@ -1,11 +1,12 @@
 """視窗各版面共用的文案與折行：卡片的提示、看板的橫幅，以及依字型寬度折行。版面配置不在這裡，各版面自己排。
 文案先以正體中文暫置。"""
 import re
+from typing import Optional
 
 from . import COMMAND
 from .board import Board, Card, ReadingState, Role
 from .fmt import absolute, account_label, age, countdown
-from .render_text import INVALID_SETTINGS
+from .render_text import FONT_MISSING, INVALID_SETTINGS
 
 LINE_TAG = "wrapped-line"  # 多行文字的逐行 item；同一段的各行共用最後一個 tag。測試靠它把各行接回一段
 _UPDATES_SOON = "Claude Code 更新額度快取後就會出現"
@@ -56,12 +57,15 @@ def _snapshot_note(card: Card, board: Board):
     return (text, "critical", "critical") if expired else (text, "warning", "fg")
 
 
-def banner_lines(board: Board):
+def banner_lines(board: Board, missing_font: Optional[str] = None):
+    """missing_font：設定檔指定、但這台電腦上找不到的字型名稱；只有畫面層知道字型存不存在，所以由版面傳進來。"""
     lines = []
     if board.settings_unreadable:
         lines.append("設定檔無法讀取（不是合法的 JSON），裡面的設定都當成沒填；本工具不會覆寫它，請修正後再試。")
     if board.invalid_settings:
         lines.append(INVALID_SETTINGS.format(fields="、".join(board.invalid_settings)))
+    if missing_font is not None:
+        lines.append(FONT_MISSING.format(font=missing_font))
     if board.restart_required:
         lines.append("設定檔的路徑欄位改了；路徑只在啟動時讀取，重新啟動本工具後才生效。")
     if board.wrong_location_suspected:

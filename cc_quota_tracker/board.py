@@ -116,6 +116,7 @@ class Preferences:
     language: str = "system"  # system／zh-TW／en
     theme: str = "system"  # system／light／dark
     opacity: int = 100  # 100／85／70
+    font: Optional[str] = None  # 字型家族名稱；None 用設計 token 的內建字型。只能在設定檔調整
 
 
 @dataclass(frozen=True)

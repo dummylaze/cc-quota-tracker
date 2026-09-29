@@ -224,10 +224,13 @@ class Widget:
         self._mode_var.set(prefs.mode)
         self._theme_var.set(prefs.theme)
         self._opacity_var.set(prefs.opacity)
-        if self.layout is None or prefs.layout != previous.layout:
+        new_layout = self.layout is None or prefs.layout != previous.layout
+        if new_layout:
             if self.layout is not None:
                 self.layout.destroy()
             self.layout = _LAYOUTS[prefs.layout](self.canvas)
+        if new_layout or prefs.font != previous.font:
+            self.layout.set_font(prefs.font)  # 字型存不存在只有畫面層知道；找不到時版面自己在橫幅提示
         if self._board is not None:
             # 跟隨系統：每輪 poll 都會走到這裡，系統切換深淺色後下一輪就跟上
             theme = self._system_theme() if prefs.theme == "system" else prefs.theme

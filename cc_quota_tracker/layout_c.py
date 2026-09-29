@@ -7,12 +7,12 @@
 帶 EXPANDED_TAG。每組 item 都帶自己與上層的 tag，destroy() 刪掉全部。"""
 import itertools
 import math
-import tkinter.font as tkfont
 from typing import NamedTuple, Optional
 
 from .board import Board, Card, Limit, ReadingState, Role
 from .canvas_text import LINE_TAG, banner_lines, notes, wrap
 from .fmt import account_label, age
+from .fonts import FontSet
 from .tokens import FONTS, LINE_HEIGHT, RADIUS, SPACE, THEMES
 
 TAG = "layout-c"
@@ -31,8 +31,7 @@ class _Paint:
     def __init__(self, canvas):
         self.cv = canvas
         self.scale = canvas.winfo_fpixels("1i") / 96
-        self.fonts = {name: tkfont.Font(canvas, family=family, size=size, weight=weight)
-                      for name, (family, size, weight) in FONTS.items()}
+        self.fonts = FontSet(canvas)
 
     def px(self, key):
         return round(SPACE[key] * self.scale)
@@ -278,6 +277,10 @@ class LayoutC:
         # 補建時 len(self._cells) 就是新格的序號：第二格起帶 EXPANDED_TAG
         self._cells = _Pool(lambda: _Cell(p, (TAG, EXPANDED_TAG) if len(self._cells) else (TAG,)))
 
+    def set_font(self, custom):
+        """換字型（設定檔的 font，None 用內建字型）：只改既有字型物件的家族，item 不重建；呼叫端接著要重新 render。"""
+        self._p.fonts.configure(custom)
+
     def destroy(self):
         self.cv.delete(TAG)
         self._p.fonts.clear()  # tkfont.Font 被回收時會刪掉對應的具名字型
@@ -317,7 +320,7 @@ class LayoutC:
         self.cv.configure(width=total_w, height=total_h)
 
     def _banner_box(self, board: Board, c, x, y, width):
-        lines = banner_lines(board)
+        lines = banner_lines(board, self._p.fonts.missing)
         if not lines:
             self._p.hide(self._banner_bg)
             self._banner.hide()

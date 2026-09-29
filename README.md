@@ -123,6 +123,7 @@ You can edit it with a text editor. Settings are re-read every 5 seconds and tak
 | `theme` | `"system"`, `"light"`, `"dark"` | `"system"` | `system` follows the Windows app light/dark setting |
 | `opacity` | `100`, `85`, `70` | `100` | Window opacity in percent |
 | `countdownFormat` | `"twoUnits"`, `"decimalDays"` | `"twoUnits"` | `twoUnits`: 6天23小時 / 2小時15分 / 40分 (days + hours, hours + minutes, minutes). `decimalDays`: 6.9天 when a day or more remains (shorter spans still show hours and minutes). Both truncate, never round up |
+| `font` | font family name or `null` | `null` | Font for all text. `null` uses the built-in fonts (Microsoft JhengHei UI, and Segoe UI Semibold for the big percentages). Sizes and weights stay as designed. A font that is not installed on this computer is replaced by the system default font, and for a name you typed the window says so. Settings file only, not in the right-click menu |
 | `providers.claude.expiryWarningDays` | positive integer | `7` | Warn when the credential snapshot has *less than* this many days left |
 | `providers.claude.warningPercent` | integer 1–100, less than `criticalPercent` | `60` | Yellow threshold, used only when Claude does not report a severity itself |
 | `providers.claude.criticalPercent` | integer 1–100, greater than `warningPercent` | `85` | Red threshold, same condition |
@@ -131,7 +132,7 @@ You can edit it with a text editor. Settings are re-read every 5 seconds and tak
 
 The window position is remembered separately and is not in this file.
 
-**A bad value** falls back to the default for that one field only (the two percentage thresholds fall back together unless `warningPercent` is less than `criticalPercent`). The window names an invalid field among `layout` through `countdownFormat`; a bad value under `providers` quietly uses its default. If the whole file is not valid JSON, every default is used, the window says so, and the tool will not overwrite the file until you fix it (changes made from the right-click menu then last only until you quit).
+**A bad value** falls back to the default for that one field only (the two percentage thresholds fall back together unless `warningPercent` is less than `criticalPercent`). The window names an invalid field among `layout` through `font`; a bad value under `providers` quietly uses its default. If the whole file is not valid JSON, every default is used, the window says so, and the tool will not overwrite the file until you fix it (changes made from the right-click menu then last only until you quit).
 
 Progress bar colours follow the severity Claude itself reports (`normal` / `warning` / `critical`); the percentage thresholds above are only a fallback when it reports none.
 

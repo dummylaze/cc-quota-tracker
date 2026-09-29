@@ -14,7 +14,7 @@ class ReadPreferencesTest(HomeTestCase):
         self.assertEqual(board.preferences, Preferences())
         self.assertEqual(board.invalid_settings, ())
         self.assertEqual(Preferences(), Preferences(layout="cards", always_on_top=True, mode="compact",
-                                                    language="system", theme="system", opacity=100))
+                                                    language="system", theme="system", opacity=100, font=None))
 
     def test_hand_edit_takes_effect_on_next_poll(self):
         self.core.poll()
@@ -42,6 +42,23 @@ class ReadPreferencesTest(HomeTestCase):
             with self.subTest(field=field, value=value):
                 self.write_settings(**{field: value})
                 self.assertEqual(self.core.poll().invalid_settings, (field,))
+
+    def test_font_is_null_by_default_and_a_family_name_is_taken_as_is(self):
+        self.assertIsNone(self.core.poll().preferences.font)
+        self.write_settings(font="Consolas")
+        board = self.core.poll()
+        self.assertEqual((board.preferences.font, board.invalid_settings), ("Consolas", ()))
+        self.write_settings(font=None)
+        board = self.core.poll()
+        self.assertEqual((board.preferences.font, board.invalid_settings), (None, ()))
+
+    def test_font_that_is_neither_a_string_nor_null_is_invalid_and_uses_the_default(self):
+        for value in (12, True, ["Consolas"], {"family": "Consolas"}):
+            with self.subTest(value=value):
+                self.write_settings(font=value, theme="dark")
+                board = self.core.poll()
+                self.assertEqual((board.preferences.font, board.preferences.theme, board.invalid_settings),
+                                 (None, "dark", ("font",)))
 
     def test_missing_field_uses_default_without_complaint(self):
         self.write_settings_text(json.dumps({"theme": "dark"}))

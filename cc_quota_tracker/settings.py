@@ -16,12 +16,13 @@ SETTINGS_FILE = "settings.json"
 CLAUDE_DIR_FIELD, MANAGED_DIR_FIELD = "claudeConfigDir", "managedDir"  # 設定檔裡的兩個路徑欄位
 PROVIDERS_FIELD = "providers"  # 按供應商分開的設定：{"claude": {...}}，預設值由各供應商帶入
 COUNTDOWN_FORMAT_FIELD = "countdownFormat"  # 倒數格式：twoUnits（天＋時）或 decimalDays（天數到小數第 1 位）
+FONT_FIELD = "font"  # 字型家族名稱或 null（用內建字型）；只能在設定檔調整，不進 GUI 選單
 CLAUDE_CONFIG_DIR = "CLAUDE_CONFIG_DIR"  # Claude Code 自己的環境變數；空字串當成沒設
-# 第一次啟動時整份寫出：七項偏好與各供應商設定的預設值，加上兩個路徑欄位（null＝沒填）。欄位說明在 README，JSON 不能寫註解
+# 第一次啟動時整份寫出：八項偏好與各供應商設定的預設值，加上兩個路徑欄位（null＝沒填）。欄位說明在 README，JSON 不能寫註解
 DEFAULTS = {
     "layout": "cards", "alwaysOnTop": True, "mode": "compact",
     "language": "system", "theme": "system", "opacity": 100, "countdownFormat": "twoUnits",
-    "providers": {claude_provider.PROVIDER: claude_provider.SETTINGS_DEFAULTS},
+    "font": None, "providers": {claude_provider.PROVIDER: claude_provider.SETTINGS_DEFAULTS},
     "claudeConfigDir": None, "managedDir": None,
 }
 
@@ -119,7 +120,7 @@ def read_settings(settings_file: Path) -> Optional[dict]:
 
 
 def read_preferences(fields: dict) -> Tuple[Preferences, Tuple[str, ...]]:
-    """回傳偏好，以及值不合法的欄位名稱（含倒數格式）。缺少的欄位用預設、不算不合法；不合法的只那一欄用預設。"""
+    """回傳偏好，以及值不合法的欄位名稱（含倒數格式、字型）。缺少的欄位用預設、不算不合法；不合法的只那一欄用預設。"""
     values, invalid = {}, []
     for field, (attr, allowed) in PREFERENCE_FIELDS.items():
         if field in fields:
@@ -129,6 +130,11 @@ def read_preferences(fields: dict) -> Tuple[Preferences, Tuple[str, ...]]:
                 invalid.append(field)
     if COUNTDOWN_FORMAT_FIELD in fields and not _allowed(fields[COUNTDOWN_FORMAT_FIELD], _COUNTDOWN_FORMATS):
         invalid.append(COUNTDOWN_FORMAT_FIELD)
+    if FONT_FIELD in fields:
+        if fields[FONT_FIELD] is None or isinstance(fields[FONT_FIELD], str):
+            values["font"] = fields[FONT_FIELD]
+        else:
+            invalid.append(FONT_FIELD)
     return Preferences(**values), tuple(sorted(invalid))
 
 

@@ -8,12 +8,12 @@
 多行文字（附註、提示、橫幅）自己折行、逐行一個 item，行數同樣由 _Pool 補建或刪到剛好。"""
 import itertools
 import math
-import tkinter.font as tkfont
 from typing import Optional
 
 from .board import Board, Card, Limit, ReadingState, Role
 from .canvas_text import LINE_TAG, banner_lines, notes, wrap
 from .fmt import absolute, account_label, age, money, until
+from .fonts import FontSet
 from .tokens import FONTS, LINE_HEIGHT, RADIUS, SPACE, THEMES
 
 TAG = "layout-a"
@@ -30,8 +30,7 @@ class _Paint:
     def __init__(self, canvas):
         self.cv = canvas
         self.scale = canvas.winfo_fpixels("1i") / 96
-        self.fonts = {name: tkfont.Font(canvas, family=family, size=size, weight=weight)
-                      for name, (family, size, weight) in FONTS.items()}
+        self.fonts = FontSet(canvas)
 
     def px(self, key):
         return round(SPACE[key] * self.scale)
@@ -341,6 +340,10 @@ class LayoutA:
         self._others_open = False
         self._last = None
 
+    def set_font(self, custom):
+        """換字型（設定檔的 font，None 用內建字型）：只改既有字型物件的家族，item 不重建；呼叫端接著要重新 render。"""
+        self._p.fonts.configure(custom)
+
     def destroy(self):
         self.cv.delete(TAG)
         self._p.fonts.clear()  # tkfont.Font 被回收時會刪掉對應的具名字型
@@ -365,7 +368,7 @@ class LayoutA:
             self.render(*self._last)
 
     def _banner_box(self, board: Board, c, x, y, width):
-        lines = banner_lines(board)
+        lines = banner_lines(board, self._p.fonts.missing)
         if not lines:
             self._p.hide(self._banner_bg)
             self._banner.hide()

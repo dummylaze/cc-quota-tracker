@@ -123,6 +123,7 @@ python -m cc_quota_tracker gui                 # 開啟視窗
 | `theme` | `"system"`、`"light"`、`"dark"` | `"system"` | `system` 跟隨 Windows 的應用程式深淺色設定 |
 | `opacity` | `100`、`85`、`70` | `100` | 視窗透明度（百分比） |
 | `countdownFormat` | `"twoUnits"`、`"decimalDays"` | `"twoUnits"` | `twoUnits`：「6天23小時」「2小時15分」「40分」；`decimalDays`：剩一天以上顯示「6.9天」（不到一天仍顯示時＋分）。兩種都是捨去，不進位 |
+| `font` | 字型家族名稱或 `null` | `null` | 所有文字使用的字型。`null` 使用內建字型（微軟正黑體 UI，大字的百分比用 Segoe UI Semibold）；字級與字重維持原設計。字型在這台電腦上不存在時，改用系統預設字型；你自己填的名稱找不到時，視窗會提示。只能在設定檔調整，不在右鍵選單裡 |
 | `providers.claude.expiryWarningDays` | 正整數 | `7` | 憑證快照**剩不到**這麼多天就警示 |
 | `providers.claude.warningPercent` | 1–100 的整數，須小於 `criticalPercent` | `60` | 黃色門檻，只在 Claude 沒有給嚴重度時才用 |
 | `providers.claude.criticalPercent` | 1–100 的整數，須大於 `warningPercent` | `85` | 紅色門檻，條件同上 |
@@ -131,7 +132,7 @@ python -m cc_quota_tracker gui                 # 開啟視窗
 
 視窗位置另外記憶，不在這個檔案裡。
 
-**值不合法時**，只有那一欄回到預設值（兩個百分比門檻除非 `warningPercent` 小於 `criticalPercent`，否則會一起回到預設）。`layout` 到 `countdownFormat` 出錯時，視窗會指出是哪一欄；`providers` 底下的值不合法時，則是默默使用預設值。整個檔案不是合法的 JSON 時，全部使用預設值並提示，工具在你修好之前**不會覆寫**檔案（此時從右鍵選單做的改動只在本次執行期間有效）。
+**值不合法時**，只有那一欄回到預設值（兩個百分比門檻除非 `warningPercent` 小於 `criticalPercent`，否則會一起回到預設）。`layout` 到 `font` 出錯時，視窗會指出是哪一欄；`providers` 底下的值不合法時，則是默默使用預設值。整個檔案不是合法的 JSON 時，全部使用預設值並提示，工具在你修好之前**不會覆寫**檔案（此時從右鍵選單做的改動只在本次執行期間有效）。
 
 進度條顏色依 Claude 自己給的嚴重度（`normal`／`warning`／`critical`）；上表的百分比門檻只在它沒給嚴重度時才當退路。
 
