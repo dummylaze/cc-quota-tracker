@@ -18,15 +18,16 @@ class ReadPreferencesTest(HomeTestCase):
 
     def test_hand_edit_takes_effect_on_next_poll(self):
         self.core.poll()
-        self.write_settings(alwaysOnTop=False, mode="expanded", language="en", theme="dark", opacity=70)
+        self.write_settings(layout="table", alwaysOnTop=False, mode="expanded", language="en", theme="dark", opacity=70)
         self.assertEqual(self.core.poll().preferences,
-                         Preferences(always_on_top=False, mode="expanded", language="en", theme="dark", opacity=70))
+                         Preferences(layout="table", always_on_top=False, mode="expanded", language="en", theme="dark",
+                                     opacity=70))
 
     def test_invalid_value_falls_back_for_that_field_only_and_is_named(self):
-        self.write_settings(mode="huge", opacity=50, theme="dark", alwaysOnTop=1, countdownFormat="weeks")
+        self.write_settings(mode="huge", opacity=50, theme="dark", alwaysOnTop=1, countdownFormat="weeks", layout="rings")
         board = self.core.poll()
         self.assertEqual(board.preferences, Preferences(theme="dark"))
-        self.assertEqual(board.invalid_settings, ("alwaysOnTop", "countdownFormat", "mode", "opacity"))
+        self.assertEqual(board.invalid_settings, ("alwaysOnTop", "countdownFormat", "layout", "mode", "opacity"))
 
     def test_values_of_the_wrong_type_are_invalid(self):
         # JSON 的 true 等於 1、100.0 等於 100：只比值會放過型別不對的值

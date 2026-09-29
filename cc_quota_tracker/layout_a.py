@@ -1,5 +1,5 @@
 """版面 A（卡片列表）。精簡模式只畫使用中帳號那一張卡片；展開模式每個帳號一張卡片，使用中帳號多出展開專用資料。
-文案先以正體中文暫置。
+提示與橫幅的文案、折行取自 canvas_text。
 
 物件生命週期：固定部分的 item 在建構時一次建好，之後每輪只改座標、文字、顏色與顯示狀態，用不到的設成 hidden。
 數量跟著看板走的部分（卡片、範圍週限額、用量去向、其他限額）由 _Pool 補建或刪到剛好的數量，所以 item 數只由
@@ -8,25 +8,18 @@
 多行文字（附註、提示、橫幅）自己折行、逐行一個 item，行數同樣由 _Pool 補建或刪到剛好。"""
 import itertools
 import math
-import re
 import tkinter.font as tkfont
 from typing import Optional
 
-from . import COMMAND
 from .board import Board, Card, Limit, ReadingState, Role
-from .fmt import absolute, account_label, age, countdown, money, until
-from .render_text import INVALID_SETTINGS
+from .canvas_text import LINE_TAG, banner_lines, notes, wrap
+from .fmt import absolute, account_label, age, money, until
 from .tokens import FONTS, LINE_HEIGHT, RADIUS, SPACE, THEMES
 
 TAG = "layout-a"
 EXPANDED_TAG = "layout-a-expanded"  # 展開專用的 item
 CLICKABLE_TAG = "clickable"  # 自己處理點擊的 item：視窗的雙擊切換模式在它上面不作用
-LINE_TAG = "layout-a-line"  # 多行文字的逐行 item；同一段的各行共用最後一個 tag
 _WINDOWS = (("session", "工作階段窗口"), ("weekly_all", "週窗口"))  # 兩種模式都固定顯示這兩個窗口
-_UPDATES_SOON = "Claude Code 更新額度快取後就會出現"
-_HOW_TO_MANAGE = (f"這個帳號還沒納管：在 Claude Code 登入它之後執行 {COMMAND} add <帳號標籤>，"
-                  "或在視窗按右鍵選「納管目前登入的帳號…」")
-_OBSERVED = "觀測值：觀測之後這個帳號沒再被用過才準確；在別台機器上用過，這台看不到"
 _NOTE_SLOTS = 4  # 一張卡片的提示最多幾條：讀數說明或未納管、落後、鎖定、憑證快照，實際同時最多 3 條
 _ids = itertools.count()
 
@@ -124,32 +117,6 @@ class _Pool:
         return self._groups
 
 
-# 折行的單位：一個西文字（連同後面的空白）、一段空白，或一個中日韓字元
-_WRAP_TOKEN = re.compile(r"[^\s\u2e80-\uffff]+\s*|\s+|.")
-
-
-def _wrap(font, text, width):
-    """把文字折成不超過 width 的各行：西文在字與字之間斷，中日韓字元逐字斷，一個字就比一行寬時逐字硬斷。
-    各行保留行尾空白，依序接回去就是原文（不含換行字元）。"""
-    lines = []
-    for paragraph in text.split("\n"):
-        line = ""
-        for token in _WRAP_TOKEN.findall(paragraph):
-            if font.measure((line + token).rstrip()) <= width:
-                line += token
-                continue
-            if line:
-                lines.append(line)
-            line = ""
-            for ch in token:
-                if line and font.measure((line + ch).rstrip()) > width:
-                    lines.append(line)
-                    line = ""
-                line += ch
-        lines.append(line)
-    return lines
-
-
 class _Text(_Group):
     """多行文字：tk 的 canvas 文字沒有行距選項，所以自己折行、逐行一個 item，行距照 LINE_HEIGHT。"""
 
@@ -162,7 +129,7 @@ class _Text(_Group):
     def render(self, x, y, width, text, color):
         """回傳下緣。行距多出的部分上下各半，所以第一行的字也在自己那一行的中間。"""
         p = self.p
-        lines = _wrap(p.fonts[self.font], text, width)
+        lines = wrap(p.fonts[self.font], text, width)
         pitch = p.pitch(self.font)
         top = y + (pitch - p.fonts[self.font].metrics("linespace")) / 2
         for i, (item, line) in enumerate(zip(self._lines.fit(len(lines)), lines)):
@@ -319,12 +286,12 @@ class _CardView(_Group):
                 row.hide()
                 continue
             y = _limit_row(p, row, name, lim, board, c, left, right, y + p.px("section_gap"), dollars=expanded)
-        notes = _notes(card, board)
+        shown = notes(card, board)
         for i, slot in enumerate(self.notes):
-            if i >= len(notes):
+            if i >= len(shown):
                 slot.hide()
                 continue
-            y = slot.render(notes[i], c, left, right, y + p.px("section_gap" if i == 0 else "line_gap"))
+            y = slot.render(shown[i], c, left, right, y + p.px("section_gap" if i == 0 else "line_gap"))
         if expanded and card.role is not Role.STANDBY:
             if self.extras is None:
                 self.extras = _Extras(p, self.tags, self._on_toggle_others)
@@ -398,7 +365,7 @@ class LayoutA:
             self.render(*self._last)
 
     def _banner_box(self, board: Board, c, x, y, width):
-        lines = _banner_lines(board)
+        lines = banner_lines(board)
         if not lines:
             self._p.hide(self._banner_bg)
             self._banner.hide()
@@ -428,62 +395,3 @@ def _reset_text(lim: Limit, board: Board) -> Optional[str]:
     if lim.resets_at is not None:
         return "重置：" + until(lim.resets_at, board.as_of, board.countdown_format)
     return None if lim.percent is None else "重置：未知"
-
-
-def _notes(card: Card, board: Board):
-    """(文字, 色點的顏色 token, 文字的顏色 token)，依顯示順序。"""
-    notes = []
-    standby = card.role is Role.STANDBY
-    if card.role is Role.UNMANAGED:
-        notes.append((_HOW_TO_MANAGE, "accent", "fg"))
-    if card.reading_state is ReadingState.PENDING:
-        notes.append(("讀數待更新，" + _UPDATES_SOON, "sub", "sub"))
-    elif card.reading_state is ReadingState.NO_READING:
-        notes.append(("尚無讀數" if standby else "尚無讀數，" + _UPDATES_SOON, "sub", "sub"))
-    elif standby:
-        notes.append((_OBSERVED, "sub", "sub"))
-    if card.lagging:
-        notes.append(("有新對話，額度尚未更新", "warning", "fg"))
-    if card.locked_reason:
-        notes.append(("額度已鎖定：" + card.locked_reason, "critical", "critical"))
-    snapshot = _snapshot_note(card, board)
-    if snapshot:
-        notes.append(snapshot)
-    return notes
-
-
-def _snapshot_note(card: Card, board: Board):
-    label = account_label(card.account_key) if card.account_key else None
-    if card.snapshot_invalid:
-        return (f"憑證快照已失效：Claude Code 目前登入的就是這個帳號，執行 {COMMAND} add {label} 重新納管",
-                "critical", "critical")
-    expires = card.snapshot_expires_at
-    if expires is None:
-        return None
-    when = absolute(expires, board.as_of)
-    expired = expires <= board.as_of
-    text = (f"憑證快照已過期（{when}）" if expired
-            else f"憑證快照 {countdown(expires - board.as_of, board.countdown_format)}後到期（{when}）")
-    if not card.snapshot_expiring:
-        return text, "sub", "fg"
-    text += f"：在 Claude Code 重新登入這個帳號，再執行 {COMMAND} add {label}"
-    return (text, "critical", "critical") if expired else (text, "warning", "fg")
-
-
-def _banner_lines(board: Board):
-    lines = []
-    if board.settings_unreadable:
-        lines.append("設定檔無法讀取（不是合法的 JSON），裡面的設定都當成沒填；本工具不會覆寫它，請修正後再試。")
-    if board.invalid_settings:
-        lines.append(INVALID_SETTINGS.format(fields="、".join(board.invalid_settings)))
-    if board.restart_required:
-        lines.append("設定檔的路徑欄位改了；路徑只在啟動時讀取，重新啟動本工具後才生效。")
-    if board.wrong_location_suspected:
-        lines.append("預設位置找不到 Claude Code 的額度快取，可能讀錯位置。Claude Code 目錄若不在 home"
-                     "（例如設了 CLAUDE_CONFIG_DIR），請在設定檔的 claudeConfigDir 指定。")
-    if board.schema_changed:
-        last = board.last_reading_at
-        shown = (f"下面是最後一次成功的讀數（{absolute(last, board.as_of)}，{age(board.as_of - last)}）" if last
-                 else "目前沒有成功的讀數")
-        lines.append("額度快取結構已變更，本工具讀不懂新的結構；" + shown)
-    return lines

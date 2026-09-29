@@ -15,8 +15,9 @@ THEMES = {
         "accent": "#3b6fd8",  # 只代表使用中帳號：外框、使用中標籤；另用於未納管提示的色點
         "chip_active_fg": "#ffffff",  # 使用中標籤的文字，畫在 accent 上
         "chip_standby": "#ebebe7", "chip_standby_fg": "#6a6a6f",  # 待命標籤的底色與文字
-        "normal": "#1a874a", "warning": "#967105", "critical": "#d34243",
+        "normal": "#118246", "warning": "#916c00", "critical": "#cd3c3e",
         "banner": "#fbecc8", "banner_fg": "#5c4300",
+        "active_row": "#f5f7fd",  # 版面 B 展開時使用中帳號那一列的淡色底；列上的文字與圖形對它另外量
     },
     # 深色不是淺色的反轉：每一對另外量過，對比不足時只調明度、保持色相
     "dark": {
@@ -29,6 +30,7 @@ THEMES = {
         "chip_standby": "#34343a", "chip_standby_fg": "#bcbcc4",
         "normal": "#54cc86", "warning": "#f0c030", "critical": "#fe9b97",
         "banner": "#3d3218", "banner_fg": "#f5dc9a",
+        "active_row": "#1e2130",  # 比卡片暗：提亮會讓 sub 與嚴重度文字跌破 Lc 60
     },
 }
 
@@ -44,8 +46,8 @@ FONTS = {
 # 多行文字的行高（行距 ÷ 字級像素）。tk 的 canvas 文字沒有行距選項，版面把多行文字拆成逐行 item 自己排
 LINE_HEIGHT = 1.5
 
-# 巢狀圓角同心：外層圓角＝內層圓角＋兩者之間的內距（panel 對 card 隔著 panel_pad）
-RADIUS = {"panel": 18, "card": 6, "chip": 9}
+# 巢狀圓角同心：外層圓角＝內層圓角＋兩者之間的內距（panel 對 card 隔著 panel_pad；card 對版面 B 的列底色隔著 row_inset）
+RADIUS = {"panel": 18, "card": 6, "chip": 9, "row": 2}
 
 SPACE = {
     "panel_pad": 12,  # 視窗邊緣到卡片
@@ -66,4 +68,10 @@ SPACE = {
     "line_gap": 3,  # 同一區塊內的文字列之間
     "dot": 6,  # 提示前的嚴重度色點直徑
     "dot_gap": 6,
+    # 版面 B：單行條的各段、表格的各欄
+    "col_gap": 14,  # 欄與欄、單行條的段與段之間
+    "cell_gap": 6,  # 同一段內：窗口名稱、進度條、百分比之間
+    "cell_bar_width": 64,  # 單行條與表格裡的小進度條
+    "row_pad_y": 8,  # 表格每一列（連同它的提示）上下的內距
+    "row_inset": 4,  # 列底色與卡片邊緣的距離
 }

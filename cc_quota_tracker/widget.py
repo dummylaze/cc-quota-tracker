@@ -1,4 +1,5 @@
 """懸浮視窗：無邊框、以透明色鍵挖出圓角、拖動任何位置可移動、雙擊切換精簡／展開；每 5 秒 poll 一次交給版面渲染。
+同一時間只建立目前選用的版面；換版面時舊版面的 item 整批銷毀、再建新的。
 右鍵選單調整偏好與納管帳號。偏好每輪取自看板（核心依設定檔的修改時間重讀），GUI 的改動合併寫回設定檔；
 主題選「跟隨系統」時每輪讀一次 Windows 的應用程式深淺色；
 視窗位置存在納管目錄的工具狀態，不進設定檔。"""
@@ -16,6 +17,7 @@ from . import atomic
 from .board import Board, Preferences
 from .core import STATE_DIR, AddWarning, InvalidLabel, NoCredential
 from .layout_a import CLICKABLE_TAG, LayoutA
+from .layout_b import LayoutB
 from .permissions import make_private
 from .fmt import account_label
 from .render_text import ADD_NOT_BOUND, ADD_WARNINGS, IMPORT_NOT_BOUND, INVALID_LABEL, NO_CREDENTIAL, NOT_A_CREDENTIAL_FILE
@@ -27,6 +29,8 @@ DEFAULT_POSITION = (40, 40)  # 主螢幕上的位置：第一次啟動，或上�
 _GRIP = 20  # 判斷位置在不在螢幕內時，看視窗左上角往內這麼多的那一點：要拖得到視窗才算在螢幕內
 _TITLE = "cc-quota-tracker"
 _ATTRS = {field: attr for field, (attr, _) in PREFERENCE_FIELDS.items()}
+_LAYOUTS = {"cards": LayoutA, "table": LayoutB}
+_LAYOUT_NAMES = (("卡片列表", "cards"), ("密集表格／單行條", "table"))  # 合法值與 settings.PREFERENCE_FIELDS 一致
 _MODES = (("精簡", "compact"), ("展開", "expanded"))
 _THEMES = (("跟隨系統", "system"), ("淺色", "light"), ("深色", "dark"))
 _OPACITIES = PREFERENCE_FIELDS["opacity"][1]
@@ -94,7 +98,7 @@ class Widget:
             pass  # 只有 Windows 支援透明色鍵；其他平台圓角外側會露出底色
         self.canvas = tk.Canvas(root, bg=TRANSPARENT_KEY, highlightthickness=0, borderwidth=0)
         self.canvas.pack()
-        self.layout = LayoutA(self.canvas)
+        self.layout = None  # 目前選用的版面：第一次套用偏好時才建立
         self._build_menu()
         self._restore_position(on_screen or on_any_screen(root))
         root.bind("<ButtonPress-1>", self._press)
@@ -107,10 +111,16 @@ class Widget:
     def _build_menu(self):
         """選單不能變長：只放常切換的偏好。變數建一次，每輪只改值，不累積。"""
         self._menu = menu = tk.Menu(self.root, tearoff=0)
+        self._layout_var = tk.StringVar(self.root)
         self._topmost_var = tk.BooleanVar(self.root)
         self._mode_var = tk.StringVar(self.root)
         self._theme_var = tk.StringVar(self.root)
         self._opacity_var = tk.IntVar(self.root)
+        layouts = tk.Menu(menu, tearoff=0)
+        for label, value in _LAYOUT_NAMES:
+            layouts.add_radiobutton(label=label, value=value, variable=self._layout_var,
+                                    command=lambda: self.set_preference("layout", self._layout_var.get()))
+        menu.add_cascade(label="版面", menu=layouts)
         menu.add_checkbutton(label="置頂", variable=self._topmost_var,
                              command=lambda: self.set_preference("alwaysOnTop", self._topmost_var.get()))
         modes = tk.Menu(menu, tearoff=0)
@@ -140,7 +150,7 @@ class Widget:
         return [self._menu.entrycget(i, "label") for i in range(last + 1) if self._menu.type(i) != "separator"]
 
     def menu_state(self) -> Preferences:
-        return replace(self._prefs, always_on_top=self._topmost_var.get(), mode=self._mode_var.get(),
+        return replace(self._prefs, layout=self._layout_var.get(), always_on_top=self._topmost_var.get(), mode=self._mode_var.get(),
                        theme=self._theme_var.get(), opacity=self._opacity_var.get())
 
     def refresh(self):
@@ -188,10 +198,15 @@ class Widget:
             self.root.attributes("-topmost", prefs.always_on_top)
         if previous is None or prefs.opacity != previous.opacity:
             self.root.attributes("-alpha", prefs.opacity / 100)
+        self._layout_var.set(prefs.layout)
         self._topmost_var.set(prefs.always_on_top)
         self._mode_var.set(prefs.mode)
         self._theme_var.set(prefs.theme)
         self._opacity_var.set(prefs.opacity)
+        if self.layout is None or prefs.layout != previous.layout:
+            if self.layout is not None:
+                self.layout.destroy()
+            self.layout = _LAYOUTS[prefs.layout](self.canvas)
         if self._board is not None:
             # 跟隨系統：每輪 poll 都會走到這裡，系統切換深淺色後下一輪就跟上
             theme = self._system_theme() if prefs.theme == "system" else prefs.theme
@@ -264,7 +279,8 @@ class Widget:
             self.root.after_cancel(self._after)
             self._after = None
         self._save_position()
-        self.layout.destroy()
+        if self.layout is not None:
+            self.layout.destroy()
         self.root.destroy()
 
     def _restore_position(self, on_screen: Callable[[int, int], bool]):

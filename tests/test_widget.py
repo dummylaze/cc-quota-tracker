@@ -140,10 +140,51 @@ class PreferenceTest(WidgetTestCase):
         self.widget.refresh()
         self.assertEqual(self.widget.menu_state(),
                          Preferences(always_on_top=False, mode="expanded", theme="dark", opacity=70))
+        self.write_settings(layout="table")
+        self.widget.refresh()
+        self.assertEqual(self.widget.menu_state().layout, "table")
 
     def test_menu_offers_settings_and_actions(self):
         self.assertEqual(self.widget.menu_labels(),
-                         ["置頂", "模式", "主題", "透明度", "納管目前登入的帳號…", "匯入憑證檔…", "開啟納管目錄", "結束"])
+                         ["版面", "置頂", "模式", "主題", "透明度", "納管目前登入的帳號…", "匯入憑證檔…", "開啟納管目錄", "結束"])
+
+
+class LayoutSwitchTest(WidgetTestCase):
+    def layout_items(self, tag):
+        return self.widget.canvas.find_withtag(tag)
+
+    def test_cards_by_default_and_switching_to_table_is_remembered(self):
+        self.assertTrue(self.layout_items("layout-a"))
+        self.widget.set_preference("layout", "table")
+        self.assertEqual(self.settings()["layout"], "table")
+        self.assertEqual(self.widget.menu_state().layout, "table")
+        self.assertEqual(self.layout_items("layout-a"), ())  # 舊版面整批銷毀
+        self.assertTrue(self.layout_items("layout-b"))
+        self.widget.refresh()  # 下一輪從設定檔讀回同樣的版面
+        self.assertTrue(self.layout_items("layout-b"))
+
+    def test_hand_edited_layout_applies_on_next_round(self):
+        self.write_settings(layout="table")
+        self.widget.refresh()
+        self.assertEqual(self.layout_items("layout-a"), ())
+        self.assertTrue(self.layout_items("layout-b"))
+
+    def test_switching_layouts_back_and_forth_returns_to_the_same_item_count(self):
+        counts = {}
+        for i in range(12):
+            layout, mode = ("cards", "table")[i % 2], ("compact", "expanded")[i // 2 % 2]
+            self.widget.set_preference("mode", mode)
+            self.widget.set_preference("layout", layout)
+            counts.setdefault((layout, mode), set()).add(len(self.widget.canvas.find_all()))
+        for key, seen in counts.items():
+            self.assertEqual(len(seen), 1, key)
+        self.assertEqual(len(self.pending_after()), 1)
+
+    def test_close_destroys_the_current_layout(self):
+        self.widget.set_preference("layout", "table")
+        with mock.patch.object(self.widget.layout, "destroy", wraps=self.widget.layout.destroy) as destroy:
+            self.widget.close()
+        destroy.assert_called_once_with()
 
 
 class ThemeTest(WidgetTestCase):

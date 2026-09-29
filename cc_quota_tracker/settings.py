@@ -28,7 +28,7 @@ DEFAULTS = {
 
 # 設定檔的偏好欄位 → (Preferences 的屬性, 合法值)。第一個合法值不一定是預設；預設以 Preferences 為準
 PREFERENCE_FIELDS = {
-    "layout": ("layout", ("cards",)),  # 版面 B、C 由各自的票加入
+    "layout": ("layout", ("cards", "table")),  # cards：A 卡片列表、table：B 密集表格／單行條；C 由它的票加入
     "alwaysOnTop": ("always_on_top", (True, False)),
     "mode": ("mode", ("compact", "expanded")),
     "language": ("language", ("system", "zh-TW", "en")),

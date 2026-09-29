@@ -110,7 +110,7 @@ class Card:
 @dataclass(frozen=True)
 class Preferences:
     """設定檔的偏好，值與設定檔相同；供畫面層套用。倒數格式另放在 Board.countdown_format。"""
-    layout: str = "cards"
+    layout: str = "cards"  # cards／table
     always_on_top: bool = True
     mode: str = "compact"  # compact／expanded
     language: str = "system"  # system／zh-TW／en

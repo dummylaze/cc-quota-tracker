@@ -8,7 +8,8 @@ from cc_quota_tracker import COMMAND
 from cc_quota_tracker.board import (Board, BreakdownRow, Card, ExtraUsage, Limit, Money, ReadingState, Role, Severity,
                                     Spend, WeeklyBreakdown)
 from cc_quota_tracker.fmt import absolute
-from cc_quota_tracker.layout_a import EXPANDED_TAG, LINE_TAG, LayoutA
+from cc_quota_tracker.canvas_text import LINE_TAG
+from cc_quota_tracker.layout_a import EXPANDED_TAG, LayoutA
 from cc_quota_tracker.tokens import FONTS, LINE_HEIGHT, SPACE, THEMES
 from tests.fakehome import NOW
 
