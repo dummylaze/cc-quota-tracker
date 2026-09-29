@@ -1,5 +1,6 @@
 """縫 ②：版面 A。同一個 widget 連續渲染看板、在精簡與展開之間來回切換，Canvas 的 item 數不能累積。"""
 import tkinter as tk
+import tkinter.font as tkfont
 import unittest
 from datetime import timedelta
 
@@ -7,8 +8,8 @@ from cc_quota_tracker import COMMAND
 from cc_quota_tracker.board import (Board, BreakdownRow, Card, ExtraUsage, Limit, Money, ReadingState, Role, Severity,
                                     Spend, WeeklyBreakdown)
 from cc_quota_tracker.fmt import absolute
-from cc_quota_tracker.layout_a import EXPANDED_TAG, LayoutA
-from cc_quota_tracker.tokens import THEMES
+from cc_quota_tracker.layout_a import EXPANDED_TAG, LINE_TAG, LayoutA
+from cc_quota_tracker.tokens import FONTS, LINE_HEIGHT, SPACE, THEMES
 from tests.fakehome import NOW
 
 
@@ -111,8 +112,29 @@ class LayoutACompactTest(unittest.TestCase):
 
 
 def visible_texts(canvas):
-    return [canvas.itemcget(i, "text") for i in canvas.find_all()
-            if canvas.type(i) == "text" and canvas.itemcget(i, "state") != "hidden"]
+    """畫面上的每一段文字。多行文字拆成逐行 item，同一段的各行接回一段（各行保留行尾空白，直接相接就是原文）。"""
+    texts, blocks = [], {}
+    for i in canvas.find_all():
+        if canvas.type(i) != "text" or canvas.itemcget(i, "state") == "hidden":
+            continue
+        if LINE_TAG in canvas.gettags(i):
+            blocks.setdefault(canvas.gettags(i)[-1], []).append(i)
+        else:
+            texts.append(canvas.itemcget(i, "text"))
+    for lines in blocks.values():
+        lines.sort(key=lambda i: canvas.coords(i)[1])
+        texts.append("".join(canvas.itemcget(i, "text") for i in lines))
+    return texts
+
+
+def visible_lines(canvas):
+    """多行文字的每一段：[(y, 該行文字, 字型), ...]，由上而下。"""
+    blocks = {}
+    for i in canvas.find_withtag(LINE_TAG):
+        if canvas.itemcget(i, "state") != "hidden":
+            font = tkfont.nametofont(canvas.itemcget(i, "font"))
+            blocks.setdefault(canvas.gettags(i)[-1], []).append((canvas.coords(i)[1], canvas.itemcget(i, "text"), font))
+    return [sorted(lines, key=lambda line: line[0]) for lines in blocks.values()]
 
 
 FULL = Card("claude:work", Role.ACTIVE, ReadingState.HAS_READING, reading_age=timedelta(minutes=3), lagging=True,
@@ -208,8 +230,8 @@ class LayoutAExpandedTest(unittest.TestCase):
 
     def test_expiry_warning_has_a_dot_and_the_remedy(self):
         self.shown()
-        note = self.item_with_text("後到期")
-        self.assertIn(f"{COMMAND} add work", self.canvas.itemcget(note, "text"))
+        note = next(t for t in visible_texts(self.canvas) if "後到期" in t)
+        self.assertIn(f"{COMMAND} add work", note)
         dots = [i for i in self.canvas.find_all() if self.canvas.type(i) == "oval"
                 and self.canvas.itemcget(i, "state") != "hidden"
                 and self.canvas.itemcget(i, "fill") == THEMES["light"]["warning"]]
@@ -252,6 +274,60 @@ class LayoutAExpandedTest(unittest.TestCase):
                 counts[key].add(self.items())
         for key, seen in counts.items():
             self.assertEqual(len(seen), 1, key)
+
+    def fills(self, color):
+        return [i for i in self.canvas.find_all() if self.canvas.itemcget(i, "state") != "hidden"
+                and self.canvas.type(i) != "text" and self.canvas.itemcget(i, "fill") == color]
+
+    def test_neutral_bars_use_the_neutral_color_not_accent(self):
+        for theme in ("light", "dark"):
+            with self.subTest(theme=theme):
+                self.layout.render(EXPANDED_BOARDS[0], theme, expanded=True)
+                c = THEMES[theme]
+                fills = [self.canvas.itemcget(i, "fill") for i in self.canvas.find_withtag("bar-fill")
+                         if self.canvas.itemcget(i, "state") != "hidden"]
+                self.assertEqual(fills.count(c["neutral"]), 2)  # 週窗口已過 %、額外用量
+                self.assertNotIn(c["accent"], fills)
+
+    def test_accent_only_marks_the_active_account(self):
+        for theme in ("light", "dark"):
+            with self.subTest(theme=theme):
+                self.layout.render(EXPANDED_BOARDS[0], theme, expanded=True)
+                accent = THEMES[theme]["accent"]
+                self.assertEqual(len(self.fills(accent)), 1)  # 使用中標籤
+                outlined = [i for i in self.canvas.find_all() if self.canvas.type(i) == "polygon"
+                            and self.canvas.itemcget(i, "outline") == accent]
+                self.assertEqual(len(outlined), 1)  # 使用中帳號的卡片外框
+
+    def test_standby_chip_uses_its_own_colors(self):
+        self.layout.render(EXPANDED_BOARDS[0], "dark", expanded=True)
+        c = THEMES["dark"]
+        self.assertEqual(len(self.fills(c["chip_standby"])), 2)
+        chip_texts = [i for i in self.canvas.find_all() if self.canvas.type(i) == "text"
+                      and self.canvas.itemcget(i, "text") == "待命"]
+        self.assertEqual({self.canvas.itemcget(i, "fill") for i in chip_texts}, {c["chip_standby_fg"]})
+
+    def test_wrapped_text_has_a_line_height_of_at_least_one_and_a_half(self):
+        # 未納管的說明（small）與橫幅（body）都會折成多行
+        board = Board(cards=(Card(None, Role.UNMANAGED, ReadingState.NO_READING),), as_of=NOW,
+                      schema_changed=True, invalid_settings=("mode", "opacity"))
+        self.layout.render(board, "light", expanded=True)
+        wrapped = [lines for lines in visible_lines(self.canvas) if len(lines) > 1]
+        self.assertEqual({lines[0][2].actual("size") for lines in wrapped},
+                         {FONTS["small"][1], FONTS["body"][1]})
+        px_per_pt = self.canvas.winfo_fpixels("1i") / 72
+        for lines in wrapped:
+            font_px = lines[0][2].actual("size") * px_per_pt
+            for (y1, _, _), (y2, _, _) in zip(lines, lines[1:]):
+                self.assertGreaterEqual(y2 - y1, LINE_HEIGHT * font_px - 0.5)
+
+    def test_wrapped_lines_fit_inside_the_card_padding(self):
+        self.layout.render(EXPANDED_BOARDS[0], "light", expanded=True)
+        scale = self.canvas.winfo_fpixels("1i") / 96
+        width = scale * (SPACE["card_width"] - 2 * SPACE["card_pad_x"])
+        for lines in visible_lines(self.canvas):
+            for _, text, font in lines:
+                self.assertLessEqual(font.measure(text.rstrip()), width, text)
 
     def test_destroy_after_expanded_removes_every_item(self):
         self.shown()

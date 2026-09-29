@@ -4,8 +4,11 @@
 物件生命週期：固定部分的 item 在建構時一次建好，之後每輪只改座標、文字、顏色與顯示狀態，用不到的設成 hidden。
 數量跟著看板走的部分（卡片、範圍週限額、用量去向、其他限額）由 _Pool 補建或刪到剛好的數量，所以 item 數只由
 看板、模式與摺疊區開合決定：三者相同時 item 數永遠相同。展開專用的 item 第一次以展開模式渲染時才建立，
-回到精簡模式就刪掉。每組 item 都帶自己與上層的 tag，刪一組就是刪它的 tag；destroy() 刪掉全部。"""
+回到精簡模式就刪掉。每組 item 都帶自己與上層的 tag，刪一組就是刪它的 tag；destroy() 刪掉全部。
+多行文字（附註、提示、橫幅）自己折行、逐行一個 item，行數同樣由 _Pool 補建或刪到剛好。"""
 import itertools
+import math
+import re
 import tkinter.font as tkfont
 from typing import Optional
 
@@ -13,11 +16,12 @@ from . import COMMAND
 from .board import Board, Card, Limit, ReadingState, Role
 from .fmt import absolute, account_label, age, countdown, money, until
 from .render_text import INVALID_SETTINGS
-from .tokens import FONTS, RADIUS, SPACE, THEMES
+from .tokens import FONTS, LINE_HEIGHT, RADIUS, SPACE, THEMES
 
 TAG = "layout-a"
 EXPANDED_TAG = "layout-a-expanded"  # 展開專用的 item
 CLICKABLE_TAG = "clickable"  # 自己處理點擊的 item：視窗的雙擊切換模式在它上面不作用
+LINE_TAG = "layout-a-line"  # 多行文字的逐行 item；同一段的各行共用最後一個 tag
 _WINDOWS = (("session", "工作階段窗口"), ("weekly_all", "週窗口"))  # 兩種模式都固定顯示這兩個窗口
 _UPDATES_SOON = "Claude Code 更新額度快取後就會出現"
 _HOW_TO_MANAGE = (f"這個帳號還沒納管：在 Claude Code 登入它之後執行 {COMMAND} add <帳號標籤>，"
@@ -39,8 +43,14 @@ class _Paint:
     def px(self, key):
         return round(SPACE[key] * self.scale)
 
+    def pitch(self, font):
+        """多行文字的行距：字級像素 × LINE_HEIGHT，不小於字型本身的 linespace。"""
+        size_px = FONTS[font][1] * self.cv.winfo_fpixels("1i") / 72
+        return max(self.fonts[font].metrics("linespace"), math.ceil(LINE_HEIGHT * size_px))
+
     def text(self, item, x, y, width, text, color):
-        """多行文字：回傳它的下緣。"""
+        """單行標題（用量去向、其他限額）：回傳它的下緣。太長時 tk 會自己折行，行距是字型的 linespace；
+        會折成多行的內文改用 _Text。"""
         self.show(item, x, y, text=text, fill=color, width=width)
         return self.cv.bbox(item)[3]
 
@@ -53,9 +63,15 @@ class _Paint:
             self.cv.itemconfigure(item, state="hidden")
 
     def rrect(self, item, x1, y1, x2, y2, radius, color, **options):
+        """圓角以折線逼近四分之一圓。不用 smooth 多邊形：它只經過相鄰兩點的中點，畫出的半徑只有一半。"""
         r = max(0, min(self.scale * radius, (x2 - x1) / 2, (y2 - y1) / 2))
-        points = (x1 + r, y1, x2 - r, y1, x2, y1, x2, y1 + r, x2, y2 - r, x2, y2,
-                  x2 - r, y2, x1 + r, y2, x1, y2, x1, y2 - r, x1, y1 + r, x1, y1)
+        steps = max(1, math.ceil(r / 2))
+        points = []
+        # 順時針：右上、右下、左下、左上，各從角度 start 轉 90 度（畫面座標 y 朝下）
+        for cx, cy, start in ((x2 - r, y1 + r, -90), (x2 - r, y2 - r, 0), (x1 + r, y2 - r, 90), (x1 + r, y1 + r, 180)):
+            for i in range(steps + 1):
+                angle = math.radians(start + 90 * i / steps)
+                points += (cx + r * math.cos(angle), cy + r * math.sin(angle))
         self.show(item, *points, **{"fill": color, "outline": "", **options})
 
     def row(self, row: "_Row", left, right, y, name, value, value_font, value_color, percent, bar_color, foot, c):
@@ -77,9 +93,9 @@ class _Paint:
             self.hide(row.fill)
         y += bar
         if foot is None:
-            self.hide(row.foot)
+            row.foot.hide()
             return y
-        return self.text(row.foot, left, y + self.px("line_gap"), right - left, foot, c["sub"])
+        return row.foot.render(left, y + self.px("line_gap"), right - left, foot, c["sub"])
 
 
 class _Group:
@@ -94,18 +110,67 @@ class _Group:
 
 
 class _Pool:
-    """數量跟著看板走的同款 item 組：補建或刪到剛好 n 組。"""
+    """數量跟著看板走的同款 item 組：補建或刪到剛好 n 組。destroy 預設是組自己的 destroy()。"""
 
-    def __init__(self, make):
-        self._make, self._groups = make, []
+    def __init__(self, make, destroy=None):
+        self._make, self._destroy, self._groups = make, destroy or (lambda group: group.destroy()), []
 
     def fit(self, n):
         while len(self._groups) < n:
             self._groups.append(self._make())
         for group in self._groups[n:]:
-            group.destroy()
+            self._destroy(group)
         del self._groups[n:]
         return self._groups
+
+
+# 折行的單位：一個西文字（連同後面的空白）、一段空白，或一個中日韓字元
+_WRAP_TOKEN = re.compile(r"[^\s\u2e80-\uffff]+\s*|\s+|.")
+
+
+def _wrap(font, text, width):
+    """把文字折成不超過 width 的各行：西文在字與字之間斷，中日韓字元逐字斷，一個字就比一行寬時逐字硬斷。
+    各行保留行尾空白，依序接回去就是原文（不含換行字元）。"""
+    lines = []
+    for paragraph in text.split("\n"):
+        line = ""
+        for token in _WRAP_TOKEN.findall(paragraph):
+            if font.measure((line + token).rstrip()) <= width:
+                line += token
+                continue
+            if line:
+                lines.append(line)
+            line = ""
+            for ch in token:
+                if line and font.measure((line + ch).rstrip()) > width:
+                    lines.append(line)
+                    line = ""
+                line += ch
+        lines.append(line)
+    return lines
+
+
+class _Text(_Group):
+    """多行文字：tk 的 canvas 文字沒有行距選項，所以自己折行、逐行一個 item，行距照 LINE_HEIGHT。"""
+
+    def __init__(self, p, parent_tags, font):
+        super().__init__(p, parent_tags)
+        self.font = font
+        tags = (LINE_TAG, *self.tags)
+        self._lines = _Pool(lambda: p.cv.create_text(0, 0, anchor="nw", font=p.fonts[font], tags=tags), p.cv.delete)
+
+    def render(self, x, y, width, text, color):
+        """回傳下緣。行距多出的部分上下各半，所以第一行的字也在自己那一行的中間。"""
+        p = self.p
+        lines = _wrap(p.fonts[self.font], text, width)
+        pitch = p.pitch(self.font)
+        top = y + (pitch - p.fonts[self.font].metrics("linespace")) / 2
+        for i, (item, line) in enumerate(zip(self._lines.fit(len(lines)), lines)):
+            p.show(item, x, top + i * pitch, text=line, fill=color)
+        return y + len(lines) * pitch
+
+    def hide(self):
+        self._lines.fit(0)  # 行數只由顯示中的文字決定，所以藏起來就是刪到 0 行
 
 
 class _Row(_Group):
@@ -118,10 +183,11 @@ class _Row(_Group):
         self.value = cv.create_text(0, 0, anchor="e", tags=t)
         self.track = cv.create_line(0, 0, 0, 0, capstyle="round", tags=t)
         self.fill = cv.create_line(0, 0, 0, 0, capstyle="round", tags=(*t, "bar-fill"))
-        self.foot = cv.create_text(0, 0, anchor="nw", font=f["small"], tags=t)
+        self.foot = _Text(p, t, "small")
 
-    def items(self):
-        return self.name, self.value, self.track, self.fill, self.foot
+    def hide(self):
+        self.p.hide(self.name, self.value, self.track, self.fill)
+        self.foot.hide()
 
 
 class _Pair(_Group):
@@ -130,12 +196,14 @@ class _Pair(_Group):
     def __init__(self, p, parent_tags):
         super().__init__(p, parent_tags)
         cv, f = p.cv, p.fonts
-        self.name = cv.create_text(0, 0, anchor="nw", font=f["small"], tags=self.tags)
+        self.name = _Text(p, self.tags, "small")
         self.value = cv.create_text(0, 0, anchor="ne", font=f["small"], tags=self.tags)
 
     def render(self, name, value, c, left, right, y):
-        self.p.show(self.value, right, y, text=value, fill=c["fg"])
-        return self.p.text(self.name, left, y, right - left - self.p.fonts["small"].measure(value), name, c["fg"])
+        p = self.p
+        first_line = y + (p.pitch("small") - p.fonts["small"].metrics("linespace")) / 2  # 與名稱的第一行同高
+        p.show(self.value, right, first_line, text=value, fill=c["fg"])
+        return self.name.render(left, y, right - left - p.fonts["small"].measure(value), name, c["fg"])
 
 
 class _Note(_Group):
@@ -144,15 +212,19 @@ class _Note(_Group):
     def __init__(self, p, parent_tags):
         super().__init__(p, parent_tags)
         self.dot = p.cv.create_oval(0, 0, 0, 0, width=0, tags=self.tags)
-        self.text = p.cv.create_text(0, 0, anchor="nw", font=p.fonts["small"], tags=self.tags)
+        self.text = _Text(p, self.tags, "small")
 
     def render(self, note, c, left, right, y):
         text, dot_key, text_key = note
         p = self.p
         dot, gap = p.px("dot"), p.px("dot_gap")
-        top = y + (p.fonts["small"].metrics("linespace") - dot) / 2
+        top = y + (p.pitch("small") - dot) / 2  # 對齊第一行
         p.show(self.dot, left, top, left + dot, top + dot, fill=c[dot_key])
-        return p.text(self.text, left + dot + gap, y, right - left - dot - gap, text, c[text_key])
+        return self.text.render(left + dot + gap, y, right - left - dot - gap, text, c[text_key])
+
+    def hide(self):
+        self.p.hide(self.dot)
+        self.text.hide()
 
 
 class _Extras(_Group):
@@ -182,9 +254,9 @@ class _Extras(_Group):
             passed = min(max(int((board.as_of - b.started_at) / (b.ends_at - b.started_at) * 100), 0), 100)
             span = f"本週 {absolute(b.started_at, board.as_of)} ～ {absolute(b.ends_at, board.as_of)}"
             y = p.row(self.week, left, right, y + gap, span, f"已過 {passed}%", "body", c["sub"], passed,
-                      c["accent"], None, c)
+                      c["neutral"], None, c)
         else:
-            p.hide(*self.week.items())
+            self.week.hide()
         rows = b.rows if b else ()
         if rows:
             y = p.text(self.breakdown_title, left, y + gap, right - left, "本週用量去向", c["fg"])
@@ -196,15 +268,15 @@ class _Extras(_Group):
         e = card.extra_usage
         if e:
             y = p.row(self.extra, left, right, y + gap, "額外用量", f"{money(e.used)} / {money(e.limit)}", "body",
-                      c["fg"], e.percent, c["accent"], None, c)
+                      c["fg"], e.percent, c["neutral"], None, c)
         else:
-            p.hide(*self.extra.items())
+            self.extra.hide()
         s = card.spend
         if s:
             y = p.row(self.spend, left, right, y + gap, "花費", f"{money(s.used)} / {money(s.limit)}", "body",
                       c["fg"], s.percent, c[s.severity.value], None, c)
         else:
-            p.hide(*self.spend.items())
+            self.spend.hide()
         others = card.other_limits
         if others:
             title = f"{'▾' if others_open else '▸'} 其他限額（{len(others)}）"
@@ -223,10 +295,10 @@ class _CardView(_Group):
     def __init__(self, p, on_toggle_others):
         super().__init__(p, (TAG,))
         cv, f, t = p.cv, p.fonts, self.tags
-        self.shadow = cv.create_polygon(0, 0, 0, 0, 0, 0, smooth=True, tags=t)
-        self.card = cv.create_polygon(0, 0, 0, 0, 0, 0, smooth=True, tags=t)
+        self.shadow = cv.create_polygon(0, 0, 0, 0, 0, 0, tags=t)
+        self.card = cv.create_polygon(0, 0, 0, 0, 0, 0, tags=t)
         self.title = cv.create_text(0, 0, anchor="w", font=f["title"], tags=t)
-        self.chip = cv.create_polygon(0, 0, 0, 0, 0, 0, smooth=True, tags=t)
+        self.chip = cv.create_polygon(0, 0, 0, 0, 0, 0, tags=t)
         self.chip_text = cv.create_text(0, 0, anchor="center", font=f["chip"], tags=t)
         self.age = cv.create_text(0, 0, anchor="e", font=f["small"], tags=t)
         self.windows = [_Row(p, t) for _ in _WINDOWS]
@@ -244,13 +316,13 @@ class _CardView(_Group):
         for row, (kind, name) in zip(self.windows, _WINDOWS):
             lim = limits.get(kind)
             if lim is None:
-                p.hide(*row.items())
+                row.hide()
                 continue
             y = _limit_row(p, row, name, lim, board, c, left, right, y + p.px("section_gap"), dollars=expanded)
         notes = _notes(card, board)
         for i, slot in enumerate(self.notes):
             if i >= len(notes):
-                p.hide(slot.dot, slot.text)
+                slot.hide()
                 continue
             y = slot.render(notes[i], c, left, right, y + p.px("section_gap" if i == 0 else "line_gap"))
         if expanded and card.role is not Role.STANDBY:
@@ -281,8 +353,9 @@ class _CardView(_Group):
         chip_w = f["chip"].measure(chip) + 2 * p.px("chip_pad_x")
         chip_h = p.px("chip_height")
         p.rrect(self.chip, chip_x, mid - chip_h / 2, chip_x + chip_w, mid + chip_h / 2, RADIUS["chip"],
-                c["track" if standby else "accent"])
-        p.show(self.chip_text, chip_x + chip_w / 2, mid, text=chip, fill=c["sub" if standby else "chip_fg"])
+                c["chip_standby" if standby else "accent"])
+        p.show(self.chip_text, chip_x + chip_w / 2, mid, text=chip,
+               fill=c["chip_standby_fg" if standby else "chip_active_fg"])
         if card.reading_state is ReadingState.HAS_READING and card.reading_age is not None:
             p.show(self.age, right, mid, text=("觀測 " if standby else "讀數 ") + age(card.reading_age), fill=c["sub"])
         else:
@@ -294,9 +367,9 @@ class LayoutA:
     def __init__(self, canvas):
         self.cv = canvas
         self._p = p = _Paint(canvas)
-        self._panel = canvas.create_polygon(0, 0, 0, 0, 0, 0, smooth=True, tags=TAG)
-        self._banner_bg = canvas.create_polygon(0, 0, 0, 0, 0, 0, smooth=True, tags=TAG)
-        self._banner = canvas.create_text(0, 0, anchor="nw", font=p.fonts["body"], tags=TAG)
+        self._panel = canvas.create_polygon(0, 0, 0, 0, 0, 0, tags=TAG)
+        self._banner_bg = canvas.create_polygon(0, 0, 0, 0, 0, 0, tags=TAG)
+        self._banner = _Text(p, (TAG,), "body")
         self._cards = _Pool(lambda: _CardView(p, self.toggle_other_limits))
         self._others_open = False
         self._last = None
@@ -327,10 +400,11 @@ class LayoutA:
     def _banner_box(self, board: Board, c, x, y, width):
         lines = _banner_lines(board)
         if not lines:
-            self._p.hide(self._banner_bg, self._banner)
+            self._p.hide(self._banner_bg)
+            self._banner.hide()
             return y
         pad = self._p.px("banner_pad")
-        bottom = self._p.text(self._banner, x + pad, y + pad, width - 2 * pad, "\n".join(lines), c["banner_fg"]) + pad
+        bottom = self._banner.render(x + pad, y + pad, width - 2 * pad, "\n".join(lines), c["banner_fg"]) + pad
         self._p.rrect(self._banner_bg, x, y, x + width, bottom, RADIUS["card"], c["banner"])
         return bottom + self._p.px("card_gap")
 

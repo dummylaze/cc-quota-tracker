@@ -5,19 +5,29 @@
 # 透明色鍵：視窗底色設成它、再宣告為透明色，圓角外側就被挖空。不可與任何主題色相同
 TRANSPARENT_KEY = "#010203"
 
+# 以角色命名：一個 token 只用在它的角色，不因為色值剛好合適就借用；配色規則見 spec〈畫面層〉，tests/test_tokens.py 逐對量對比
 THEMES = {
     "light": {
         "panel": "#eeeeeb", "card": "#ffffff", "shadow": "#dcdcd7",
-        "fg": "#1d1d1f", "sub": "#6b6b70", "track": "#e1e1dd",
-        "accent": "#3b6fd8", "chip_fg": "#ffffff",
-        "normal": "#2a9254", "warning": "#a17900", "critical": "#d64545",
+        "fg": "#1d1d1f", "sub": "#6b6b70",
+        "track": "#e1e1dd",  # 進度條底軌
+        "neutral": "#80807d",  # 中性資訊的進度條填色（週窗口已過 %、額外用量）
+        "accent": "#3b6fd8",  # 只代表使用中帳號：外框、使用中標籤；另用於未納管提示的色點
+        "chip_active_fg": "#ffffff",  # 使用中標籤的文字，畫在 accent 上
+        "chip_standby": "#ebebe7", "chip_standby_fg": "#6a6a6f",  # 待命標籤的底色與文字
+        "normal": "#1a874a", "warning": "#967105", "critical": "#d34243",
         "banner": "#fbecc8", "banner_fg": "#5c4300",
     },
+    # 深色不是淺色的反轉：每一對另外量過，對比不足時只調明度、保持色相
     "dark": {
         "panel": "#1d1d21", "card": "#26262a", "shadow": "#101013",
-        "fg": "#ececec", "sub": "#9a9aa2", "track": "#3a3a40",
-        "accent": "#6d9bff", "chip_fg": "#0f1420",
-        "normal": "#4cc47f", "warning": "#f0c030", "critical": "#ff6b6b",
+        "fg": "#ececec", "sub": "#b6b6be",
+        "track": "#5a5a60",
+        "neutral": "#ababb2",
+        "accent": "#89affe",
+        "chip_active_fg": "#0f1420",
+        "chip_standby": "#34343a", "chip_standby_fg": "#bcbcc4",
+        "normal": "#54cc86", "warning": "#f0c030", "critical": "#fe9b97",
         "banner": "#3d3218", "banner_fg": "#f5dc9a",
     },
 }
@@ -31,7 +41,11 @@ FONTS = {
     "percent": ("Segoe UI Semibold", 13, "bold"),
 }
 
-RADIUS = {"panel": 16, "card": 12, "chip": 9}
+# 多行文字的行高（行距 ÷ 字級像素）。tk 的 canvas 文字沒有行距選項，版面把多行文字拆成逐行 item 自己排
+LINE_HEIGHT = 1.5
+
+# 巢狀圓角同心：外層圓角＝內層圓角＋兩者之間的內距（panel 對 card 隔著 panel_pad）
+RADIUS = {"panel": 18, "card": 6, "chip": 9}
 
 SPACE = {
     "panel_pad": 12,  # 視窗邊緣到卡片
