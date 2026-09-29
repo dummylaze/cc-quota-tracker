@@ -501,7 +501,7 @@ def _tighten(path: Path, new: bool = False) -> bool:
         return False
     make_private(path)
     if not is_private(path):
-        raise PermissionError(f"無法把權限收緊到只有目前使用者：{path.name}")
+        raise PermissionError(f"could not restrict access to the current user: {path.name}")  # 給開發者的診斷，不是畫面文案
     return not new
 
 

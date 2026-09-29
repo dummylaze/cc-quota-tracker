@@ -1,5 +1,6 @@
 """版面 A（卡片列表）。精簡模式只畫使用中帳號那一張卡片；展開模式每個帳號一張卡片，使用中帳號多出展開專用資料。
-提示與橫幅的文案、折行取自 canvas_text。
+提示與橫幅的文案、折行取自 canvas_text；其餘文案取自語系檔，語系由 render 傳入、存在 _Paint.lang。切換語系只是
+以新的語系重畫：文字改在既有的 item 上，不重建。
 
 物件生命週期：固定部分的 item 在建構時一次建好，之後每輪只改座標、文字、顏色與顯示狀態，用不到的設成 hidden。
 數量跟著看板走的部分（卡片、範圍週限額、用量去向、其他限額）由 _Pool 補建或刪到剛好的數量，所以 item 數只由
@@ -14,12 +15,13 @@ from .board import Board, Card, Limit, ReadingState, Role
 from .canvas_text import LINE_TAG, banner_lines, notes, wrap
 from .fmt import absolute, account_label, age, money, until
 from .fonts import FontSet
+from .i18n import ZH_TW, text
 from .tokens import FONTS, LINE_HEIGHT, RADIUS, SPACE, THEMES
 
 TAG = "layout-a"
 EXPANDED_TAG = "layout-a-expanded"  # 展開專用的 item
 CLICKABLE_TAG = "clickable"  # 自己處理點擊的 item：視窗的雙擊切換模式在它上面不作用
-_WINDOWS = (("session", "工作階段窗口"), ("weekly_all", "週窗口"))  # 兩種模式都固定顯示這兩個窗口
+_WINDOWS = (("session", "window.session"), ("weekly_all", "window.weekly_all"))  # 兩種模式都固定顯示這兩個窗口；值是語系鍵
 _NOTE_SLOTS = 4  # 一張卡片的提示最多幾條：讀數說明或未納管、落後、鎖定、憑證快照，實際同時最多 3 條
 _ids = itertools.count()
 
@@ -31,6 +33,7 @@ class _Paint:
         self.cv = canvas
         self.scale = canvas.winfo_fpixels("1i") / 96
         self.fonts = FontSet(canvas)
+        self.lang = ZH_TW  # 這一輪使用的語系；每次 render 一開始就換成呼叫端給的
 
     def px(self, key):
         return round(SPACE[key] * self.scale)
@@ -213,19 +216,21 @@ class _Extras(_Group):
         p = self.p
         gap = p.px("section_gap")
         for row, lim in zip(self.scoped.fit(len(card.scoped_limits)), card.scoped_limits):
-            name = f"週限額（{lim.scope}）" if lim.scope else "週限額"
+            name = text(p.lang, "window.weekly_scoped")
+            if lim.scope:
+                name = text(p.lang, "limit.scoped", name=name, scope=lim.scope)
             y = _limit_row(p, row, name, lim, board, c, left, right, y + gap, dollars=True)
         b = card.weekly_breakdown
         if b and b.started_at and b.ends_at and b.ends_at > b.started_at:
             passed = min(max(int((board.as_of - b.started_at) / (b.ends_at - b.started_at) * 100), 0), 100)
-            span = f"本週 {absolute(b.started_at, board.as_of)} ～ {absolute(b.ends_at, board.as_of)}"
-            y = p.row(self.week, left, right, y + gap, span, f"已過 {passed}%", "body", c["sub"], passed,
-                      c["neutral"], None, c)
+            span = text(p.lang, "week.span", start=absolute(b.started_at, board.as_of), end=absolute(b.ends_at, board.as_of))
+            y = p.row(self.week, left, right, y + gap, span, text(p.lang, "week.passed", percent=passed), "body",
+                      c["sub"], passed, c["neutral"], None, c)
         else:
             self.week.hide()
         rows = b.rows if b else ()
         if rows:
-            y = p.text(self.breakdown_title, left, y + gap, right - left, "本週用量去向", c["fg"])
+            y = p.text(self.breakdown_title, left, y + gap, right - left, text(p.lang, "breakdown.title"), c["fg"])
             for pair, r in zip(self.breakdown.fit(len(rows)), rows):
                 y = pair.render(r.label, f"{r.percent}%", c, left, right, y + p.px("line_gap"))
         else:
@@ -233,19 +238,19 @@ class _Extras(_Group):
             self.breakdown.fit(0)
         e = card.extra_usage
         if e:
-            y = p.row(self.extra, left, right, y + gap, "額外用量", f"{money(e.used)} / {money(e.limit)}", "body",
-                      c["fg"], e.percent, c["neutral"], None, c)
+            y = p.row(self.extra, left, right, y + gap, text(p.lang, "extra_usage"),
+                      f"{money(e.used)} / {money(e.limit)}", "body", c["fg"], e.percent, c["neutral"], None, c)
         else:
             self.extra.hide()
         s = card.spend
         if s:
-            y = p.row(self.spend, left, right, y + gap, "花費", f"{money(s.used)} / {money(s.limit)}", "body",
-                      c["fg"], s.percent, c[s.severity.value], None, c)
+            y = p.row(self.spend, left, right, y + gap, text(p.lang, "spend"), f"{money(s.used)} / {money(s.limit)}",
+                      "body", c["fg"], s.percent, c[s.severity.value], None, c)
         else:
             self.spend.hide()
         others = card.other_limits
         if others:
-            title = f"{'▾' if others_open else '▸'} 其他限額（{len(others)}）"
+            title = text(p.lang, "others.title", arrow="▾" if others_open else "▸", count=len(others))
             y = p.text(self.others_title, left, y + gap, right - left, title, c["sub"])
         else:
             p.hide(self.others_title)
@@ -279,13 +284,13 @@ class _CardView(_Group):
         top = y
         y = self._header(card, c, left, right, y + p.px("card_pad_top"))
         limits = {lim.kind: lim for lim in card.limits} if card.reading_state is ReadingState.HAS_READING else {}
-        for row, (kind, name) in zip(self.windows, _WINDOWS):
+        for row, (kind, name_key) in zip(self.windows, _WINDOWS):
             lim = limits.get(kind)
             if lim is None:
                 row.hide()
                 continue
-            y = _limit_row(p, row, name, lim, board, c, left, right, y + p.px("section_gap"), dollars=expanded)
-        shown = notes(card, board)
+            y = _limit_row(p, row, text(p.lang, name_key), lim, board, c, left, right, y + p.px("section_gap"), dollars=expanded)
+        shown = notes(card, board, p.lang)
         for i, slot in enumerate(self.notes):
             if i >= len(shown):
                 slot.hide()
@@ -309,12 +314,12 @@ class _CardView(_Group):
 
     def _header(self, card: Card, c, left, right, y):
         p, f = self.p, self.p.fonts
-        label = account_label(card.account_key) if card.account_key else "未納管帳號"
+        label = account_label(card.account_key) if card.account_key else text(p.lang, "account.unmanaged")
         height = f["title"].metrics("linespace")
         mid = y + height / 2
         p.show(self.title, left, mid, text=label, fill=c["fg"])
         standby = card.role is Role.STANDBY
-        chip = "待命" if standby else "使用中"
+        chip = text(p.lang, "role.standby" if standby else "role.active")
         chip_x = left + f["title"].measure(label) + p.px("chip_gap")
         chip_w = f["chip"].measure(chip) + 2 * p.px("chip_pad_x")
         chip_h = p.px("chip_height")
@@ -323,7 +328,8 @@ class _CardView(_Group):
         p.show(self.chip_text, chip_x + chip_w / 2, mid, text=chip,
                fill=c["chip_standby_fg" if standby else "chip_active_fg"])
         if card.reading_state is ReadingState.HAS_READING and card.reading_age is not None:
-            p.show(self.age, right, mid, text=("觀測 " if standby else "讀數 ") + age(card.reading_age), fill=c["sub"])
+            p.show(self.age, right, mid, text=text(p.lang, "age.observed" if standby else "age.reading",
+                                                   age=age(card.reading_age, p.lang)), fill=c["sub"])
         else:
             p.hide(self.age)
         return y + max(height, chip_h)
@@ -349,9 +355,11 @@ class LayoutA:
         self._p.fonts.clear()  # tkfont.Font 被回收時會刪掉對應的具名字型
         self._last = None
 
-    def render(self, board: Board, theme: str, expanded: bool = False):
-        self._last = (board, theme, expanded)
+    def render(self, board: Board, theme: str, expanded: bool = False, lang: str = ZH_TW):
+        """lang 的預設值只給不在意語系的呼叫端（測試）；視窗每輪都明確傳入。"""
+        self._last = (board, theme, expanded, lang)
         p, c = self._p, THEMES[theme]
+        p.lang = lang
         pad, width = p.px("panel_pad"), p.px("card_width")
         y = self._banner_box(board, c, pad, pad, width)
         cards = board.cards if expanded else board.cards[:1]  # 核心保證第一張是使用中帳號（或未納管帳號）
@@ -368,7 +376,7 @@ class LayoutA:
             self.render(*self._last)
 
     def _banner_box(self, board: Board, c, x, y, width):
-        lines = banner_lines(board, self._p.fonts.missing)
+        lines = banner_lines(board, self._p.lang, self._p.fonts.missing)
         if not lines:
             self._p.hide(self._banner_bg)
             self._banner.hide()
@@ -381,20 +389,20 @@ class LayoutA:
 
 def _limit_row(p: _Paint, row: _Row, name: str, lim: Limit, board: Board, c, left, right, y, dollars: bool):
     if lim.reset:
-        value, font, color = "已重置，下次重置時間未知", "body", c["sub"]
+        value, font, color = text(p.lang, "limit.reset"), "body", c["sub"]
     elif lim.percent is None:
-        value, font, color = "無計時中窗口", "body", c["sub"]
+        value, font, color = text(p.lang, "limit.no_open_window"), "body", c["sub"]
     else:
         value, font, color = f"{lim.percent}%", "percent", c[lim.severity.value]
-    foot = _reset_text(lim, board)
+    foot = _reset_text(lim, board, p.lang)
     if dollars and lim.dollars and lim.dollars.used is not None:
-        foot = " · ".join(filter(None, (foot, f"已用 ${lim.dollars.used:g}")))
+        foot = " · ".join(filter(None, (foot, text(p.lang, "limit.dollars_used", used=f"{lim.dollars.used:g}"))))
     return p.row(row, left, right, y, name, value, font, color, lim.percent, color, foot, c)
 
 
-def _reset_text(lim: Limit, board: Board) -> Optional[str]:
+def _reset_text(lim: Limit, board: Board, lang: str) -> Optional[str]:
     if lim.reset:
         return None  # 已經寫在數值那一格
     if lim.resets_at is not None:
-        return "重置：" + until(lim.resets_at, board.as_of, board.countdown_format)
-    return None if lim.percent is None else "重置：未知"
+        return text(lang, "limit.resets", when=until(lim.resets_at, board.as_of, board.countdown_format, lang))
+    return None if lim.percent is None else text(lang, "limit.resets", when=text(lang, "common.unknown"))

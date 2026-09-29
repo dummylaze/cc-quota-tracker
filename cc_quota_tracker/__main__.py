@@ -1,73 +1,78 @@
-"""命令列：納管帳號的操作都交給核心，這裡只負責參數與文案。"""
+"""命令列：納管帳號的操作都交給核心，這裡只負責參數與文案；文案的語系與視窗一樣取自設定檔的 language。"""
 import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Optional
 
-from . import COMMAND, claude_provider
+from . import COMMAND, claude_provider, i18n
 from .claude_provider import FieldStatus, NoReading, SchemaCheck
 from .core import Core, InvalidLabel, NoCredential, UnknownLabel
-from .render_text import ADD_WARNINGS, INVALID_LABEL, NO_CREDENTIAL, SETTINGS_UNREADABLE, render
+from .i18n import text
+from .render_text import add_warning, render
 from .settings import (CLAUDE_CONFIG_DIR, CLAUDE_DIR_FIELD, MANAGED_DIR_FIELD, InvalidPathSetting, PathProblem,
-                       PathSource, ResolvedPaths, resolve_paths)
-
-USAGE = f"""用法：
-  {COMMAND} add <帳號標籤>     納管 Claude Code 目前登入的帳號；標籤已存在就重新納管
-  {COMMAND} remove <帳號標籤>  移除納管帳號
-  {COMMAND} list               列出看板
-  {COMMAND} check              檢查 Claude Code 的額度快取結構是否仍與本工具相容，並列出實際使用的目錄
-  {COMMAND} gui                開啟懸浮視窗；改用 pythonw 執行就不會出現主控台視窗"""
+                       PathSource, ResolvedPaths, read_preferences, read_settings, resolve_paths)
 
 _PATH_PROBLEMS = {
-    PathProblem.NOT_ABSOLUTE: "設定檔的 {field} 必須是完整的絕對路徑；不指定請寫 null。",
-    PathProblem.NOT_A_DIRECTORY: "設定檔的 {field} 指向的目錄不存在。本工具不會改用預設位置，以免讀到另一組帳號。",
-    PathProblem.INSIDE_CLAUDE_DIR: "納管目錄不能放在 Claude Code 的目錄裡面（本工具不寫入 Claude Code 的目錄）；"
-                                   "請在設定檔的 {field} 指定別的位置。",
+    PathProblem.NOT_ABSOLUTE: "path.not_absolute",
+    PathProblem.NOT_A_DIRECTORY: "path.not_a_directory",
+    PathProblem.INSIDE_CLAUDE_DIR: "path.inside_claude_dir",
 }
+
+
+def configured_language(settings_file: Optional[Path]) -> str:
+    """命令列用的語系：設定檔的 language，跟隨系統時取作業系統的語系。設定檔讀不到或讀不懂就當成跟隨系統。
+    視窗的語系取自每輪 poll 的看板（含 GUI 尚未寫進設定檔的改動），解析規則同樣是 i18n.resolve。"""
+    fields = read_settings(settings_file) if settings_file else None
+    preferences, _ = read_preferences(fields or {})
+    return i18n.resolve(preferences.language, i18n.system_tag())
 
 
 def main(argv=None) -> int:
     args = sys.argv[1:] if argv is None else argv
     command, params = (args[0], args[1:]) if args else (None, [])
     if (command, len(params)) not in {("add", 1), ("remove", 1), ("list", 0), ("check", 0), ("gui", 0)}:
-        print(USAGE, file=sys.stderr)
+        print(text(configured_language(None), "cli.usage", command=COMMAND), file=sys.stderr)  # 還沒解析路徑，讀不到設定檔
         return 2
     try:
         paths = resolve_paths(Path.home(), os.environ)
     except InvalidPathSetting as e:
-        message = _PATH_PROBLEMS[e.problem].format(field=e.field) + f"\n設定檔位置：{e.settings_file}"
+        lang = configured_language(e.settings_file)
+        message = (text(lang, _PATH_PROBLEMS[e.problem], field=e.field) + "\n"
+                   + text(lang, "cli.settings_file_location", path=e.settings_file))
         if command == "gui":  # pythonw 沒有主控台，印出來使用者看不到
             _show_error(message)
         print(message, file=sys.stderr)
         return 1
+    lang = configured_language(paths.settings_file)
     if command == "check":
-        return check(paths)
+        return check(paths, lang)
     if command == "gui":
         return gui(paths)
     core = Core(paths, lambda: datetime.now(timezone.utc))
     if command == "list":
-        print(render(core.poll()))
+        print(render(core.poll(), lang))
         return 0
     label = params[0]
     if paths.settings_unreadable:  # list 由看板帶出這個提示
-        print(SETTINGS_UNREADABLE, file=sys.stderr)
+        print(text(lang, "notice", text=text(lang, "settings.unreadable")), file=sys.stderr)
     try:
         if command == "add":
             result = core.add(label)
-            print(f"已納管「{label}」")
+            print(text(lang, "account.added", label=label))
             for warning in sorted(result.warnings, key=lambda w: w.value):
-                print(ADD_WARNINGS[warning], file=sys.stderr)
+                print(add_warning(lang, warning, "cli"), file=sys.stderr)
         else:
             core.remove(label)
-            print(f"已移除「{label}」")
+            print(text(lang, "account.removed", label=label))
     except InvalidLabel:
-        print(INVALID_LABEL.format(label=label), file=sys.stderr)
+        print(text(lang, "error.invalid_label", label=label), file=sys.stderr)
         return 2
     except NoCredential:
-        print(NO_CREDENTIAL, file=sys.stderr)
+        print(text(lang, "error.no_credential"), file=sys.stderr)
         return 1
     except UnknownLabel:
-        print(f"沒有帳號標籤為「{label}」的納管帳號。", file=sys.stderr)
+        print(text(lang, "error.unknown_label", label=label), file=sys.stderr)
         return 1
     return 0
 
@@ -96,71 +101,75 @@ def _show_error(message: str):
     root.destroy()
 
 
-_TYPE_NAMES = {"object": "物件", "list": "清單", "string": "字串", "number": "數字", "boolean": "布林", "null": "null"}
+_TYPE_NAMES = {"object": "type.object", "list": "type.list", "string": "type.string", "number": "type.number",
+               "boolean": "type.boolean", "null": "type.null"}
 _STATUS = {
-    FieldStatus.OK: "通過",
-    FieldStatus.MISSING: "缺少",
-    FieldStatus.WRONG_TYPE: "型別不符",
-    FieldStatus.ABSENT: "可選，未出現",
-    FieldStatus.NO_ITEMS: "清單是空的，無從檢查",
-    FieldStatus.UNREACHABLE: "上層不符，無從檢查",
-    FieldStatus.PARENT_ABSENT: "上層未出現，免檢查",
+    FieldStatus.OK: "status.ok",
+    FieldStatus.MISSING: "status.missing",
+    FieldStatus.WRONG_TYPE: "status.wrong_type",
+    FieldStatus.ABSENT: "status.absent",
+    FieldStatus.NO_ITEMS: "status.no_items",
+    FieldStatus.UNREACHABLE: "status.unreachable",
+    FieldStatus.PARENT_ABSENT: "status.parent_absent",
 }
 
 
-def check(paths: ResolvedPaths) -> int:
+def check(paths: ResolvedPaths, lang: str) -> int:
     """架設者檢查指令：只讀額度快取所在的檔案，只印型別與欄位名稱，不印任何值。"""
-    print(f"Claude Code 目錄：{paths.claude_dir}（{_source(paths.claude_source, CLAUDE_DIR_FIELD)}）")
-    print(f"額度快取：{paths.claude_json}")
-    print(f"納管目錄：{paths.managed_dir}（{_source(paths.managed_source, MANAGED_DIR_FIELD)}）")
-    print(f"設定檔：{paths.settings_file}")
+    print(text(lang, "check.claude_dir", path=paths.claude_dir, source=_source(paths.claude_source, CLAUDE_DIR_FIELD, lang)))
+    print(text(lang, "check.usage_cache", path=paths.claude_json))
+    print(text(lang, "check.managed_dir", path=paths.managed_dir, source=_source(paths.managed_source, MANAGED_DIR_FIELD, lang)))
+    print(text(lang, "check.settings_file", path=paths.settings_file))
     if paths.settings_unreadable:
-        print(SETTINGS_UNREADABLE)
+        print(text(lang, "notice", text=text(lang, "settings.unreadable")))
     print()
     try:
-        text = paths.claude_json.read_text(encoding="utf-8")
+        cache = paths.claude_json.read_text(encoding="utf-8")
     except FileNotFoundError:
-        print(f"找不到 {paths.claude_json}，無法檢查。請確認 Claude Code 目錄的位置，並至少用 Claude Code 登入過一次。",
-              file=sys.stderr)
+        print(text(lang, "check.not_found", path=paths.claude_json), file=sys.stderr)
         return 1
     except OSError as e:
-        print(f"讀不到 {paths.claude_json}：{e.strerror}", file=sys.stderr)
+        print(text(lang, "check.unreadable", path=paths.claude_json, reason=e.strerror), file=sys.stderr)
         return 1
-    result = claude_provider.check_schema(text)
+    result = claude_provider.check_schema(cache)
     if isinstance(result, NoReading):
-        print("尚無讀數：額度快取還不存在，無法檢查。請先在 Claude Code 使用一次，等它寫入額度快取後再執行。",
-              file=sys.stderr)
+        print(text(lang, "check.no_reading"), file=sys.stderr)
         return 1
     if not isinstance(result, SchemaCheck):
-        print("檔案正在被 Claude Code 寫入，內容不完整。請稍後再執行一次。", file=sys.stderr)
+        print(text(lang, "check.incomplete"), file=sys.stderr)
         return 1
-    print("依賴的欄位：")
+    print(text(lang, "check.fields_header"))
     for f in result.fields:
-        expected = _TYPE_NAMES[f.expected] + ("" if f.required else "，可選")
-        status = _STATUS[f.status]
+        expected = text(lang, _TYPE_NAMES[f.expected])
+        if not f.required:
+            expected = text(lang, "check.optional", type=expected)
+        status = text(lang, _STATUS[f.status])
         if f.status is FieldStatus.WRONG_TYPE:
-            status += f"：實際為{_TYPE_NAMES[f.actual]}"
-        print(f"  [{status}] {f.path}（{expected}）")
+            status = text(lang, "check.wrong_type", status=status, actual=text(lang, _TYPE_NAMES[f.actual]))
+        print(text(lang, "check.field_line", status=status, path=f.path, expected=expected))
     print()
-    print("新出現的欄位（utilization 底下，實測基準之後才出現的）：")
+    print(text(lang, "check.new_fields_header"))
     for name, limit_shaped in result.new_fields:
-        print(f"  {name}" + ("（額度形狀，看板會當成其他限額顯示）" if limit_shaped else ""))
+        print(f"  {name}" + (text(lang, "check.limit_shaped") if limit_shaped else ""))
     if not result.new_fields:
-        print("  無")
+        print("  " + text(lang, "check.no_new_fields"))
     if not result.parses:
         print()
-        print("解析層無法解析這份額度快取：上方清單以外的依賴欄位也有不符，看板會把它當成結構不符。")
+        print(text(lang, "check.unparseable"))
     print()
     if result.compatible:
-        print("結果：相容")
+        print(text(lang, "check.result_compatible"))
+    elif result.failures:
+        print(text(lang, "check.result_failures", count=len(result.failures)))
     else:
-        print(f"結果：不相容，{len(result.failures)} 個欄位不符" if result.failures else "結果：不相容，解析層無法解析")
+        print(text(lang, "check.result_unparseable"))
     return 0 if result.compatible else 1
 
 
-def _source(source: PathSource, field: str) -> str:
-    return {PathSource.SETTINGS_FILE: f"設定檔的 {field}", PathSource.ENV: f"環境變數 {CLAUDE_CONFIG_DIR}",
-            PathSource.DEFAULT: "預設值"}[source]
+def _source(source: PathSource, field: str, lang: str) -> str:
+    return {PathSource.SETTINGS_FILE: text(lang, "check.source.settings_file", field=field),
+            PathSource.ENV: text(lang, "check.source.env", name=CLAUDE_CONFIG_DIR),
+            PathSource.DEFAULT: text(lang, "check.source.default")}[source]
 
 
 if __name__ == "__main__":

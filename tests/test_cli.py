@@ -1,19 +1,22 @@
 import io
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
+from datetime import datetime, timedelta, timezone
 
 from cc_quota_tracker import COMMAND
 from cc_quota_tracker.__main__ import main
-from tests.fakehome import HomeTestCase
+from tests.fakehome import HomeTestCase, claude_json, usage_cache
 
 
-class CliTest(HomeTestCase):
-    def run_cli(self, *args):
+class CliTestCase(HomeTestCase):
+    def run_cli(self, *args, system_language="zh-TW"):
         out, err = io.StringIO(), io.StringIO()
-        with self.cli_environment(), redirect_stdout(out), redirect_stderr(err):
+        with self.cli_environment(system_language), redirect_stdout(out), redirect_stderr(err):
             code = main(list(args))
         return code, out.getvalue(), err.getvalue()
 
+
+class CliTest(CliTestCase):
     def test_single_entry_point_is_python_dash_m(self):
         self.assertEqual(COMMAND, "python -m cc_quota_tracker")
 
@@ -80,7 +83,7 @@ class CliTest(HomeTestCase):
             with self.subTest(command=command):
                 code, out, err = self.run_cli(*command)
                 self.assertEqual(code, 0)
-                self.assertIn("設定檔無法讀取", out + err)
+                self.assertIn("注意：設定檔無法讀取", out + err)
 
     def test_list_shows_path_hints(self):
         self.assertIn("可能讀錯位置", self.run_cli("list")[1])  # 預設位置沒有 .claude.json
@@ -93,6 +96,72 @@ class CliTest(HomeTestCase):
                 code, _, err = self.run_cli(*args)
                 self.assertEqual(code, 2)
                 self.assertIn(f"{COMMAND} add <帳號標籤>", err)
+
+
+class CliLanguageTest(CliTestCase):
+    """命令列的文案語系與視窗一致：設定檔的 language，跟隨系統時取作業系統的語系，不支援時英文。"""
+
+    def test_follows_the_system_by_default(self):
+        self.assertIn("尚未納管任何帳號", self.run_cli("list", system_language="zh-TW")[1])
+        self.assertIn("No accounts managed yet", self.run_cli("list", system_language="en-US")[1])
+
+    def test_unsupported_system_language_falls_back_to_english(self):
+        for tag in ("ja-JP", "zh-CN", None):
+            self.assertIn("No accounts managed yet", self.run_cli("list", system_language=tag)[1], tag)
+
+    def test_a_chosen_language_ignores_the_system(self):
+        self.write_settings(language="en")
+        self.assertIn("No accounts managed yet", self.run_cli("list", system_language="zh-TW")[1])
+        self.write_settings(language="zh-TW")
+        self.assertIn("尚未納管任何帳號", self.run_cli("list", system_language="en-US")[1])
+
+    def test_list_reads_in_english_without_leftover_chinese(self):
+        later = datetime.now(timezone.utc) + timedelta(days=3, hours=1)
+        self.write_claude_json(claude_json(usage_cache(session=12, weekly=75, resets_at=later)))
+        self.write_settings(language="en")
+        out = self.run_cli("list")[1]
+        self.assertIn("Session window  12%  Resets: in 3d 0h", out)
+        self.assertIn("Weekly window  75%", out)
+        self.assertIn("[Active] Unmanaged account", out)
+        self.assertNotRegex(out, r"[⺀-鿿]")
+
+    def test_add_and_remove_report_in_english(self):
+        self.write_settings(language="en")
+        self.log_in()
+        code, out, err = self.run_cli("add", "someone@example.com")
+        self.assertEqual(code, 0)
+        self.assertIn("Managed \"someone@example.com\"", out)
+        self.assertIn("looks like an email address", err)
+        self.assertIn("Managed accounts: someone@example.com", self.run_cli("list")[1])
+        self.assertIn("Removed \"someone@example.com\"", self.run_cli("remove", "someone@example.com")[1])
+
+    def test_errors_are_in_english(self):
+        self.write_settings(language="en")
+        self.assertIn("Couldn't read the current sign-in credential", self.run_cli("add", "work")[2])
+        self.log_in()
+        self.assertIn("can't be used as a file name", self.run_cli("add", "../work")[2])
+        self.assertIn("There is no managed account with the label \"work\"", self.run_cli("remove", "work")[2])
+
+    def test_usage_and_path_problems_are_in_english(self):
+        self.assertIn(f"{COMMAND} add <label>", self.run_cli(system_language="en-US")[2])
+        self.write_settings(language="en", claudeConfigDir="relative")
+        err = self.run_cli("list")[2]
+        self.assertIn("must be a full absolute path", err)
+        self.assertIn("Settings file:", err)
+
+    def test_unreadable_settings_file_follows_the_system_language(self):
+        self.write_settings_text("{")
+        out = self.run_cli("list", system_language="en-US")[1]
+        self.assertIn("The settings file can't be read", out)
+
+    def test_check_reads_in_english(self):
+        self.write_settings(language="en")
+        self.write_claude_json(claude_json(usage_cache()))
+        code, out, err = self.run_cli("check")
+        self.assertEqual(code, 0)
+        self.assertIn("Fields depended on:", out)
+        self.assertIn("Result: compatible", out)
+        self.assertNotRegex(out + err, r"[⺀-鿿]")
 
 
 if __name__ == "__main__":

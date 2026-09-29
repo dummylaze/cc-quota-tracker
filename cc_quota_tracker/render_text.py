@@ -1,4 +1,4 @@
-"""把看板渲染成終端機文字；所有文案都在這一層套用。"""
+"""把看板渲染成終端機文字；所有文案都在這一層套用，語系由呼叫端指定（i18n）。"""
 from datetime import datetime
 from typing import Optional
 
@@ -6,119 +6,110 @@ from . import COMMAND
 from .board import Board, Card, Limit, ReadingState, Role
 from .core import AddWarning
 from .fmt import absolute, account_label, age, countdown, money, until
+from .i18n import ZH_TW, text
 
-_WINDOW_NAMES = {"session": "工作階段窗口", "weekly_all": "週窗口", "weekly_scoped": "週限額"}
-_UPDATES_SOON = "Claude Code 更新額度快取後就會出現"
-INVALID_SETTINGS = "設定檔的 {fields} 值不合法，這幾項改用預設值；請參考 README 的欄位說明修正。"
-SETTINGS_UNREADABLE = "注意：設定檔無法讀取（不是合法的 JSON），裡面的設定都當成沒填；本工具不會覆寫它，請修正後再試。"
-
-# 納管帳號的結果：命令列與視窗共用
-ADD_WARNINGS = {
-    AddWarning.LABEL_LOOKS_LIKE_EMAIL: "注意：這個帳號標籤看起來像 email，它會顯示在畫面上。"
-                                       "不想顯示的話，可以用別的標籤重新納管，或直接改憑證快照的檔名。",
-    AddWarning.PERMISSIONS_FIXED: "警告：納管目錄或其中檔案的權限不符預期（其他人可存取，或沿用上層目錄的設定），"
-                                  "已修正為只有目前使用者能存取。",
-    AddWarning.NOT_BOUND: "警告：讀不到 Claude Code 目前登入帳號的識別碼，這份憑證快照暫時沒有綁定帳號；"
-                          "該帳號成為使用中帳號之前只會顯示「讀數待更新」。可以稍後再執行一次 add。",
-}
-ADD_NOT_BOUND = ("讀不到 Claude Code 目前登入帳號的識別碼，這份憑證快照暫時沒有綁定帳號；"
-                 "該帳號成為使用中帳號之前只會顯示「讀數待更新」。可以稍後再從右鍵選單「納管目前登入的帳號…」做一次。")
-# 匯入的憑證檔本來就不帶帳號識別碼，沒有綁定是常態，不是讀取失敗
-IMPORT_NOT_BOUND = "這份憑證快照還沒有綁定帳號：在 Claude Code 登入這個帳號、成為使用中帳號之後，本工具會自動補上；在那之前只會顯示「讀數待更新」。"
-FONT_MISSING = "設定檔的 font 指定的字型「{font}」在這台電腦上找不到，改用系統預設字型。"
-INVALID_LABEL = ("帳號標籤「{label}」不能當檔名：不可空白、不可以點開頭或結尾，"
-                 "也不能含 < > : \" / \\ | ? * 或裝置名稱（如 CON、NUL）")
-NO_CREDENTIAL = "讀不到目前登入的憑證。請先在 Claude Code 登入要納管的帳號，再執行一次。"
-NOT_A_CREDENTIAL_FILE = "這個檔案不是 Claude Code 的憑證檔（讀不出 claudeAiOauth 的 refreshToken），沒有匯入。"
+_WINDOW_NAMES = {"session": "window.session", "weekly_all": "window.weekly_all", "weekly_scoped": "window.weekly_scoped"}
+_ROLES = {Role.ACTIVE: "role.active", Role.STANDBY: "role.standby"}
+_ADD_WARNINGS = {AddWarning.LABEL_LOOKS_LIKE_EMAIL: "add_warning.label_looks_like_email",
+                 AddWarning.PERMISSIONS_FIXED: "add_warning.permissions_fixed"}
+# 讀不到帳號識別碼的說明依入口不同：命令列、右鍵選單的納管、匯入憑證檔
+_NOT_BOUND = {"cli": "add_warning.not_bound.cli", "menu": "add_warning.not_bound.menu",
+              "import": "add_warning.not_bound.import"}
 
 
-def render(board: Board) -> str:
-    lines = [_render_card(c, board) for c in board.cards]
+def add_warning(lang: str, warning: AddWarning, via: str) -> str:
+    """納管帳號的提醒：命令列與視窗共用。via 是入口（cli、menu、import），只有 NOT_BOUND 的說明依入口而異。"""
+    return text(lang, _NOT_BOUND[via]) if warning is AddWarning.NOT_BOUND else text(lang, _ADD_WARNINGS[warning])
+
+
+def render(board: Board, lang: str = ZH_TW) -> str:
+    """lang 的預設值只給不在意語系的呼叫端（測試）；命令列一律明確傳入。"""
+    lines = [_render_card(c, board, lang) for c in board.cards]
     if board.schema_changed:
-        shown = (f"以下是最後一次成功的讀數（{_time(board.last_reading_at)}）" if board.last_reading_at
-                 else "目前沒有成功的讀數")
-        lines.insert(0, f"注意：額度快取結構已變更，本工具讀不懂新的結構；{shown}")
+        key = "list.schema_changed" if board.last_reading_at else "list.schema_changed_none"
+        lines.insert(0, text(lang, "notice", text=text(lang, key, time=_time(board.last_reading_at, lang))))
     if board.wrong_location_suspected:
-        lines.insert(0, "注意：預設位置找不到 Claude Code 的額度快取，可能讀錯位置。"
-                        "Claude Code 目錄若不在 home（例如設了 CLAUDE_CONFIG_DIR），請在設定檔的 claudeConfigDir 指定。")
+        lines.insert(0, text(lang, "notice", text=text(lang, "board.wrong_location")))
     if board.invalid_settings:
-        lines.insert(0, "注意：" + INVALID_SETTINGS.format(fields="、".join(board.invalid_settings)))
+        fields = text(lang, "sep.item").join(board.invalid_settings)
+        lines.insert(0, text(lang, "notice", text=text(lang, "settings.invalid", fields=fields)))
     if board.settings_unreadable:
-        lines.insert(0, SETTINGS_UNREADABLE)
+        lines.insert(0, text(lang, "notice", text=text(lang, "settings.unreadable")))
     labels = [account_label(key) for key in board.managed_accounts]
-    lines.append("納管帳號：" + "、".join(labels) if labels else "尚未納管任何帳號")
+    lines.append(text(lang, "list.managed", labels=text(lang, "sep.item").join(labels)) if labels
+                 else text(lang, "list.none_managed"))
     return "\n".join(lines)
 
 
-def _render_card(card: Card, board: Board) -> str:
-    body = _body(card, board)
+def _render_card(card: Card, board: Board, lang: str) -> str:
+    body = _body(card, board, lang)
     expires = card.snapshot_expires_at
     label = account_label(card.account_key) if card.account_key else None
     if expires is not None:
+        when = absolute(expires, board.as_of)
         if expires <= board.as_of:
-            when = f"憑證快照已過期（{absolute(expires, board.as_of)}）"
+            when = text(lang, "snapshot.expired", when=when)
         else:
-            left = countdown(expires - board.as_of, board.countdown_format)
-            when = f"憑證快照 {left}後到期（{absolute(expires, board.as_of)}）"
+            left = countdown(expires - board.as_of, board.countdown_format, lang)
+            when = text(lang, "snapshot.expires_in", left=left, when=when)
         if card.snapshot_expiring:
-            body.insert(0, f"{when}：在 Claude Code 重新登入這個帳號，再執行 {COMMAND} add {label}")
+            body.insert(0, text(lang, "snapshot.relogin", when=when, command=COMMAND, label=label))
         else:
             body.append(when)
     if card.snapshot_invalid:
-        body.insert(0, f"憑證快照已失效，請重新納管：Claude Code 目前登入的就是這個帳號，執行 {COMMAND} add {label}")
-    return "\n".join([_header(card)] + ["  " + line for line in body])
+        body.insert(0, text(lang, "list.snapshot_invalid", command=COMMAND, label=label))
+    return "\n".join([_header(card, lang)] + ["  " + line for line in body])
 
 
-def _header(card: Card) -> str:
+def _header(card: Card, lang: str) -> str:
     if card.role is Role.UNMANAGED:
-        return f"[使用中] 未納管帳號（納管方法：在 Claude Code 登入這個帳號後執行 {COMMAND} add <帳號標籤>）"
-    label = account_label(card.account_key)
-    return f"[{'使用中' if card.role is Role.ACTIVE else '待命'}] {label}"
+        return text(lang, "list.header_unmanaged", command=COMMAND)
+    return text(lang, "list.header", role=text(lang, _ROLES[card.role]), label=account_label(card.account_key))
 
 
-def _body(card: Card, board: Board) -> list:
+def _body(card: Card, board: Board, lang: str) -> list:
     if card.reading_state is ReadingState.NO_READING:
-        return ["尚無讀數" if card.role is Role.STANDBY else "尚無讀數，" + _UPDATES_SOON]
+        return [text(lang, "reading.none" if card.role is Role.STANDBY else "reading.none_soon")]
     if card.reading_state is ReadingState.PENDING:
-        return ["讀數待更新，" + _UPDATES_SOON]
+        return [text(lang, "reading.pending")]
     if card.role is Role.STANDBY:
-        lines = [f"最後觀測：{age(card.reading_age)}（觀測值：觀測之後這個帳號沒再被用過才準確）"]
+        lines = [text(lang, "list.observed", age=age(card.reading_age, lang))]
     else:
-        lines = ["讀數年齡：" + age(card.reading_age)]
+        lines = [text(lang, "list.reading_age", age=age(card.reading_age, lang))]
         if card.lagging:
-            lines.append("有新對話，額度尚未更新")
+            lines.append(text(lang, "reading.lagging"))
     if card.locked_reason:
-        lines.append("額度已鎖定：" + card.locked_reason)
-    lines += [_limit_line(lim, board) for lim in card.limits + card.scoped_limits]
+        lines.append(text(lang, "reading.locked", reason=card.locked_reason))
+    lines += [_limit_line(lim, board, lang) for lim in card.limits + card.scoped_limits]
     if card.other_limits:
-        lines.append("其他限額：")
-        lines += ["  " + _limit_line(lim, board) for lim in card.other_limits]
+        lines.append(text(lang, "list.other_limits"))
+        lines += ["  " + _limit_line(lim, board, lang) for lim in card.other_limits]
     if card.weekly_breakdown:
         b = card.weekly_breakdown
-        lines.append(f"本週用量去向（{_time(b.started_at)} ～ {_time(b.ends_at)}）：")
+        lines.append(text(lang, "list.breakdown", start=_time(b.started_at, lang), end=_time(b.ends_at, lang)))
         lines += [f"  {row.label}  {row.percent}%" for row in b.rows]
     if card.extra_usage:
         e = card.extra_usage
-        lines.append(f"額外用量  {money(e.used)} / {money(e.limit)}")
+        lines.append("  ".join((text(lang, "extra_usage"), f"{money(e.used)} / {money(e.limit)}")))
     if card.spend:
         s = card.spend
-        lines.append(f"花費  {money(s.used)} / {money(s.limit)}")
+        lines.append("  ".join((text(lang, "spend"), f"{money(s.used)} / {money(s.limit)}")))
     return lines
 
 
-def _limit_line(lim: Limit, board: Board) -> str:
-    name = _WINDOW_NAMES.get(lim.kind, lim.kind)
+def _limit_line(lim: Limit, board: Board, lang: str) -> str:
+    name = text(lang, _WINDOW_NAMES[lim.kind]) if lim.kind in _WINDOW_NAMES else lim.kind  # 不認得的種類用供應商的原始名稱
     if lim.scope:
-        name = f"{name}（{lim.scope}）"
+        name = text(lang, "limit.scoped", name=name, scope=lim.scope)
     if lim.reset:
-        return f"{name}  已重置，下次重置時間未知"
-    value = "無計時中窗口" if lim.percent is None else f"{lim.percent}%"
-    line = f"{name}  {value}  重置：{until(lim.resets_at, board.as_of, board.countdown_format) if lim.resets_at else '未知'}"
+        return "  ".join((name, text(lang, "limit.reset")))
+    value = text(lang, "limit.no_open_window") if lim.percent is None else f"{lim.percent}%"
+    when = until(lim.resets_at, board.as_of, board.countdown_format, lang) if lim.resets_at else text(lang, "common.unknown")
+    line = "  ".join((name, value, text(lang, "limit.resets", when=when)))
     if lim.dollars and lim.dollars.used is not None:
-        line += f"  已用 ${lim.dollars.used:g}"
+        line += "  " + text(lang, "limit.dollars_used", used=f"{lim.dollars.used:g}")
     return line
 
 
-def _time(value: Optional[datetime]) -> str:
-    return value.astimezone().strftime("%Y-%m-%d %H:%M") if value else "未知"
-
+def _time(value: Optional[datetime], lang: str) -> str:
+    return value.astimezone().strftime("%Y-%m-%d %H:%M") if value else text(lang, "common.unknown")

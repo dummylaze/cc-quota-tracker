@@ -89,10 +89,12 @@ class HomeTestCase(unittest.TestCase):
         self.core = Core(self.paths, self.clock)
 
     @contextlib.contextmanager
-    def cli_environment(self):
-        """命令列入口讀真實的 home 與環境變數：兩者都換成這個假 home。"""
+    def cli_environment(self, system_language="zh-TW"):
+        """命令列入口讀真實的 home 與環境變數：兩者都換成這個假 home。作業系統的語系也由測試給定（預設正體中文），
+        設定檔的 language 是「跟隨系統」時測試才不會隨執行的機器改變。"""
         with mock.patch("pathlib.Path.home", return_value=self.home), \
-                mock.patch.dict(os.environ, self.env, clear=True):
+                mock.patch.dict(os.environ, self.env, clear=True), \
+                mock.patch("cc_quota_tracker.i18n.system_tag", return_value=system_language):
             yield
 
     def settings_file(self):

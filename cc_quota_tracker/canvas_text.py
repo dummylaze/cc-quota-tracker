@@ -1,81 +1,75 @@
 """視窗各版面共用的文案與折行：卡片的提示、看板的橫幅，以及依字型寬度折行。版面配置不在這裡，各版面自己排。
-文案先以正體中文暫置。"""
+文案取自語系檔，語系由版面渲染時傳入。"""
 import re
 from typing import Optional
 
 from . import COMMAND
 from .board import Board, Card, ReadingState, Role
 from .fmt import absolute, account_label, age, countdown
-from .render_text import FONT_MISSING, INVALID_SETTINGS
+from .i18n import text
 
 LINE_TAG = "wrapped-line"  # 多行文字的逐行 item；同一段的各行共用最後一個 tag。測試靠它把各行接回一段
-_UPDATES_SOON = "Claude Code 更新額度快取後就會出現"
-_HOW_TO_MANAGE = (f"這個帳號還沒納管：在 Claude Code 登入它之後執行 {COMMAND} add <帳號標籤>，"
-                  "或在視窗按右鍵選「納管目前登入的帳號…」")
-_OBSERVED = "觀測值：觀測之後這個帳號沒再被用過才準確；在別台機器上用過，這台看不到"
 
 
-def notes(card: Card, board: Board, expiry_info: bool = True):
+def notes(card: Card, board: Board, lang: str, expiry_info: bool = True):
     """(文字, 色點的顏色 token, 文字的顏色 token)，依顯示順序。
     expiry_info 為 False 時略過只是告知到期時間的那一條（版面另有欄位顯示）；要使用者動手的到期提示照樣列出。"""
     result = []
     standby = card.role is Role.STANDBY
     if card.role is Role.UNMANAGED:
-        result.append((_HOW_TO_MANAGE, "accent", "fg"))
+        result.append((text(lang, "note.how_to_manage", command=COMMAND), "accent", "fg"))
     if card.reading_state is ReadingState.PENDING:
-        result.append(("讀數待更新，" + _UPDATES_SOON, "sub", "sub"))
+        result.append((text(lang, "reading.pending"), "sub", "sub"))
     elif card.reading_state is ReadingState.NO_READING:
-        result.append(("尚無讀數" if standby else "尚無讀數，" + _UPDATES_SOON, "sub", "sub"))
+        result.append((text(lang, "reading.none" if standby else "reading.none_soon"), "sub", "sub"))
     elif standby:
-        result.append((_OBSERVED, "sub", "sub"))
+        result.append((text(lang, "note.observed"), "sub", "sub"))
     if card.lagging:
-        result.append(("有新對話，額度尚未更新", "warning", "fg"))
+        result.append((text(lang, "reading.lagging"), "warning", "fg"))
     if card.locked_reason:
-        result.append(("額度已鎖定：" + card.locked_reason, "critical", "critical"))
+        result.append((text(lang, "reading.locked", reason=card.locked_reason), "critical", "critical"))
     if expiry_info or card.snapshot_invalid or card.snapshot_expiring:
-        snapshot = _snapshot_note(card, board)
+        snapshot = _snapshot_note(card, board, lang)
         if snapshot:
             result.append(snapshot)
     return result
 
 
-def _snapshot_note(card: Card, board: Board):
+def _snapshot_note(card: Card, board: Board, lang: str):
     label = account_label(card.account_key) if card.account_key else None
     if card.snapshot_invalid:
-        return (f"憑證快照已失效：Claude Code 目前登入的就是這個帳號，執行 {COMMAND} add {label} 重新納管",
-                "critical", "critical")
+        return text(lang, "snapshot.invalid", command=COMMAND, label=label), "critical", "critical"
     expires = card.snapshot_expires_at
     if expires is None:
         return None
     when = absolute(expires, board.as_of)
     expired = expires <= board.as_of
-    text = (f"憑證快照已過期（{when}）" if expired
-            else f"憑證快照 {countdown(expires - board.as_of, board.countdown_format)}後到期（{when}）")
+    note = (text(lang, "snapshot.expired", when=when) if expired
+            else text(lang, "snapshot.expires_in", left=countdown(expires - board.as_of, board.countdown_format, lang),
+                      when=when))
     if not card.snapshot_expiring:
-        return text, "sub", "fg"
-    text += f"：在 Claude Code 重新登入這個帳號，再執行 {COMMAND} add {label}"
-    return (text, "critical", "critical") if expired else (text, "warning", "fg")
+        return note, "sub", "fg"
+    note = text(lang, "snapshot.relogin", when=note, command=COMMAND, label=label)
+    return (note, "critical", "critical") if expired else (note, "warning", "fg")
 
 
-def banner_lines(board: Board, missing_font: Optional[str] = None):
+def banner_lines(board: Board, lang: str, missing_font: Optional[str] = None):
     """missing_font：設定檔指定、但這台電腦上找不到的字型名稱；只有畫面層知道字型存不存在，所以由版面傳進來。"""
     lines = []
     if board.settings_unreadable:
-        lines.append("設定檔無法讀取（不是合法的 JSON），裡面的設定都當成沒填；本工具不會覆寫它，請修正後再試。")
+        lines.append(text(lang, "settings.unreadable"))
     if board.invalid_settings:
-        lines.append(INVALID_SETTINGS.format(fields="、".join(board.invalid_settings)))
+        lines.append(text(lang, "settings.invalid", fields=text(lang, "sep.item").join(board.invalid_settings)))
     if missing_font is not None:
-        lines.append(FONT_MISSING.format(font=missing_font))
+        lines.append(text(lang, "font.missing", font=missing_font))
     if board.restart_required:
-        lines.append("設定檔的路徑欄位改了；路徑只在啟動時讀取，重新啟動本工具後才生效。")
+        lines.append(text(lang, "banner.restart_required"))
     if board.wrong_location_suspected:
-        lines.append("預設位置找不到 Claude Code 的額度快取，可能讀錯位置。Claude Code 目錄若不在 home"
-                     "（例如設了 CLAUDE_CONFIG_DIR），請在設定檔的 claudeConfigDir 指定。")
+        lines.append(text(lang, "board.wrong_location"))
     if board.schema_changed:
         last = board.last_reading_at
-        shown = (f"下面是最後一次成功的讀數（{absolute(last, board.as_of)}，{age(board.as_of - last)}）" if last
-                 else "目前沒有成功的讀數")
-        lines.append("額度快取結構已變更，本工具讀不懂新的結構；" + shown)
+        lines.append(text(lang, "banner.schema_changed", when=absolute(last, board.as_of),
+                          age=age(board.as_of - last, lang)) if last else text(lang, "banner.schema_changed_none"))
     return lines
 
 

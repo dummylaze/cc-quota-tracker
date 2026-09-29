@@ -1,6 +1,6 @@
 """版面 C（環形儀表）。一個帳號一格：外圈是週窗口、內圈是工作階段窗口，中央顯示工作階段百分比，底下是帳號標籤、
 狀態標籤、讀數年齡與兩個窗口的文字說明。精簡模式只有使用中帳號那一格；展開模式每列三格，使用中帳號那一格加外框，
-提示接在該列的格子下方、冠上帳號標籤。外框離卡片邊 row_inset，圓角與卡片同心。不與其他版面共用版面程式碼；提示與橫幅的文案、折行取自 canvas_text。
+提示接在該列的格子下方、冠上帳號標籤。外框離卡片邊 row_inset，圓角與卡片同心。不與其他版面共用版面程式碼；提示與橫幅的文案、折行取自 canvas_text；其餘文案取自語系檔，語系由 render 傳入、存在 _Paint.lang，切換語系只是重畫。
 
 物件生命週期同版面 A、B：一格裡固定部分的 item 一次建好，之後每輪只改座標、文字、顏色與顯示狀態；數量跟著看板走的部分
 （格子、提示、多行文字的行）由 _Pool 補建或刪到剛好，所以 item 數只由看板與模式決定。第二格起只在展開模式存在，
@@ -13,13 +13,14 @@ from .board import Board, Card, Limit, ReadingState, Role
 from .canvas_text import LINE_TAG, banner_lines, notes, wrap
 from .fmt import account_label, age
 from .fonts import FontSet
+from .i18n import ZH_TW, text
 from .tokens import FONTS, LINE_HEIGHT, RADIUS, SPACE, THEMES
 
 TAG = "layout-c"
 EXPANDED_TAG = "layout-c-expanded"  # 第二格起：只在展開模式存在
 WEEK_TAG = "ring-week"  # 外圈填色的弧
 SESSION_TAG = "ring-session"  # 內圈填色的弧
-_WINDOWS = (("session", "工作階段"), ("weekly_all", "週"))  # 兩種模式都固定顯示這兩個窗口
+_WINDOWS = (("session", "window.session_short"), ("weekly_all", "window.weekly_all_short"))  # 兩種模式都固定顯示這兩個窗口；值是語系鍵
 _COLUMNS = 3  # 展開模式每列幾格
 _NONE = "—"
 _ids = itertools.count()
@@ -32,6 +33,7 @@ class _Paint:
         self.cv = canvas
         self.scale = canvas.winfo_fpixels("1i") / 96
         self.fonts = FontSet(canvas)
+        self.lang = ZH_TW  # 這一輪使用的語系；每次 render 一開始就換成呼叫端給的
 
     def px(self, key):
         return round(SPACE[key] * self.scale)
@@ -141,31 +143,31 @@ class _Value(NamedTuple):
     foot: Optional[str] = None
 
 
-def _window(lim: Optional[Limit]) -> _Value:
+def _window(lim: Optional[Limit], lang: str) -> _Value:
     if lim is None:
         return _Value(_NONE, "sub")
     if lim.reset:
-        return _Value("已重置", "sub", foot="下次重置時間未知")
+        return _Value(text(lang, "limit.reset_short"), "sub", foot=text(lang, "limit.next_reset_unknown"))
     if lim.percent is None:
-        return _Value("無計時中窗口", "sub")
+        return _Value(text(lang, "limit.no_open_window"), "sub")
     return _Value(f"{lim.percent}%", lim.severity.value, lim.percent)
 
 
-def _windows(card: Card):
+def _windows(card: Card, lang: str):
     """(工作階段窗口, 週窗口) 的呈現；還沒有讀數時兩個都是 None（圈是空的、不寫窗口說明）。"""
     limits = {lim.kind: lim for lim in card.limits} if card.reading_state is ReadingState.HAS_READING else {}
-    return [_window(limits.get(kind)) if limits else None for kind, _ in _WINDOWS]
+    return [_window(limits.get(kind), lang) if limits else None for kind, _ in _WINDOWS]
 
 
-def _label(card: Card):
-    return account_label(card.account_key) if card.account_key else "未納管帳號"
+def _label(card: Card, lang: str):
+    return account_label(card.account_key) if card.account_key else text(lang, "account.unmanaged")
 
 
-def _chip(card: Card):
+def _chip(card: Card, lang: str):
     """(狀態標籤文字, 底色 token, 文字顏色 token)。"""
     if card.role is Role.STANDBY:
-        return "待命", "chip_standby", "chip_standby_fg"
-    return "使用中", "accent", "chip_active_fg"
+        return text(lang, "role.standby"), "chip_standby", "chip_standby_fg"
+    return text(lang, "role.active"), "accent", "chip_active_fg"
 
 
 class _Ring(_Group):
@@ -221,11 +223,12 @@ class _Cell(_Group):
         pad, cx = p.px("ring_cell_pad"), x + width / 2
         inner_width = width - 2 * pad
         y += pad
-        session, week = _windows(card)
+        lang = p.lang
+        session, week = _windows(card, lang)
         size = p.px("ring_size")
         self.ring.render(cx, y + size / 2, session, week, c)
-        y = self.label.render(cx, y + size + p.px("section_gap"), inner_width, _label(card), c["fg"])
-        chip, chip_bg, chip_fg = _chip(card)
+        y = self.label.render(cx, y + size + p.px("section_gap"), inner_width, _label(card, lang), c["fg"])
+        chip, chip_bg, chip_fg = _chip(card, lang)
         chip_w, chip_h = p.fonts["chip"].measure(chip) + 2 * p.px("chip_pad_x"), p.px("chip_height")
         y += p.px("line_gap")
         p.rrect(self.chip, cx - chip_w / 2, y, cx + chip_w / 2, y + chip_h, RADIUS["chip"], c[chip_bg])
@@ -233,17 +236,17 @@ class _Cell(_Group):
         y += chip_h
         if card.reading_state is ReadingState.HAS_READING and card.reading_age is not None:
             y += p.px("line_gap")
-            prefix = "觀測 " if card.role is Role.STANDBY else "讀數 "
-            p.show(self.age, cx, y, text=prefix + age(card.reading_age), fill=c["sub"])
+            key = "age.observed" if card.role is Role.STANDBY else "age.reading"
+            p.show(self.age, cx, y, text=text(lang, key, age=age(card.reading_age, lang)), fill=c["sub"])
             y += p.height("small")
         else:
             p.hide(self.age)
-        for lines, (_, name), value in zip(self.legend, _WINDOWS, (session, week)):
+        for lines, (_, name_key), value in zip(self.legend, _WINDOWS, (session, week)):
             if value is None:
                 lines.hide()
                 continue
-            text = f"{name} " + "，".join(filter(None, (value.text, value.foot)))
-            y = lines.render(cx, y + p.px("line_gap"), inner_width, text, c[value.color])
+            legend = f"{text(lang, name_key)} " + text(lang, "sep.clause").join(filter(None, (value.text, value.foot)))
+            y = lines.render(cx, y + p.px("line_gap"), inner_width, legend, c[value.color])
         return y + pad
 
     def outline(self, card: Card, c, x, top, width, bottom, framed: bool):
@@ -257,9 +260,10 @@ class _Cell(_Group):
     def render_notes(self, card: Card, board: Board, c, left, right, y, named: bool):
         """這一格的提示，畫在整列格子的下方、與格子的內容對齊左右邊。多個帳號並列時冠上帳號標籤，才看得出是哪一格的。回傳下緣。"""
         p = self.p
-        shown = notes(card, board)
+        shown = notes(card, board, p.lang)
         if named:
-            shown = [(f"{_label(card)}：{text}", dot, fg) for text, dot, fg in shown]
+            label = _label(card, p.lang)
+            shown = [(text(p.lang, "note.named", label=label, text=note), dot, fg) for note, dot, fg in shown]
         for i, (slot, note) in enumerate(zip(self.notes.fit(len(shown)), shown)):
             y = slot.render(note, c, left, right, y + p.px("section_gap" if i == 0 else "line_gap"))
         return y
@@ -286,8 +290,10 @@ class LayoutC:
         self._p.fonts.clear()  # tkfont.Font 被回收時會刪掉對應的具名字型
         self._cells.fit(0)
 
-    def render(self, board: Board, theme: str, expanded: bool = False):
+    def render(self, board: Board, theme: str, expanded: bool = False, lang: str = ZH_TW):
+        """lang 的預設值只給不在意語系的呼叫端（測試）；視窗每輪都明確傳入。"""
         p, c = self._p, THEMES[theme]
+        p.lang = lang
         pad, inset, cell_w, gap = p.px("panel_pad"), p.px("row_inset"), p.px("ring_cell_width"), p.px("card_gap")
         content = _COLUMNS * cell_w + (_COLUMNS - 1) * gap if expanded else p.px("ring_compact_width")
         width = content + 2 * inset
@@ -320,7 +326,7 @@ class LayoutC:
         self.cv.configure(width=total_w, height=total_h)
 
     def _banner_box(self, board: Board, c, x, y, width):
-        lines = banner_lines(board, self._p.fonts.missing)
+        lines = banner_lines(board, self._p.lang, self._p.fonts.missing)
         if not lines:
             self._p.hide(self._banner_bg)
             self._banner.hide()

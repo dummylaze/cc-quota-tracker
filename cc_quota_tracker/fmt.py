@@ -3,6 +3,7 @@ from datetime import datetime, timedelta
 from typing import Optional
 
 from .board import CountdownFormat, Money
+from .i18n import text
 
 
 def account_label(account_key: str) -> str:
@@ -10,22 +11,24 @@ def account_label(account_key: str) -> str:
     return account_key.split(":", 1)[1]
 
 
-def until(when: datetime, now: datetime, fmt: CountdownFormat) -> str:
+def until(when: datetime, now: datetime, fmt: CountdownFormat, lang: str) -> str:
     """倒數＋絕對時間，例如「2小時15分後（14:00）」。"""
-    return f"{countdown(when - now, fmt)}後（{absolute(when, now)}）"
+    return text(lang, "until", countdown=countdown(when - now, fmt, lang), when=absolute(when, now))
 
 
-def countdown(left: timedelta, fmt: CountdownFormat) -> str:
+def countdown(left: timedelta, fmt: CountdownFormat, lang: str) -> str:
     """兩個單位，不足的部分一律捨去、不進位：剩一天以上是「天＋時」（或天數到小數第 1 位），不到一天是「時＋分」。"""
     seconds = int(left.total_seconds())
     days, rest = divmod(seconds, 86400)
     hours, minutes = rest // 3600, rest % 3600 // 60
     if days and fmt is CountdownFormat.DECIMAL_DAYS:
         tenths = seconds * 10 // 86400
-        return f"{tenths // 10}.{tenths % 10}天"
+        return text(lang, "countdown.decimal_days", value=f"{tenths // 10}.{tenths % 10}")
     if days:
-        return f"{days}天{hours}小時"
-    return f"{hours}小時{minutes}分" if hours else f"{minutes}分"
+        return text(lang, "countdown.days_hours", days=days, hours=hours)
+    if hours:
+        return text(lang, "countdown.hours_minutes", hours=hours, minutes=minutes)
+    return text(lang, "countdown.minutes", minutes=minutes)
 
 
 def absolute(when: datetime, now: datetime) -> str:
@@ -34,13 +37,13 @@ def absolute(when: datetime, now: datetime) -> str:
     return local.strftime("%H:%M" if abs(when - now) < timedelta(days=1) else "%m-%d %H:%M")
 
 
-def age(value: timedelta) -> str:
+def age(value: timedelta, lang: str) -> str:
     minutes = int(value.total_seconds() // 60)
     if minutes < 60:
-        return f"{minutes} 分鐘前"
+        return text(lang, "age.minutes", n=minutes)
     if minutes < 60 * 24:
-        return f"{minutes // 60} 小時前"
-    return f"{minutes // (60 * 24)} 天前"
+        return text(lang, "age.hours", n=minutes // 60)
+    return text(lang, "age.days", n=minutes // (60 * 24))
 
 
 def money(value: Optional[Money]) -> str:

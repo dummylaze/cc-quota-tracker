@@ -1,7 +1,8 @@
 """懸浮視窗：無邊框、以透明色鍵挖出圓角、拖動任何位置可移動、雙擊切換精簡／展開；每 5 秒 poll 一次交給版面渲染。
 同一時間只建立目前選用的版面；換版面時舊版面的 item 整批銷毀、再建新的。
 右鍵選單調整偏好與納管帳號。偏好每輪取自看板（核心依設定檔的修改時間重讀），GUI 的改動合併寫回設定檔；
-主題選「跟隨系統」時每輪讀一次 Windows 的應用程式深淺色；
+主題選「跟隨系統」時每輪讀一次 Windows 的應用程式深淺色；語系同理，選「跟隨系統」時每輪問一次作業系統的介面語言；
+切換語系只改既有選單項與版面 item 的文字，不重建選單、也不重建版面；
 視窗位置存在納管目錄的工具狀態，不進設定檔。開機自動啟動的開關狀態每次開選單時問登錄，不存在設定檔也不另存一份。"""
 import json
 import os
@@ -13,15 +14,16 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, simpledialog
 from typing import Callable, Optional, Tuple
 
-from . import atomic
+from . import atomic, i18n
 from .board import Board, Preferences
-from .core import STATE_DIR, AddWarning, InvalidLabel, NoCredential
+from .core import STATE_DIR, InvalidLabel, NoCredential
 from .layout_a import CLICKABLE_TAG, LayoutA
 from .layout_b import LayoutB
 from .layout_c import LayoutC
 from .permissions import make_private
 from .fmt import account_label
-from .render_text import ADD_NOT_BOUND, ADD_WARNINGS, IMPORT_NOT_BOUND, INVALID_LABEL, NO_CREDENTIAL, NOT_A_CREDENTIAL_FILE
+from .i18n import text
+from .render_text import add_warning
 from .settings import PREFERENCE_FIELDS, ResolvedPaths, write_preference
 from .tokens import TRANSPARENT_KEY
 
@@ -31,9 +33,12 @@ _GRIP = 20  # 判斷位置在不在螢幕內時，看視窗左上角往內這麼
 _TITLE = "cc-quota-tracker"
 _ATTRS = {field: attr for field, (attr, _) in PREFERENCE_FIELDS.items()}
 _LAYOUTS = {"cards": LayoutA, "table": LayoutB, "ring": LayoutC}
-_LAYOUT_NAMES = (("卡片列表", "cards"), ("密集表格／單行條", "table"), ("環形儀表", "ring"))  # 合法值與 settings.PREFERENCE_FIELDS 一致
-_MODES = (("精簡", "compact"), ("展開", "expanded"))
-_THEMES = (("跟隨系統", "system"), ("淺色", "light"), ("深色", "dark"))
+# 選項：(語系鍵, 值)；合法值與 settings.PREFERENCE_FIELDS 一致。語系鍵為 None 的選項在每個語系都用同一個名稱
+_LAYOUT_NAMES = (("layout.cards", "cards"), ("layout.table", "table"), ("layout.ring", "ring"))
+_MODES = (("mode.compact", "compact"), ("mode.expanded", "expanded"))
+_THEMES = (("theme.system", "system"), ("theme.light", "light"), ("theme.dark", "dark"))
+_LANGUAGES = (("language.system", "system"), (None, "zh-TW"), (None, "en"))
+_LANGUAGE_NAMES = {"zh-TW": "正體中文", "en": "English"}  # 各語系用自己的名稱，選錯語系的人也找得到自己看得懂的那一項
 _OPACITIES = PREFERENCE_FIELDS["opacity"][1]
 _PERSONALIZE_KEY = r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"  # 登錄機碼，在 HKEY_CURRENT_USER 底下
 
@@ -77,15 +82,20 @@ def windows_app_theme() -> str:
 class Widget:
     def __init__(self, root: tk.Tk, core, paths: ResolvedPaths,
                  on_screen: Optional[Callable[[int, int], bool]] = None,
-                 system_theme: Callable[[], str] = windows_app_theme, autostart=None):
+                 system_theme: Callable[[], str] = windows_app_theme, autostart=None,
+                 system_language: Callable[[], Optional[str]] = i18n.system_tag):
         """core 提供 poll、add、import_snapshot；paths 是啟動時解析的路徑，設定檔與納管目錄都取自它。
         system_theme 回傳系統目前的深淺色，主題選「跟隨系統」時每次渲染都問一次。
-        autostart 提供 is_enabled、enable、disable；None 表示這個平台沒有開機自動啟動，選單就不放這一項。"""
+        autostart 提供 is_enabled、enable、disable；None 表示這個平台沒有開機自動啟動，選單就不放這一項。
+        system_language 回傳作業系統的語系標籤（例如 zh-TW），語系選「跟隨系統」時每次渲染都問一次。"""
         self.root = root
         self._core = core
         self._autostart = autostart
         self._paths = paths
         self._system_theme = system_theme
+        self._system_language = system_language
+        self._lang = i18n.resolve("system", system_language())  # 目前套用中的語系；第一次套用偏好時會校正
+        self._menu_labels = []  # (選單, 項目序號, 語系鍵)：換語系時逐項改字，選單本身不重建
         self._position_file = paths.managed_dir / STATE_DIR / "window.json"
         self._board: Optional[Board] = None
         self._prefs: Optional[Preferences] = None  # 目前套用中的偏好；None 表示還沒套用過
@@ -111,45 +121,56 @@ class Widget:
         root.bind("<Double-Button-1>", self._double_click)
         self.refresh()
 
+    def _add_entry(self, parent, kind, key, **options):
+        """加一個選單項，並記下它的語系鍵：key 為 None 的項目在每個語系都用同一個名稱，由 label 直接給。"""
+        label = options.pop("label", None) or text(self._lang, key)
+        getattr(parent, f"add_{kind}")(label=label, **options)
+        if key is not None:
+            self._menu_labels.append((parent, parent.index("end"), key))
+
+    def _add_choices(self, menu, key, choices, var, field):
+        """一組單選：右鍵選單的一個子選單。"""
+        submenu = tk.Menu(menu, tearoff=0)
+        for choice_key, value in choices:
+            self._add_entry(submenu, "radiobutton", choice_key, value=value, variable=var,
+                            label=_LANGUAGE_NAMES.get(value) if choice_key is None else None,
+                            command=lambda: self.set_preference(field, var.get()))
+        self._add_entry(menu, "cascade", key, menu=submenu)
+
     def _build_menu(self):
         """選單不能變長：只放常切換的偏好。變數建一次，每輪只改值，不累積。"""
         self._menu = menu = tk.Menu(self.root, tearoff=0, postcommand=self.sync_autostart)
         self._layout_var = tk.StringVar(self.root)
         self._topmost_var = tk.BooleanVar(self.root)
         self._mode_var = tk.StringVar(self.root)
+        self._language_var = tk.StringVar(self.root)
         self._theme_var = tk.StringVar(self.root)
         self._opacity_var = tk.IntVar(self.root)
         self._autostart_var = tk.BooleanVar(self.root)
-        layouts = tk.Menu(menu, tearoff=0)
-        for label, value in _LAYOUT_NAMES:
-            layouts.add_radiobutton(label=label, value=value, variable=self._layout_var,
-                                    command=lambda: self.set_preference("layout", self._layout_var.get()))
-        menu.add_cascade(label="版面", menu=layouts)
-        menu.add_checkbutton(label="置頂", variable=self._topmost_var,
-                             command=lambda: self.set_preference("alwaysOnTop", self._topmost_var.get()))
-        modes = tk.Menu(menu, tearoff=0)
-        for label, value in _MODES:
-            modes.add_radiobutton(label=label, value=value, variable=self._mode_var,
-                                  command=lambda: self.set_preference("mode", self._mode_var.get()))
-        menu.add_cascade(label="模式", menu=modes)
-        themes = tk.Menu(menu, tearoff=0)
-        for label, value in _THEMES:
-            themes.add_radiobutton(label=label, value=value, variable=self._theme_var,
-                                   command=lambda: self.set_preference("theme", self._theme_var.get()))
-        menu.add_cascade(label="主題", menu=themes)
+        self._add_choices(menu, "menu.layout", _LAYOUT_NAMES, self._layout_var, "layout")
+        self._add_entry(menu, "checkbutton", "menu.topmost", variable=self._topmost_var,
+                        command=lambda: self.set_preference("alwaysOnTop", self._topmost_var.get()))
+        self._add_choices(menu, "menu.mode", _MODES, self._mode_var, "mode")
+        self._add_choices(menu, "menu.language", _LANGUAGES, self._language_var, "language")
+        self._add_choices(menu, "menu.theme", _THEMES, self._theme_var, "theme")
         opacities = tk.Menu(menu, tearoff=0)
         for value in _OPACITIES:
             opacities.add_radiobutton(label=f"{value}%", value=value, variable=self._opacity_var,
                                       command=lambda: self.set_preference("opacity", self._opacity_var.get()))
-        menu.add_cascade(label="透明度", menu=opacities)
+        self._add_entry(menu, "cascade", "menu.opacity", menu=opacities)
         if self._autostart is not None:
-            menu.add_checkbutton(label="開機自動啟動", variable=self._autostart_var, command=self._toggle_autostart)
+            self._add_entry(menu, "checkbutton", "menu.autostart", variable=self._autostart_var,
+                            command=self._toggle_autostart)
         menu.add_separator()
-        menu.add_command(label="納管目前登入的帳號…", command=self.add_current_account)
-        menu.add_command(label="匯入憑證檔…", command=self.import_credential_file)
-        menu.add_command(label="開啟納管目錄", command=self.open_managed_dir)
+        self._add_entry(menu, "command", "menu.add", command=self.add_current_account)
+        self._add_entry(menu, "command", "menu.import", command=self.import_credential_file)
+        self._add_entry(menu, "command", "menu.open_dir", command=self.open_managed_dir)
         menu.add_separator()
-        menu.add_command(label="結束", command=self.close)
+        self._add_entry(menu, "command", "menu.quit", command=self.close)
+
+    def _relabel_menu(self):
+        for menu, index, key in self._menu_labels:
+            menu.entryconfigure(index, label=text(self._lang, key))
 
     def menu_labels(self):
         last = self._menu.index("end")
@@ -157,7 +178,7 @@ class Widget:
 
     def menu_state(self) -> Preferences:
         return replace(self._prefs, layout=self._layout_var.get(), always_on_top=self._topmost_var.get(), mode=self._mode_var.get(),
-                       theme=self._theme_var.get(), opacity=self._opacity_var.get())
+                       language=self._language_var.get(), theme=self._theme_var.get(), opacity=self._opacity_var.get())
 
     def sync_autostart(self):
         """勾選狀態以登錄的實際值為準：每次開選單前對一次，使用者自己在別處刪掉啟動項時才不會不同步。"""
@@ -171,7 +192,7 @@ class Widget:
         try:
             (self._autostart.enable if self._autostart_var.get() else self._autostart.disable)()
         except OSError as e:
-            messagebox.showerror(_TITLE, f"無法變更開機自動啟動：{e}", parent=self.root)
+            messagebox.showerror(_TITLE, text(self._lang, "dialog.autostart_failed", error=e), parent=self.root)
         self.sync_autostart()  # 寫不進去時勾選不能停在使用者剛點的那一邊
 
     def refresh(self):
@@ -219,9 +240,15 @@ class Widget:
             self.root.attributes("-topmost", prefs.always_on_top)
         if previous is None or prefs.opacity != previous.opacity:
             self.root.attributes("-alpha", prefs.opacity / 100)
+        # 跟隨系統：每輪 poll 都會走到這裡，系統換介面語言後下一輪就跟上
+        lang = i18n.resolve(prefs.language, self._system_language())
+        if lang != self._lang:
+            self._lang = lang
+            self._relabel_menu()
         self._layout_var.set(prefs.layout)
         self._topmost_var.set(prefs.always_on_top)
         self._mode_var.set(prefs.mode)
+        self._language_var.set(prefs.language)
         self._theme_var.set(prefs.theme)
         self._opacity_var.set(prefs.opacity)
         new_layout = self.layout is None or prefs.layout != previous.layout
@@ -234,7 +261,7 @@ class Widget:
         if self._board is not None:
             # 跟隨系統：每輪 poll 都會走到這裡，系統切換深淺色後下一輪就跟上
             theme = self._system_theme() if prefs.theme == "system" else prefs.theme
-            self.layout.render(self._board, theme, prefs.mode == "expanded")
+            self.layout.render(self._board, theme, prefs.mode == "expanded", self._lang)
 
     def _double_click(self, event):
         # 摺疊區標題自己處理點擊：雙擊它等於開合兩次，不該同時切換模式
@@ -243,46 +270,46 @@ class Widget:
         self.toggle_mode()
 
     def add_current_account(self):
-        label = simpledialog.askstring(_TITLE, "帳號標籤（會顯示在畫面上，也是憑證快照的檔名）：", parent=self.root)
+        lang = self._lang
+        label = simpledialog.askstring(_TITLE, text(lang, "dialog.label_prompt"), parent=self.root)
         if label is None:
             return
         try:
             result = self._core.add(label)
         except InvalidLabel:
-            messagebox.showerror(_TITLE, INVALID_LABEL.format(label=label), parent=self.root)
+            messagebox.showerror(_TITLE, text(lang, "error.invalid_label", label=label), parent=self.root)
             return
         except NoCredential:
-            messagebox.showerror(_TITLE, NO_CREDENTIAL, parent=self.root)
+            messagebox.showerror(_TITLE, text(lang, "error.no_credential"), parent=self.root)
             return
-        warnings = [ADD_NOT_BOUND if w is AddWarning.NOT_BOUND else ADD_WARNINGS[w]
-                    for w in sorted(result.warnings, key=lambda w: w.value)]
-        self._report(f"已納管「{label}」", warnings)
+        warnings = [add_warning(lang, w, "menu") for w in sorted(result.warnings, key=lambda w: w.value)]
+        self._report(text(lang, "account.added", label=label), warnings)
 
     def import_credential_file(self):
-        source = filedialog.askopenfilename(parent=self.root, title="匯入憑證檔",
-                                            filetypes=(("JSON", "*.json"), ("所有檔案", "*.*")))
+        lang = self._lang
+        source = filedialog.askopenfilename(parent=self.root, title=text(lang, "dialog.import_title"),
+                                            filetypes=(("JSON", "*.json"), (text(lang, "dialog.all_files"), "*.*")))
         if not source:
             return
-        label = simpledialog.askstring(_TITLE, "帳號標籤（會顯示在畫面上，也是憑證快照的檔名）：",
+        label = simpledialog.askstring(_TITLE, text(lang, "dialog.label_prompt"),
                                        initialvalue=Path(source).stem, parent=self.root)
         if label is None:
             return
         # 標籤就是檔名，Windows 的檔名不分大小寫
         taken = {account_label(key).casefold() for key in self._board.managed_accounts} if self._board else set()
         if label.casefold() in taken and not messagebox.askyesno(
-                _TITLE, f"已經有帳號標籤「{label}」，要用這個檔案取代它的憑證快照嗎？", parent=self.root):
+                _TITLE, text(lang, "dialog.confirm_replace", label=label), parent=self.root):
             return
         try:
             result = self._core.import_snapshot(Path(source), label)
         except InvalidLabel:
-            messagebox.showerror(_TITLE, INVALID_LABEL.format(label=label), parent=self.root)
+            messagebox.showerror(_TITLE, text(lang, "error.invalid_label", label=label), parent=self.root)
             return
         except NoCredential:
-            messagebox.showerror(_TITLE, NOT_A_CREDENTIAL_FILE, parent=self.root)
+            messagebox.showerror(_TITLE, text(lang, "error.not_a_credential_file"), parent=self.root)
             return
-        warnings = [IMPORT_NOT_BOUND if w is AddWarning.NOT_BOUND else ADD_WARNINGS[w]
-                    for w in sorted(result.warnings, key=lambda w: w.value)]
-        self._report(f"已匯入「{label}」", warnings)
+        warnings = [add_warning(lang, w, "import") for w in sorted(result.warnings, key=lambda w: w.value)]
+        self._report(text(lang, "account.imported", label=label), warnings)
 
     def _report(self, done: str, warnings):
         self.refresh()  # 新帳號立刻出現在看板上，不必等下一輪
@@ -291,7 +318,8 @@ class Widget:
     def open_managed_dir(self):
         directory = self._paths.managed_dir
         if not directory.is_dir():
-            messagebox.showinfo(_TITLE, f"納管目錄還不存在：{directory}\n納管第一個帳號時會建立。", parent=self.root)
+            messagebox.showinfo(_TITLE, text(self._lang, "dialog.managed_dir_missing", directory=directory),
+                                parent=self.root)
             return
         if sys.platform == "win32":
             os.startfile(directory)

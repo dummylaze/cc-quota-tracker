@@ -1,5 +1,6 @@
 """視窗骨架：每輪 poll 一次交給版面渲染，after() 不重複註冊；偏好來自看板，GUI 的改動合併寫回設定檔；視窗位置存在工具狀態。"""
 import json
+import shutil
 import tkinter as tk
 import tkinter.font as tkfont
 import unittest
@@ -57,13 +58,15 @@ class WidgetTestCase(HomeTestCase):
         self.addCleanup(self.destroy_root)
         self.on_screen = lambda x, y: True
         self.system_theme = "light"
+        self.system_language = "zh-TW"
         self.open_widget()
 
     def open_widget(self):
         self.counting = CountingCore(self.core)
         self.autostart = FakeAutostart()
         self.widget = Widget(self.root, self.counting, self.paths, on_screen=lambda x, y: self.on_screen(x, y),
-                             system_theme=lambda: self.system_theme, autostart=self.autostart)
+                             system_theme=lambda: self.system_theme, autostart=self.autostart,
+                             system_language=lambda: self.system_language)
 
     def destroy_root(self):
         try:
@@ -168,7 +171,7 @@ class PreferenceTest(WidgetTestCase):
 
     def test_menu_offers_settings_and_actions(self):
         self.assertEqual(self.widget.menu_labels(),
-                         ["版面", "置頂", "模式", "主題", "透明度", "開機自動啟動", "納管目前登入的帳號…", "匯入憑證檔…", "開啟納管目錄", "結束"])
+                         ["版面", "置頂", "模式", "語系", "主題", "透明度", "開機自動啟動", "納管目前登入的帳號…", "匯入憑證檔…", "開啟納管目錄", "結束"])
 
 
 class AutostartTest(WidgetTestCase):
@@ -210,7 +213,8 @@ class AutostartTest(WidgetTestCase):
     def test_no_menu_entry_when_the_platform_has_no_autostart(self):
         window = tk.Toplevel(self.root)  # 不另開一個 Tk：多個 Tk 直譯器同時銷毀時 ttk 會吐一堆錯誤訊息
         window.withdraw()
-        widget = Widget(window, self.core, self.paths, on_screen=lambda x, y: True, autostart=None)
+        widget = Widget(window, self.core, self.paths, on_screen=lambda x, y: True, autostart=None,
+                        system_language=lambda: "zh-TW")
         self.assertNotIn("開機自動啟動", widget.menu_labels())
         widget.close()
 
@@ -338,6 +342,137 @@ class FontTest(WidgetTestCase):
         self.widget.refresh()
         self.widget.set_preference("opacity", 70)
         self.assertEqual(self.settings()["font"], family)
+
+
+class LanguageTest(WidgetTestCase):
+    def submenu(self, index):
+        menu = self.widget._menu
+        return menu.nametowidget(menu.entrycget(index, "menu"))
+
+    def submenu_labels(self, index):
+        menu = self.submenu(index)
+        return [menu.entrycget(i, "label") for i in range(menu.index("end") + 1)]
+
+    def texts(self):
+        return visible_texts(self.widget.canvas)
+
+    def test_follows_the_system_by_default_and_rechecks_every_round(self):
+        self.assertEqual(self.widget.menu_state().language, "system")
+        self.assertIn("未納管帳號", self.texts())
+        self.assertEqual(self.widget.menu_labels()[0], "版面")
+        self.system_language = "en-US"  # 使用者換了作業系統的介面語言
+        self.widget.refresh()
+        self.assertIn("Unmanaged account", self.texts())
+        self.assertEqual(self.widget.menu_labels()[0], "Layout")
+        self.system_language = "zh-TW"
+        self.widget.refresh()
+        self.assertIn("未納管帳號", self.texts())
+
+    def test_an_unsupported_system_language_falls_back_to_english(self):
+        for tag in ("ja-JP", "zh-CN", "fr-FR", None):
+            self.system_language = tag
+            self.widget.refresh()
+            self.assertIn("Unmanaged account", self.texts(), tag)
+            self.assertEqual(self.widget.menu_labels()[0], "Layout", tag)
+
+    def test_a_chosen_language_ignores_the_system(self):
+        self.system_language = "ja-JP"
+        self.widget.set_preference("language", "zh-TW")
+        self.widget.refresh()
+        self.assertIn("未納管帳號", self.texts())
+        self.system_language = "zh-TW"
+        self.widget.set_preference("language", "en")
+        self.widget.refresh()
+        self.assertIn("Unmanaged account", self.texts())
+        self.assertEqual(self.settings()["language"], "en")
+
+    def test_gui_change_applies_at_once_and_is_remembered(self):
+        self.widget.set_preference("language", "en")
+        self.assertIn("Unmanaged account", self.texts())  # 不必等下一輪
+        self.assertEqual(self.counting.polls, 1)
+        self.assertEqual(self.settings()["language"], "en")
+        self.assertEqual(self.widget.menu_state().language, "en")
+
+    def test_hand_edit_applies_on_next_round(self):
+        self.write_settings(language="en")
+        self.widget.refresh()
+        self.assertIn("Unmanaged account", self.texts())
+        self.assertEqual(self.widget.menu_labels()[0], "Layout")
+
+    def test_menu_offers_follow_system_and_the_two_languages_each_in_its_own_name(self):
+        index = self.widget.menu_labels().index("語系")
+        self.assertEqual(self.submenu_labels(index), ["跟隨系統", "正體中文", "English"])
+        self.widget.set_preference("language", "en")
+        index = self.widget.menu_labels().index("Language")
+        self.assertEqual(self.submenu_labels(index), ["Follow system", "正體中文", "English"])
+
+    def test_every_menu_entry_and_submenu_follows_the_language(self):
+        self.widget.set_preference("language", "en")
+        self.assertEqual(self.widget.menu_labels(),
+                         ["Layout", "Always on top", "Mode", "Language", "Theme", "Opacity", "Start at login",
+                          "Manage the signed-in account…", "Import credential file…", "Open managed directory", "Quit"])
+        self.assertEqual(self.submenu_labels(0), ["Card list", "Dense table / one-line strip", "Ring gauge"])
+        self.assertEqual(self.submenu_labels(2), ["Compact", "Expanded"])
+        self.assertEqual(self.submenu_labels(4), ["Follow system", "Light", "Dark"])
+
+    def test_switching_language_updates_the_existing_widgets_instead_of_rebuilding(self):
+        menu, submenu = self.widget._menu, self.submenu(0)
+        entries = menu.index("end")
+        variables = len(self.root.tk.call("info", "globals"))
+        items = tuple(i for i in self.widget.canvas.find_all() if "wrapped-line" not in self.widget.canvas.gettags(i))
+        for language in ("en", "zh-TW", "system") * 4:
+            self.widget.set_preference("language", language)
+        self.widget.set_preference("language", "en")
+        self.assertIs(self.widget._menu, menu)
+        self.assertIs(self.submenu(0), submenu)
+        self.assertEqual(menu.index("end"), entries)
+        self.assertEqual(len(self.root.tk.call("info", "globals")), variables)
+        self.assertEqual(tuple(i for i in self.widget.canvas.find_all()
+                               if "wrapped-line" not in self.widget.canvas.gettags(i)), items)
+        self.assertEqual(len(self.pending_after()), 1)
+
+    def test_language_survives_layout_and_mode_switches(self):
+        self.widget.set_preference("language", "en")
+        for layout in ("table", "ring", "cards"):
+            for mode in ("expanded", "compact"):
+                self.widget.set_preference("layout", layout)
+                self.widget.set_preference("mode", mode)
+                self.assertIn("Unmanaged account", self.texts(), (layout, mode))
+
+    def test_invalid_language_in_the_settings_file_is_named_and_the_system_language_is_used(self):
+        self.write_settings(language="klingon")
+        self.widget.refresh()
+        self.assertEqual(self.widget.menu_state().language, "system")
+        self.assertIn("language", "".join(self.texts()))
+        self.assertIn("未納管帳號", self.texts())
+
+    def test_dialogs_speak_the_chosen_language(self):
+        self.widget.set_preference("language", "en")
+        with mock.patch("cc_quota_tracker.widget.messagebox") as box, \
+                mock.patch("cc_quota_tracker.widget.simpledialog") as ask:
+            ask.askstring.return_value = "work"
+            self.widget.add_current_account()  # 沒有登入：讀不到憑證
+        self.assertIn("Account label", ask.askstring.call_args.args[1])
+        self.assertIn("Couldn't read the current sign-in credential", box.showerror.call_args.args[1])
+        shutil.rmtree(self.paths.managed_dir, ignore_errors=True)  # 目錄不存在才會跳訊息，而不是真的開啟檔案總管
+        with mock.patch("cc_quota_tracker.widget.messagebox") as box:
+            self.widget.open_managed_dir()
+        self.assertIn("doesn't exist yet", box.showinfo.call_args.args[1])
+        self.widget.set_preference("language", "zh-TW")
+        with mock.patch("cc_quota_tracker.widget.messagebox") as box:
+            self.widget.open_managed_dir()
+        self.assertIn("納管目錄還不存在", box.showinfo.call_args.args[1])
+
+    def test_managing_an_account_reports_in_the_chosen_language(self):
+        self.log_in()
+        self.widget.set_preference("language", "en")
+        with mock.patch("cc_quota_tracker.widget.messagebox") as box, \
+                mock.patch("cc_quota_tracker.widget.simpledialog") as ask:
+            ask.askstring.return_value = "someone@example.com"
+            self.widget.add_current_account()
+        message = box.showinfo.call_args.args[1]
+        self.assertIn("Managed \"someone@example.com\"", message)
+        self.assertIn("looks like an email address", message)
 
 
 class ThemeTest(WidgetTestCase):

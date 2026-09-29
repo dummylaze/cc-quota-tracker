@@ -6,7 +6,7 @@ A small always-on-top desktop window (Windows) that shows how much quota each of
 
 - **Compact mode**: the active account's session window and weekly window — progress bar, reset countdown, reading age, credential expiry countdown.
 - **Expanded mode**: one card per managed account, the active one highlighted; standby accounts show their last observed reading and how old it is.
-- Three layouts (card list, dense table / one-line strip, ring gauge), light / dark / follow-system theme, adjustable opacity.
+- Three layouts (card list, dense table / one-line strip, ring gauge), light / dark / follow-system theme, adjustable opacity, Traditional Chinese or English interface.
 
 **Everything comes from local files that Claude Code already maintains. The tool makes no network requests, never writes to Claude Code's files, and never changes Claude Code's settings (no statusLine, no hooks).**
 
@@ -101,6 +101,7 @@ Drag anywhere to move; double-click to switch between compact and expanded. Righ
 
 - **Layout**: card list (default) / dense table and one-line strip / ring gauge
 - **Always on top** (default on), **Mode** (compact / expanded)
+- **Language**: follow system (default), 正體中文, English. Follow system uses the Windows display language and falls back to English when it is neither Traditional Chinese nor English. Switching takes effect at once; the command line (`list`, `add`, `check`, …) follows the same setting. Values Claude reports itself (a lock reason, the name of a limit this tool doesn't recognise) are shown as reported, not translated
 - **Theme**: follow system (default), light, dark
 - **Opacity**: 100% (default), 85%, 70%
 - **Start at login** (default off): writes one value to your user's `Run` registry key and removes it when turned off. It does not need administrator rights and touches nothing else. The checkbox always reflects the actual registry value. The registered command points at the Python and the folder it was turned on from; if you move the folder or change Python, the checkbox shows off until you turn it on again.
@@ -119,10 +120,10 @@ You can edit it with a text editor. Settings are re-read every 5 seconds and tak
 | `layout` | `"cards"`, `"table"`, `"ring"` | `"cards"` | Card list / dense table and one-line strip / ring gauge |
 | `alwaysOnTop` | `true`, `false` | `true` | Keep the window above others |
 | `mode` | `"compact"`, `"expanded"` | `"compact"` | Active account only / all accounts |
-| `language` | `"system"`, `"zh-TW"`, `"en"` | `"system"` | Interface language. **Not in effect yet:** the interface is currently Traditional Chinese only, so this field is accepted but changes nothing visible |
+| `language` | `"system"`, `"zh-TW"`, `"en"` | `"system"` | Interface language, for the window and the command line. `system` follows the Windows display language: Traditional Chinese (zh-TW, zh-HK, zh-MO) gives `zh-TW`, English gives `en`, anything else falls back to `en` |
 | `theme` | `"system"`, `"light"`, `"dark"` | `"system"` | `system` follows the Windows app light/dark setting |
 | `opacity` | `100`, `85`, `70` | `100` | Window opacity in percent |
-| `countdownFormat` | `"twoUnits"`, `"decimalDays"` | `"twoUnits"` | `twoUnits`: 6天23小時 / 2小時15分 / 40分 (days + hours, hours + minutes, minutes). `decimalDays`: 6.9天 when a day or more remains (shorter spans still show hours and minutes). Both truncate, never round up |
+| `countdownFormat` | `"twoUnits"`, `"decimalDays"` | `"twoUnits"` | `twoUnits`: 6d 23h / 2h 15m / 40m (days + hours, hours + minutes, minutes; the Traditional Chinese interface writes 6天23小時 / 2小時15分 / 40分). `decimalDays`: 6.9d (6.9天) when a day or more remains (shorter spans still show hours and minutes). Both truncate, never round up |
 | `font` | font family name or `null` | `null` | Font for all text. `null` uses the built-in fonts (Microsoft JhengHei UI, and Segoe UI Semibold for the big percentages). Sizes and weights stay as designed. A font that is not installed on this computer is replaced by the system default font, and for a name you typed the window says so. Settings file only, not in the right-click menu |
 | `providers.claude.expiryWarningDays` | positive integer | `7` | Warn when the credential snapshot has *less than* this many days left |
 | `providers.claude.warningPercent` | integer 1–100, less than `criticalPercent` | `60` | Yellow threshold, used only when Claude does not report a severity itself |

@@ -1,5 +1,5 @@
 """版面 B（密集表格／單行條）。精簡模式是使用中帳號的一行橫條；展開模式是表格，一列一個帳號，提示接在該列下方，
-使用中帳號那一列加淡色底。不與版面 A 共用版面程式碼；提示與橫幅的文案、折行取自 canvas_text。
+使用中帳號那一列加淡色底。不與版面 A 共用版面程式碼；提示與橫幅的文案、折行取自 canvas_text；其餘文案取自語系檔，語系由 render 傳入、存在 _Paint.lang，切換語系只是重畫。
 
 物件生命週期同版面 A：固定部分的 item 一次建好，之後每輪只改座標、文字、顏色與顯示狀態；數量跟著看板走的部分
 （表格的列、提示、多行文字的行）由 _Pool 補建或刪到剛好，所以 item 數只由看板與模式決定。單行條只在精簡模式存在、
@@ -10,14 +10,16 @@ from typing import NamedTuple, Optional
 
 from .board import Board, Card, Limit, ReadingState, Role
 from .canvas_text import LINE_TAG, banner_lines, notes, wrap
-from .fmt import absolute, account_label, age, countdown
+from .fmt import absolute, account_label, age, until
 from .fonts import FontSet
+from .i18n import ZH_TW, text
 from .tokens import FONTS, LINE_HEIGHT, RADIUS, SPACE, THEMES
 
 TAG = "layout-b"
 EXPANDED_TAG = "layout-b-expanded"  # 表格：只在展開模式存在
-_WINDOWS = (("session", "工作階段"), ("weekly_all", "週"))  # 兩種模式都固定顯示這兩個窗口；名稱是單行條上的簡稱
-_HEADERS = ("帳號", "工作階段窗口", "週窗口", "讀數", "憑證到期")
+# 兩種模式都固定顯示這兩個窗口；名稱是單行條上的簡稱。值都是語系鍵
+_WINDOWS = (("session", "window.session_short"), ("weekly_all", "window.weekly_all_short"))
+_HEADERS = ("table.account", "window.session", "window.weekly_all", "table.reading", "table.credential_expiry")
 _NONE = "—"
 _ids = itertools.count()
 
@@ -29,6 +31,7 @@ class _Paint:
         self.cv = canvas
         self.scale = canvas.winfo_fpixels("1i") / 96
         self.fonts = FontSet(canvas)
+        self.lang = ZH_TW  # 這一輪使用的語系；每次 render 一開始就換成呼叫端給的
 
     def px(self, key):
         return round(SPACE[key] * self.scale)
@@ -146,50 +149,49 @@ class _Value(NamedTuple):
     foot: Optional[str] = None
 
 
-def _window(lim: Optional[Limit]) -> _Value:
+def _window(lim: Optional[Limit], lang: str) -> _Value:
     if lim is None:
         return _Value(_NONE, "small", "sub")
     if lim.reset:
-        return _Value("已重置", "small", "sub", foot="下次重置時間未知")
+        return _Value(text(lang, "limit.reset_short"), "small", "sub", foot=text(lang, "limit.next_reset_unknown"))
     if lim.percent is None:
-        return _Value("無計時中窗口", "small", "sub")
+        return _Value(text(lang, "limit.no_open_window"), "small", "sub")
     return _Value(f"{lim.percent}%", "percent", lim.severity.value, lim.percent)
 
 
-def _windows(card: Card):
+def _windows(card: Card, lang: str):
     """兩個窗口的呈現；還沒有讀數時整個是 None（精簡模式不顯示窗口，表格顯示「—」）。"""
     limits = {lim.kind: lim for lim in card.limits} if card.reading_state is ReadingState.HAS_READING else {}
-    return [_window(limits.get(kind)) if limits else None for kind, _ in _WINDOWS]
+    return [_window(limits.get(kind), lang) if limits else None for kind, _ in _WINDOWS]
 
 
-def _label(card: Card):
-    return account_label(card.account_key) if card.account_key else "未納管帳號"
+def _label(card: Card, lang: str):
+    return account_label(card.account_key) if card.account_key else text(lang, "account.unmanaged")
 
 
-def _chip(card: Card):
+def _chip(card: Card, lang: str):
     """(狀態標籤文字, 底色 token, 文字顏色 token)。"""
     if card.role is Role.STANDBY:
-        return "待命", "chip_standby", "chip_standby_fg"
-    return "使用中", "accent", "chip_active_fg"
+        return text(lang, "role.standby"), "chip_standby", "chip_standby_fg"
+    return text(lang, "role.active"), "accent", "chip_active_fg"
 
 
-def _age(card: Card):
+def _age(card: Card, lang: str):
     if card.reading_state is ReadingState.HAS_READING and card.reading_age is not None:
-        return age(card.reading_age)
+        return age(card.reading_age, lang)
     return None
 
 
-def _expiry(card: Card, board: Board):
+def _expiry(card: Card, board: Board, lang: str):
     """憑證到期倒數：兩個單位＋絕對時間。失效、過期的處置寫在該列的提示裡。"""
     expires = card.snapshot_expires_at
     if card.snapshot_invalid:
-        return "已失效"
+        return text(lang, "expiry.invalid")
     if expires is None:
         return _NONE
-    when = absolute(expires, board.as_of)
     if expires <= board.as_of:
-        return f"已過期（{when}）"
-    return f"{countdown(expires - board.as_of, board.countdown_format)}後（{when}）"
+        return text(lang, "expiry.expired", when=absolute(expires, board.as_of))
+    return until(expires, board.as_of, board.countdown_format, lang)
 
 
 def _count_dot(shown):
@@ -215,22 +217,23 @@ class _Strip(_Group):
 
     def _parts(self, card: Card, board: Board):
         """要顯示的各段，由左而右：[(段, 寬度, 內容)]；段是 "label"、窗口的序號、"age" 或 "count"。"""
-        p, f = self.p, self.p.fonts
-        label = _label(card)
+        p, f, lang = self.p, self.p.fonts, self.p.lang
+        label = _label(card, lang)
         parts = [("label", f["title"].measure(label), label)]
-        for i, ((_, name), window) in enumerate(zip(_WINDOWS, _windows(card))):
+        for i, ((_, name_key), window) in enumerate(zip(_WINDOWS, _windows(card, lang))):
             if window is None:
                 continue
-            text = "，".join(filter(None, (window.text, window.foot)))
+            name = text(lang, name_key)
+            value = text(lang, "sep.clause").join(filter(None, (window.text, window.foot)))
             bar = p.px("cell_bar_width") + p.px("cell_gap") if window.percent is not None else 0
-            width = f["small"].measure(name) + p.px("cell_gap") + bar + f[window.font].measure(text)
-            parts.append((i, width, (name, window, text)))
-        shown_age = _age(card)
+            width = f["small"].measure(name) + p.px("cell_gap") + bar + f[window.font].measure(value)
+            parts.append((i, width, (name, window, value)))
+        shown_age = _age(card, lang)
         if shown_age:
             parts.append(("age", f["small"].measure(shown_age), shown_age))
-        shown = notes(card, board, expiry_info=False)
+        shown = notes(card, board, lang, expiry_info=False)
         if shown:
-            count = f"{len(shown)} 則提示"
+            count = text(lang, "notes.count", count=len(shown))
             parts.append(("count", p.px("dot") + p.px("dot_gap") + f["small"].measure(count), (count, shown)))
         return parts
 
@@ -256,14 +259,14 @@ class _Strip(_Group):
                 p.show(self.count, x + dot + p.px("dot_gap"), mid, text=count, fill=c["fg"])
             else:
                 name_item, track, fill, value_item = self.windows[part]
-                name, window, text = content
+                name, window, value = content
                 p.show(name_item, x, mid, text=name, fill=c["sub"])
                 left = x + f["small"].measure(name) + p.px("cell_gap")
                 if window.percent is not None:
                     right = left + p.px("cell_bar_width")
                     p.bar(track, fill, left, right, mid, window.percent, c[window.color], c)
                     left = right + p.px("cell_gap")
-                p.show(value_item, left, mid, text=text, font=f[window.font], fill=c[window.color])
+                p.show(value_item, left, mid, text=value, font=f[window.font], fill=c[window.color])
             x += width + p.px("col_gap")
         return y + height
 
@@ -322,24 +325,25 @@ class _TableRow(_Group):
         y += p.px("row_pad_y")
         height = max(p.height("title"), p.height("percent"), p.px("chip_height"))
         mid, below = y + height / 2, y + height
-        label = _label(card)
+        lang = p.lang
+        label = _label(card, lang)
         (label_x, _), *window_cols, (age_x, _), (expiry_x, _) = columns
         p.show(self.label, label_x, mid, text=label, fill=c["fg"])
-        chip, chip_bg, chip_fg = _chip(card)
+        chip, chip_bg, chip_fg = _chip(card, lang)
         chip_x = label_x + f["title"].measure(label) + p.px("chip_gap")
         chip_w, chip_h = _chip_width(p, chip), p.px("chip_height")
         p.rrect(self.chip, chip_x, mid - chip_h / 2, chip_x + chip_w, mid + chip_h / 2, RADIUS["chip"], c[chip_bg])
         p.show(self.chip_text, chip_x + chip_w / 2, mid, text=chip, fill=c[chip_fg])
         bottom = below
-        for cell, (left, width), window in zip(self.cells, window_cols, _windows(card)):
-            bottom = max(bottom, cell.render(window or _window(None), c, left, width, mid, below))
-        shown_age = _age(card)
+        for cell, (left, width), window in zip(self.cells, window_cols, _windows(card, lang)):
+            bottom = max(bottom, cell.render(window or _window(None, lang), c, left, width, mid, below))
+        shown_age = _age(card, lang)
         p.show(self.age, age_x, mid, text=shown_age or _NONE, fill=c["sub"])
-        expiry = _expiry(card, board)
+        expiry = _expiry(card, board, lang)
         p.show(self.expiry, expiry_x, mid, text=expiry, fill=c["sub" if expiry == _NONE else "fg"])
         y = bottom
         left, right = x1 + p.px("card_pad_x"), x2 - p.px("card_pad_x")
-        shown = notes(card, board, expiry_info=False)
+        shown = notes(card, board, lang, expiry_info=False)
         for i, (slot, note) in enumerate(zip(self.note_rows.fit(len(shown)), shown)):
             y = slot.render(note, c, left, right, y + p.px("section_gap" if i == 0 else "line_gap"))
         y += p.px("row_pad_y")
@@ -366,18 +370,18 @@ class _Table(_Group):
 
     def columns(self, board: Board):
         """各欄寬度：欄名與這一輪每一列內容的最大寬度；窗口欄至少容得下小進度條。"""
-        p, f = self.p, self.p.fonts
-        widths = [f["small"].measure(h) for h in _HEADERS]
+        p, f, lang = self.p, self.p.fonts, self.p.lang
+        widths = [f["small"].measure(text(lang, key)) for key in _HEADERS]
         for i in (1, 2):
             widths[i] = max(widths[i], p.px("cell_bar_width"))
         for card in board.cards:
-            chip = _chip_width(p, _chip(card)[0])
-            widths[0] = max(widths[0], f["title"].measure(_label(card)) + p.px("chip_gap") + chip)
-            for i, window in enumerate(_windows(card), start=1):
-                window = window or _window(None)
+            chip = _chip_width(p, _chip(card, lang)[0])
+            widths[0] = max(widths[0], f["title"].measure(_label(card, lang)) + p.px("chip_gap") + chip)
+            for i, window in enumerate(_windows(card, lang), start=1):
+                window = window or _window(None, lang)
                 widths[i] = max(widths[i], f[window.font].measure(window.text), f["small"].measure(window.foot or ""))
-            widths[3] = max(widths[3], f["small"].measure(_age(card) or _NONE))
-            widths[4] = max(widths[4], f["small"].measure(_expiry(card, board)))
+            widths[3] = max(widths[3], f["small"].measure(_age(card, lang) or _NONE))
+            widths[4] = max(widths[4], f["small"].measure(_expiry(card, board, lang)))
         return widths
 
     def render(self, board: Board, c, widths, x1, x2, y):
@@ -389,7 +393,7 @@ class _Table(_Group):
             x += width + p.px("col_gap")
         mid = y + p.height("small") / 2
         for item, header, (left, _) in zip(self.headers, _HEADERS, columns):
-            p.show(item, left, mid, text=header, fill=c["sub"])
+            p.show(item, left, mid, text=text(p.lang, header), fill=c["sub"])
         y += p.height("small") + p.px("line_gap")
         for row, card in zip(self.rows.fit(len(board.cards)), board.cards):
             y = row.render(card, board, c, columns, x1, x2, y)
@@ -417,8 +421,10 @@ class LayoutB:
         self._p.fonts.clear()  # tkfont.Font 被回收時會刪掉對應的具名字型
         self._strip = self._table = None
 
-    def render(self, board: Board, theme: str, expanded: bool = False):
+    def render(self, board: Board, theme: str, expanded: bool = False, lang: str = ZH_TW):
+        """lang 的預設值只給不在意語系的呼叫端（測試）；視窗每輪都明確傳入。"""
         p, c = self._p, THEMES[theme]
+        p.lang = lang
         pad, pad_x = p.px("panel_pad"), p.px("card_pad_x")
         if expanded:
             if self._strip is not None:
@@ -451,7 +457,7 @@ class LayoutB:
         self.cv.configure(width=total_w, height=total_h)
 
     def _banner_box(self, board: Board, c, x, y, width):
-        lines = banner_lines(board, self._p.fonts.missing)
+        lines = banner_lines(board, self._p.lang, self._p.fonts.missing)
         if not lines:
             self._p.hide(self._banner_bg)
             self._banner.hide()
