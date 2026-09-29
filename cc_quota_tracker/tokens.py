@@ -10,7 +10,7 @@ THEMES = {
         "panel": "#eeeeeb", "card": "#ffffff", "shadow": "#dcdcd7",
         "fg": "#1d1d1f", "sub": "#6b6b70", "track": "#e1e1dd",
         "accent": "#3b6fd8", "chip_fg": "#ffffff",
-        "normal": "#2e9d5b", "warning": "#c99500", "critical": "#d64545",
+        "normal": "#2a9254", "warning": "#a17900", "critical": "#d64545",
         "banner": "#fbecc8", "banner_fg": "#5c4300",
     },
     "dark": {

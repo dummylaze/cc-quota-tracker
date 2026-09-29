@@ -1,5 +1,6 @@
 """懸浮視窗：無邊框、以透明色鍵挖出圓角、拖動任何位置可移動、雙擊切換精簡／展開；每 5 秒 poll 一次交給版面渲染。
 右鍵選單調整偏好與納管帳號。偏好每輪取自看板（核心依設定檔的修改時間重讀），GUI 的改動合併寫回設定檔；
+主題選「跟隨系統」時每輪讀一次 Windows 的應用程式深淺色；
 視窗位置存在納管目錄的工具狀態，不進設定檔。"""
 import json
 import os
@@ -27,7 +28,9 @@ _GRIP = 20  # 判斷位置在不在螢幕內時，看視窗左上角往內這麼
 _TITLE = "cc-quota-tracker"
 _ATTRS = {field: attr for field, (attr, _) in PREFERENCE_FIELDS.items()}
 _MODES = (("精簡", "compact"), ("展開", "expanded"))
+_THEMES = (("跟隨系統", "system"), ("淺色", "light"), ("深色", "dark"))
 _OPACITIES = PREFERENCE_FIELDS["opacity"][1]
+_PERSONALIZE_KEY = r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"  # 登錄機碼，在 HKEY_CURRENT_USER 底下
 
 
 def enable_dpi_awareness():
@@ -53,13 +56,29 @@ def on_any_screen(root: tk.Misc) -> Callable[[int, int], bool]:
     return lambda x, y: 0 <= x < root.winfo_screenwidth() and 0 <= y < root.winfo_screenheight()
 
 
+def windows_app_theme() -> str:
+    """Windows 的應用程式深淺色（light／dark）。讀不到（Windows 10 1809 以前沒有這個值、或不是 Windows）就當淺色。"""
+    if sys.platform != "win32":
+        return "light"
+    import winreg
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, _PERSONALIZE_KEY) as key:
+            apps_use_light, _ = winreg.QueryValueEx(key, "AppsUseLightTheme")  # DWORD：0 是深色
+    except OSError:
+        return "light"
+    return "dark" if apps_use_light == 0 else "light"
+
+
 class Widget:
     def __init__(self, root: tk.Tk, core, paths: ResolvedPaths,
-                 on_screen: Optional[Callable[[int, int], bool]] = None):
-        """core 提供 poll、add、import_snapshot；paths 是啟動時解析的路徑，設定檔與納管目錄都取自它。"""
+                 on_screen: Optional[Callable[[int, int], bool]] = None,
+                 system_theme: Callable[[], str] = windows_app_theme):
+        """core 提供 poll、add、import_snapshot；paths 是啟動時解析的路徑，設定檔與納管目錄都取自它。
+        system_theme 回傳系統目前的深淺色，主題選「跟隨系統」時每次渲染都問一次。"""
         self.root = root
         self._core = core
         self._paths = paths
+        self._system_theme = system_theme
         self._position_file = paths.managed_dir / STATE_DIR / "window.json"
         self._board: Optional[Board] = None
         self._prefs: Optional[Preferences] = None  # 目前套用中的偏好；None 表示還沒套用過
@@ -90,6 +109,7 @@ class Widget:
         self._menu = menu = tk.Menu(self.root, tearoff=0)
         self._topmost_var = tk.BooleanVar(self.root)
         self._mode_var = tk.StringVar(self.root)
+        self._theme_var = tk.StringVar(self.root)
         self._opacity_var = tk.IntVar(self.root)
         menu.add_checkbutton(label="置頂", variable=self._topmost_var,
                              command=lambda: self.set_preference("alwaysOnTop", self._topmost_var.get()))
@@ -98,6 +118,11 @@ class Widget:
             modes.add_radiobutton(label=label, value=value, variable=self._mode_var,
                                   command=lambda: self.set_preference("mode", self._mode_var.get()))
         menu.add_cascade(label="模式", menu=modes)
+        themes = tk.Menu(menu, tearoff=0)
+        for label, value in _THEMES:
+            themes.add_radiobutton(label=label, value=value, variable=self._theme_var,
+                                   command=lambda: self.set_preference("theme", self._theme_var.get()))
+        menu.add_cascade(label="主題", menu=themes)
         opacities = tk.Menu(menu, tearoff=0)
         for value in _OPACITIES:
             opacities.add_radiobutton(label=f"{value}%", value=value, variable=self._opacity_var,
@@ -116,7 +141,7 @@ class Widget:
 
     def menu_state(self) -> Preferences:
         return replace(self._prefs, always_on_top=self._topmost_var.get(), mode=self._mode_var.get(),
-                       opacity=self._opacity_var.get())
+                       theme=self._theme_var.get(), opacity=self._opacity_var.get())
 
     def refresh(self):
         """poll 一次並渲染，再排下一輪；排程永遠只有一個。這一輪出錯也照樣排下一輪，視窗才不會就此凍結。"""
@@ -165,10 +190,11 @@ class Widget:
             self.root.attributes("-alpha", prefs.opacity / 100)
         self._topmost_var.set(prefs.always_on_top)
         self._mode_var.set(prefs.mode)
+        self._theme_var.set(prefs.theme)
         self._opacity_var.set(prefs.opacity)
         if self._board is not None:
-            # 主題的「跟隨系統」屬票 15；在那之前跟隨系統一律用淺色
-            theme = prefs.theme if prefs.theme in ("light", "dark") else "light"
+            # 跟隨系統：每輪 poll 都會走到這裡，系統切換深淺色後下一輪就跟上
+            theme = self._system_theme() if prefs.theme == "system" else prefs.theme
             self.layout.render(self._board, theme, prefs.mode == "expanded")
 
     def _double_click(self, event):

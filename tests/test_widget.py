@@ -5,6 +5,7 @@ import unittest
 from unittest import mock
 
 from cc_quota_tracker.board import Preferences
+from cc_quota_tracker.tokens import THEMES
 from cc_quota_tracker.widget import DEFAULT_POSITION, Widget
 from tests.fakehome import HomeTestCase
 from tests.test_layout_a import BOARDS
@@ -34,11 +35,13 @@ class WidgetTestCase(HomeTestCase):
         self.root.withdraw()
         self.addCleanup(self.destroy_root)
         self.on_screen = lambda x, y: True
+        self.system_theme = "light"
         self.open_widget()
 
     def open_widget(self):
         self.counting = CountingCore(self.core)
-        self.widget = Widget(self.root, self.counting, self.paths, on_screen=lambda x, y: self.on_screen(x, y))
+        self.widget = Widget(self.root, self.counting, self.paths, on_screen=lambda x, y: self.on_screen(x, y),
+                             system_theme=lambda: self.system_theme)
 
     def destroy_root(self):
         try:
@@ -133,13 +136,48 @@ class PreferenceTest(WidgetTestCase):
         self.assertAlmostEqual(float(self.root.attributes("-alpha")), 0.7, places=2)
 
     def test_menu_shows_the_current_preferences(self):
-        self.write_settings(alwaysOnTop=False, mode="expanded", opacity=70)
+        self.write_settings(alwaysOnTop=False, mode="expanded", theme="dark", opacity=70)
         self.widget.refresh()
-        self.assertEqual(self.widget.menu_state(), Preferences(always_on_top=False, mode="expanded", opacity=70))
+        self.assertEqual(self.widget.menu_state(),
+                         Preferences(always_on_top=False, mode="expanded", theme="dark", opacity=70))
 
     def test_menu_offers_settings_and_actions(self):
         self.assertEqual(self.widget.menu_labels(),
-                         ["置頂", "模式", "透明度", "納管目前登入的帳號…", "匯入憑證檔…", "開啟納管目錄", "結束"])
+                         ["置頂", "模式", "主題", "透明度", "納管目前登入的帳號…", "匯入憑證檔…", "開啟納管目錄", "結束"])
+
+
+class ThemeTest(WidgetTestCase):
+    def fills(self):
+        return {self.widget.canvas.itemcget(i, "fill") for i in self.widget.canvas.find_all()}
+
+    def assertShows(self, theme):
+        other = "dark" if theme == "light" else "light"
+        self.assertIn(THEMES[theme]["panel"], self.fills())
+        self.assertNotIn(THEMES[other]["panel"], self.fills())
+
+    def test_follows_system_by_default_and_rechecks_every_round(self):
+        self.assertEqual(self.widget.menu_state().theme, "system")
+        self.assertShows("light")
+        self.system_theme = "dark"  # Windows 切換了應用程式深淺色
+        self.widget.refresh()
+        self.assertShows("dark")
+        self.system_theme = "light"
+        self.widget.refresh()
+        self.assertShows("light")
+
+    def test_chosen_theme_ignores_the_system(self):
+        self.system_theme = "dark"
+        self.widget.set_preference("theme", "light")
+        self.widget.refresh()
+        self.assertShows("light")
+        self.assertEqual(self.settings()["theme"], "light")
+
+    def test_switching_back_and_forth_keeps_the_same_items(self):
+        before = self.widget.canvas.find_all()
+        for theme in ("dark", "light", "system", "dark") * 5:
+            self.widget.set_preference("theme", theme)
+        self.widget.set_preference("theme", "light")
+        self.assertEqual(self.widget.canvas.find_all(), before)  # 同一批 item，只改了屬性
 
 
 class PositionTest(WidgetTestCase):
