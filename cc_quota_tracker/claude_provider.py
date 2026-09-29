@@ -3,6 +3,7 @@ import json
 import os
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from enum import Enum
 from pathlib import Path
 from typing import Optional, Tuple, Union
 
@@ -86,6 +87,146 @@ def parse_cache(cache) -> Union[UsageReading, SchemaMismatch]:
         return _to_reading(cache)
     except (KeyError, TypeError, ValueError, AttributeError):
         return SchemaMismatch()
+
+
+class FieldStatus(Enum):
+    OK = "ok"
+    MISSING = "missing"  # 必要欄位不存在
+    WRONG_TYPE = "wrong_type"
+    ABSENT = "absent"  # 可選欄位不存在或為 null
+    NO_ITEMS = "no_items"  # 清單是空的，元素的欄位無從檢查
+    PARENT_ABSENT = "parent_absent"  # 上層不存在或為 null：可選的上層不在就免檢查，必要的上層由上層那一列報告
+    UNREACHABLE = "unreachable"  # 上層欄位不存在或型別不符，由上層那一列報告
+
+
+@dataclass(frozen=True)
+class FieldCheck:
+    path: str
+    expected: str  # 型別：object／list／string／number／boolean
+    required: bool
+    status: FieldStatus
+    actual: Optional[str] = None  # 型別不符時的實際型別，同一套型別名稱加上 null
+
+
+@dataclass(frozen=True)
+class SchemaCheck:
+    fields: Tuple[FieldCheck, ...]
+    unknown_fields: Tuple[Tuple[str, bool], ...]  # utilization 底下不在已知清單的欄位：(名稱, 是否額度形狀)
+    parses: bool  # 解析層實際解析得動；欄位清單沒列到的依賴壞掉時，靠這一項兜住
+
+    @property
+    def failures(self) -> Tuple[FieldCheck, ...]:
+        return tuple(f for f in self.fields if f.status in (FieldStatus.MISSING, FieldStatus.WRONG_TYPE))
+
+    @property
+    def compatible(self) -> bool:
+        return self.parses and not self.failures
+
+
+_USAGE = "cachedUsageUtilization.utilization"
+# 本工具依賴的欄位路徑：(路徑, 型別, 必要)。路徑從 .claude.json 的根算起，[] 表示清單裡的每一個元素。
+# 上層排在下層前面；可選欄位不存在或為 null 不算不相容，有值就必須是這個型別。可選物件底下的必要欄位，只在該物件存在時檢查。
+# 這份清單列的是架設者最需要看到的路徑，不是解析層依賴的全集：相容與否最終以解析層實際解析的結果為準
+DEPENDED_FIELDS = (
+    ("oauthAccount", "object", True),
+    ("oauthAccount.accountUuid", "string", True),
+    ("cachedUsageUtilization", "object", True),
+    ("cachedUsageUtilization.fetchedAtMs", "number", True),
+    ("cachedUsageUtilization.accountUuid", "string", True),
+    (_USAGE, "object", True),
+    (f"{_USAGE}.limits", "list", True),
+    (f"{_USAGE}.limits[]", "object", True),
+    (f"{_USAGE}.limits[].kind", "string", True),
+    (f"{_USAGE}.limits[].percent", "number", True),
+    (f"{_USAGE}.limits[].severity", "string", False),
+    (f"{_USAGE}.limits[].resets_at", "string", False),
+    (f"{_USAGE}.limits[].is_active", "boolean", False),
+    (f"{_USAGE}.limits[].scope", "object", False),
+    *((f"{_USAGE}.{name}", "object", False) for name in (
+        *WINDOW_FIELDS.values(), *MODEL_WEEKLY_FIELDS, "seven_day_breakdown", "extra_usage", "spend")),
+    (f"{_USAGE}.seven_day_breakdown.rows", "list", True),
+    (f"{_USAGE}.seven_day_breakdown.rows[]", "object", True),
+    (f"{_USAGE}.seven_day_breakdown.rows[].key", "string", True),
+    (f"{_USAGE}.seven_day_breakdown.rows[].display_name", "string", True),
+    (f"{_USAGE}.seven_day_breakdown.rows[].percent", "number", True),
+    (f"{_USAGE}.extra_usage.is_enabled", "boolean", True),
+    (f"{_USAGE}.spend.enabled", "boolean", True),
+)
+# utilization 底下已經見過的欄位（2026-09 實測）。本工具多半不用它們，列在這裡只是為了讓檢查指令只報新出現的欄位；
+# 代號欄位若變成額度形狀，看板照樣當成其他限額顯示，與這份清單無關
+OBSERVED_USAGE_FIELDS = frozenset({
+    "limits", *KNOWN_FIELDS, "seven_day_breakdown", "spend", "member_dashboard_available",
+    "seven_day_cowork", "seven_day_oauth_apps", "seven_day_omelette", "omelette_promotional",
+    "amber_cistern", "amber_gauge", "amber_ladder", "brass_thimble", "cedar_ember", "cinder_cove",
+    "copper_kite", "harbor_lantern", "iguana_necktie", "juniper_tide", "nimbus_quill", "tangelo", "wattle_ember",
+})
+
+_TYPES = (("null", type(None)), ("boolean", bool), ("number", (int, float)), ("string", str),
+          ("list", list), ("object", dict))  # bool 是 int 的子類別，所以排在 number 前面
+_ABSENT = object()
+
+
+def check_schema(text: str) -> Union[SchemaCheck, TransientlyUnreadable, NoReading]:
+    """架設者檢查指令用：逐一驗證本工具依賴的欄位。只回報型別，不帶出任何欄位的值。"""
+    try:
+        raw = json.loads(text)
+    except ValueError:
+        return TransientlyUnreadable()
+    if not isinstance(raw, dict) or "cachedUsageUtilization" not in raw:
+        return NoReading()
+    fields = tuple(_check_field(raw, *spec) for spec in DEPENDED_FIELDS)
+    usage = _values(raw, _USAGE)[0]
+    usage = usage[0] if usage and isinstance(usage[0], dict) else {}
+    unknown = tuple((name, _is_limit_field(value)) for name, value in usage.items()
+                    if name not in OBSERVED_USAGE_FIELDS)
+    parses = not isinstance(parse_cache(raw["cachedUsageUtilization"]), SchemaMismatch)
+    return SchemaCheck(fields, unknown, parses)
+
+
+def _check_field(raw: dict, path: str, expected: str, required: bool) -> FieldCheck:
+    """必要欄位為 null 算型別不符；可選欄位為 null 與不存在相同。"""
+    values, parent_absent = _values(raw, path)
+    if values is None:
+        return FieldCheck(path, expected, required, FieldStatus.UNREACHABLE)
+    if not values:
+        return FieldCheck(path, expected, required,
+                          FieldStatus.PARENT_ABSENT if parent_absent else FieldStatus.NO_ITEMS)
+    present = [v for v in values if v is not _ABSENT and (required or v is not None)]
+    wrong = next((_type_name(v) for v in present if _type_name(v) != expected), None)
+    if wrong:
+        return FieldCheck(path, expected, required, FieldStatus.WRONG_TYPE, wrong)
+    if len(present) < len(values) and required:
+        return FieldCheck(path, expected, required, FieldStatus.MISSING)
+    return FieldCheck(path, expected, required, FieldStatus.OK if present else FieldStatus.ABSENT)
+
+
+def _values(raw: dict, path: str) -> Tuple[Optional[list], bool]:
+    """路徑上的所有值（不存在的以 _ABSENT 表示），以及是否有上層不存在或為 null 而略過。
+    途中的上層型別不符（不是物件，或 [] 那層不是清單）時，值為 None。"""
+    nodes, parent_absent = [raw], False
+    parts = path.split(".")
+    for depth, part in enumerate(parts):
+        name, each = (part[:-2], True) if part.endswith("[]") else (part, False)
+        found = []
+        for node in nodes:
+            if depth and (node is _ABSENT or node is None):
+                parent_absent = True
+                continue
+            if not isinstance(node, dict):
+                return None, parent_absent
+            value = node.get(name, _ABSENT)
+            if each and not isinstance(value, list):
+                if value is _ABSENT or value is None:
+                    parent_absent = True
+                    continue
+                return None, parent_absent
+            found.extend(value if each else [value])
+        nodes = found
+    return nodes, parent_absent
+
+
+def _type_name(value) -> str:
+    return next(name for name, kind in _TYPES if isinstance(value, kind))
 
 
 def read_settings(providers) -> ProviderSettings:
