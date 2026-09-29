@@ -1,9 +1,10 @@
 """把看板渲染成終端機文字；所有文案都在這一層套用。"""
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Optional
 
 from . import COMMAND
-from .board import Board, Card, CountdownFormat, Limit, Money, ReadingState, Role
+from .board import Board, Card, Limit, Money, ReadingState, Role
+from .fmt import absolute, account_label, age, countdown, until
 
 _WINDOW_NAMES = {"session": "工作階段窗口", "weekly_all": "週窗口", "weekly_scoped": "週限額"}
 _UPDATES_SOON = "Claude Code 更新額度快取後就會出現"
@@ -21,7 +22,7 @@ def render(board: Board) -> str:
                         "Claude Code 目錄若不在 home（例如設了 CLAUDE_CONFIG_DIR），請在設定檔的 claudeConfigDir 指定。")
     if board.settings_unreadable:
         lines.insert(0, SETTINGS_UNREADABLE)
-    labels = [key.split(":", 1)[1] for key in board.managed_accounts]  # 畫面上只顯示帳號標籤
+    labels = [account_label(key) for key in board.managed_accounts]
     lines.append("納管帳號：" + "、".join(labels) if labels else "尚未納管任何帳號")
     return "\n".join(lines)
 
@@ -29,13 +30,13 @@ def render(board: Board) -> str:
 def _render_card(card: Card, board: Board) -> str:
     body = _body(card, board)
     expires = card.snapshot_expires_at
-    label = card.account_key.split(":", 1)[1] if card.account_key else None
+    label = account_label(card.account_key) if card.account_key else None
     if expires is not None:
         if expires <= board.as_of:
-            when = f"憑證快照已過期（{_absolute(expires, board.as_of)}）"
+            when = f"憑證快照已過期（{absolute(expires, board.as_of)}）"
         else:
-            left = _countdown(expires - board.as_of, board.countdown_format)
-            when = f"憑證快照 {left}後到期（{_absolute(expires, board.as_of)}）"
+            left = countdown(expires - board.as_of, board.countdown_format)
+            when = f"憑證快照 {left}後到期（{absolute(expires, board.as_of)}）"
         if card.snapshot_expiring:
             body.insert(0, f"{when}：在 Claude Code 重新登入這個帳號，再執行 {COMMAND} add {label}")
         else:
@@ -48,7 +49,7 @@ def _render_card(card: Card, board: Board) -> str:
 def _header(card: Card) -> str:
     if card.role is Role.UNMANAGED:
         return f"[使用中] 未納管帳號（納管方法：在 Claude Code 登入這個帳號後執行 {COMMAND} add <帳號標籤>）"
-    label = card.account_key.split(":", 1)[1]  # 畫面上只顯示帳號標籤
+    label = account_label(card.account_key)
     return f"[{'使用中' if card.role is Role.ACTIVE else '待命'}] {label}"
 
 
@@ -58,9 +59,9 @@ def _body(card: Card, board: Board) -> list:
     if card.reading_state is ReadingState.PENDING:
         return ["讀數待更新，" + _UPDATES_SOON]
     if card.role is Role.STANDBY:
-        lines = [f"最後觀測：{_age(card.reading_age)}（觀測值：觀測之後這個帳號沒再被用過才準確）"]
+        lines = [f"最後觀測：{age(card.reading_age)}（觀測值：觀測之後這個帳號沒再被用過才準確）"]
     else:
-        lines = ["讀數年齡：" + _age(card.reading_age)]
+        lines = ["讀數年齡：" + age(card.reading_age)]
         if card.lagging:
             lines.append("有新對話，額度尚未更新")
     if card.locked_reason:
@@ -89,7 +90,7 @@ def _limit_line(lim: Limit, board: Board) -> str:
     if lim.reset:
         return f"{name}  已重置，下次重置時間未知"
     value = "無計時中窗口" if lim.percent is None else f"{lim.percent}%"
-    line = f"{name}  {value}  重置：{_until(lim.resets_at, board) if lim.resets_at else '未知'}"
+    line = f"{name}  {value}  重置：{until(lim.resets_at, board.as_of, board.countdown_format) if lim.resets_at else '未知'}"
     if lim.dollars and lim.dollars.used is not None:
         line += f"  已用 ${lim.dollars.used:g}"
     return line
@@ -99,41 +100,9 @@ def _time(value: Optional[datetime]) -> str:
     return value.astimezone().strftime("%Y-%m-%d %H:%M") if value else "未知"
 
 
-def _until(when: datetime, board: Board) -> str:
-    """倒數＋絕對時間，例如「2小時15分後（14:00）」。"""
-    return f"{_countdown(when - board.as_of, board.countdown_format)}後（{_absolute(when, board.as_of)}）"
-
-
-def _countdown(left: timedelta, fmt: CountdownFormat) -> str:
-    """兩個單位，不足的部分一律捨去、不進位：剩一天以上是「天＋時」（或天數到小數第 1 位），不到一天是「時＋分」。"""
-    seconds = int(left.total_seconds())
-    days, rest = divmod(seconds, 86400)
-    hours, minutes = rest // 3600, rest % 3600 // 60
-    if days and fmt is CountdownFormat.DECIMAL_DAYS:
-        tenths = seconds * 10 // 86400
-        return f"{tenths // 10}.{tenths % 10}天"
-    if days:
-        return f"{days}天{hours}小時"
-    return f"{hours}小時{minutes}分" if hours else f"{minutes}分"
-
-
-def _absolute(when: datetime, now: datetime) -> str:
-    """24 小時內只顯示時刻，更遠的加上月日；不顯示年份。"""
-    local = when.astimezone()
-    return local.strftime("%H:%M" if abs(when - now) < timedelta(days=1) else "%m-%d %H:%M")
-
-
 def _money(value: Optional[Money]) -> str:
     if value is None:
         return "—"
     amount = value.minor / 10 ** value.exponent
     return f"{amount:.{value.exponent}f} {value.currency or ''}".rstrip()
 
-
-def _age(age: timedelta) -> str:
-    minutes = int(age.total_seconds() // 60)
-    if minutes < 60:
-        return f"{minutes} 分鐘前"
-    if minutes < 60 * 24:
-        return f"{minutes // 60} 小時前"
-    return f"{minutes // (60 * 24)} 天前"

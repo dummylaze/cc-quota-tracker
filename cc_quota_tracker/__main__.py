@@ -15,7 +15,8 @@ USAGE = f"""用法：
   {COMMAND} add <帳號標籤>     納管 Claude Code 目前登入的帳號；標籤已存在就重新納管
   {COMMAND} remove <帳號標籤>  移除納管帳號
   {COMMAND} list               列出看板
-  {COMMAND} check              檢查 Claude Code 的額度快取結構是否仍與本工具相容，並列出實際使用的目錄"""
+  {COMMAND} check              檢查 Claude Code 的額度快取結構是否仍與本工具相容，並列出實際使用的目錄
+  {COMMAND} gui                開啟懸浮視窗；改用 pythonw 執行就不會出現主控台視窗"""
 
 _WARNINGS = {
     AddWarning.LABEL_LOOKS_LIKE_EMAIL: "注意：這個帳號標籤看起來像 email，它會顯示在畫面上。"
@@ -37,17 +38,21 @@ _PATH_PROBLEMS = {
 def main(argv=None) -> int:
     args = sys.argv[1:] if argv is None else argv
     command, params = (args[0], args[1:]) if args else (None, [])
-    if (command, len(params)) not in {("add", 1), ("remove", 1), ("list", 0), ("check", 0)}:
+    if (command, len(params)) not in {("add", 1), ("remove", 1), ("list", 0), ("check", 0), ("gui", 0)}:
         print(USAGE, file=sys.stderr)
         return 2
     try:
         paths = resolve_paths(Path.home(), os.environ)
     except InvalidPathSetting as e:
-        print(_PATH_PROBLEMS[e.problem].format(field=e.field), file=sys.stderr)
-        print(f"設定檔位置：{e.settings_file}", file=sys.stderr)
+        message = _PATH_PROBLEMS[e.problem].format(field=e.field) + f"\n設定檔位置：{e.settings_file}"
+        if command == "gui":  # pythonw 沒有主控台，印出來使用者看不到
+            _show_error(message)
+        print(message, file=sys.stderr)
         return 1
     if command == "check":
         return check(paths)
+    if command == "gui":
+        return gui(paths)
     core = Core(paths, lambda: datetime.now(timezone.utc))
     if command == "list":
         print(render(core.poll()))
@@ -75,6 +80,26 @@ def main(argv=None) -> int:
         print(f"沒有帳號標籤為「{label}」的納管帳號。", file=sys.stderr)
         return 1
     return 0
+
+
+def gui(paths: ResolvedPaths) -> int:
+    import tkinter as tk
+    from .widget import Widget, enable_dpi_awareness
+    enable_dpi_awareness()
+    root = tk.Tk()
+    core = Core(paths, lambda: datetime.now(timezone.utc))
+    Widget(root, core.poll)
+    root.mainloop()
+    return 0
+
+
+def _show_error(message: str):
+    import tkinter as tk
+    from tkinter import messagebox
+    root = tk.Tk()
+    root.withdraw()
+    messagebox.showerror("cc-quota-tracker", message, parent=root)
+    root.destroy()
 
 
 _TYPE_NAMES = {"object": "物件", "list": "清單", "string": "字串", "number": "數字", "boolean": "布林", "null": "null"}

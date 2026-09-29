@@ -88,7 +88,7 @@ class CliTest(HomeTestCase):
         self.assertNotIn("可能讀錯位置", self.run_cli("list")[1])
 
     def test_bad_usage_prints_full_command(self):
-        for args in [(), ("add",), ("add", "a", "b"), ("list", "x"), ("nope",)]:
+        for args in [(), ("add",), ("add", "a", "b"), ("list", "x"), ("gui", "x"), ("nope",)]:
             with self.subTest(args=args):
                 code, _, err = self.run_cli(*args)
                 self.assertEqual(code, 2)
