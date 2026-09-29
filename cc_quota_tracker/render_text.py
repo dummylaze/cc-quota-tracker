@@ -61,6 +61,8 @@ def _body(card: Card, board: Board) -> list:
         lines = [f"最後觀測：{_age(card.reading_age)}（觀測值：觀測之後這個帳號沒再被用過才準確）"]
     else:
         lines = ["讀數年齡：" + _age(card.reading_age)]
+        if card.lagging:
+            lines.append("有新對話，額度尚未更新")
     if card.locked_reason:
         lines.append("額度已鎖定：" + card.locked_reason)
     lines += [_limit_line(lim, board) for lim in card.limits + card.scoped_limits]

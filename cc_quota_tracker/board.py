@@ -93,6 +93,7 @@ class Card:
     role: Role
     reading_state: ReadingState
     reading_age: Optional[timedelta] = None
+    lagging: bool = False  # 落後讀數：觀測之後本機又有新對話。只有使用中帳號會是 True
     limits: Tuple[Limit, ...] = ()
     scoped_limits: Tuple[Limit, ...] = ()
     other_limits: Tuple[Limit, ...] = ()

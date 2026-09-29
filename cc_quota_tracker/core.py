@@ -6,7 +6,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from enum import Enum
 from pathlib import Path
-from typing import Callable, FrozenSet, Optional, Set, Tuple
+from typing import Callable, FrozenSet, NamedTuple, Optional, Set, Tuple
 
 from . import atomic
 from . import claude_provider as provider
@@ -21,6 +21,15 @@ _ILLEGAL_IN_NAME = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 _RESERVED_NAMES = {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 10)),
                    *(f"LPT{i}" for i in range(1, 10))}
 SCHEMA_CHANGE_ROUNDS = 3  # 結構不符連續這麼多輪才判定為結構變更；偶發一次不亮橫幅
+# 沒落後時多久重掃一次對話紀錄：落後提示最多晚這麼久出現，換來不必每輪 poll 都 stat 所有對話紀錄
+LAG_SCAN_INTERVAL = timedelta(seconds=60)
+
+
+class _LagScan(NamedTuple):
+    """上一次掃描對話紀錄：比對的是哪個觀測時間、何時掃的、結果是否落後。"""
+    observed_at: datetime
+    scanned_at: datetime
+    lagging: bool
 
 
 class AddWarning(Enum):
@@ -60,6 +69,8 @@ class Core:
     def __init__(self, paths: ResolvedPaths, clock: Callable[[], datetime]):
         self._source = paths.claude_json
         self._credentials = paths.claude_dir / provider.CREDENTIALS
+        self._transcripts = paths.claude_dir / provider.TRANSCRIPTS
+        self._lag_scan: Optional[_LagScan] = None
         self._managed_dir = paths.managed_dir  # 憑證快照直接放在這一層
         self._paths = paths
         self._source_missing = False
@@ -429,6 +440,7 @@ class Core:
         return Card(
             key, role, ReadingState.HAS_READING,
             reading_age=now - reading.observed_at,
+            lagging=role is not Role.STANDBY and self._lagging(reading),
             limits=_as_of(self._graded(reading.limits), now),
             scoped_limits=_as_of(self._graded(reading.scoped_limits), now),
             other_limits=_as_of(self._graded(reading.other_limits), now),
@@ -438,6 +450,17 @@ class Core:
             spend=reading.spend and replace(reading.spend, severity=self._grade(reading.spend.severity,
                                                                                  reading.spend.percent)),
         )
+
+    def _lagging(self, reading: provider.UsageReading) -> bool:
+        """落後讀數：觀測時間之後，本機有對話紀錄被修改。已判為落後就維持到下一個讀數；
+        沒落後時每 LAG_SCAN_INTERVAL 才重掃一次。讀數換了（觀測時間不同）立刻重掃。"""
+        now, last = self._clock(), self._lag_scan
+        if last and last.observed_at == reading.observed_at and (
+                last.lagging or timedelta(0) <= now - last.scanned_at < LAG_SCAN_INTERVAL):  # 時鐘往回撥也重掃
+            return last.lagging
+        lagging = provider.transcripts_modified_after(self._transcripts, reading.observed_at.timestamp())
+        self._lag_scan = _LagScan(reading.observed_at, now, lagging)
+        return lagging
 
     def _graded(self, limits: Tuple[Limit, ...]) -> Tuple[Limit, ...]:
         return tuple(replace(lim, severity=self._grade(lim.severity, lim.percent)) for lim in limits)

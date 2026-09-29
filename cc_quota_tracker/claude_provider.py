@@ -1,7 +1,9 @@
 """Claude 供應商的解析層：唯一接觸 ~/.claude.json 原始 dict 的地方。"""
 import json
+import os
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Optional, Tuple, Union
 
 from .board import (BreakdownRow, Dollars, ExtraUsage, Limit, Money, Severity, Spend,
@@ -9,6 +11,7 @@ from .board import (BreakdownRow, Dollars, ExtraUsage, Limit, Money, Severity, S
 
 PROVIDER = "claude"  # 帳號鍵的供應商前綴
 CREDENTIALS = ".credentials.json"  # Claude Code 目錄裡的當前憑證
+TRANSCRIPTS = "projects"  # Claude Code 目錄裡的對話紀錄：<專案>/<對話>.jsonl，每輪對話都會寫入
 WEEKLY_KIND = "weekly_all"
 WINDOW_KINDS = ("session", WEEKLY_KIND)
 SCOPED_KIND = "weekly_scoped"
@@ -104,6 +107,27 @@ def grade(severity: Optional[Severity], percent: Optional[int], settings: Provid
     if percent is None or percent < settings.warning_percent:
         return Severity.NORMAL
     return Severity.WARNING if percent < settings.critical_percent else Severity.CRITICAL
+
+
+def transcripts_modified_after(transcripts: Path, since: float) -> bool:
+    """<專案>/<對話>.jsonl 有沒有任何一份在 since 之後修改過。找到一份就停；
+    只逐項 stat、不留清單，對話紀錄再多，記憶體也不隨之增加。讀不到的目錄當成沒有活動。"""
+    try:
+        projects = os.scandir(transcripts)
+    except OSError:
+        return False
+    with projects:
+        for project in projects:
+            try:
+                if not project.is_dir():
+                    continue
+                with os.scandir(project.path) as sessions:
+                    if any(s.name.endswith(".jsonl") and s.is_file() and s.stat().st_mtime > since
+                           for s in sessions):
+                        return True
+            except OSError:
+                continue
+    return False
 
 
 def account_id(text: str) -> Optional[str]:
