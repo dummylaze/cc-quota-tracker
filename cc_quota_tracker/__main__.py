@@ -123,10 +123,10 @@ def check(paths: ResolvedPaths) -> int:
             status += f"：實際為{_TYPE_NAMES[f.actual]}"
         print(f"  [{status}] {f.path}（{expected}）")
     print()
-    print("未知欄位（utilization 底下，不在已知清單內）：")
-    for name, limit_shaped in result.unknown_fields:
+    print("新出現的欄位（utilization 底下，實測基準之後才出現的）：")
+    for name, limit_shaped in result.new_fields:
         print(f"  {name}" + ("（額度形狀，看板會當成其他限額顯示）" if limit_shaped else ""))
-    if not result.unknown_fields:
+    if not result.new_fields:
         print("  無")
     if not result.parses:
         print()

@@ -111,7 +111,7 @@ class FieldCheck:
 @dataclass(frozen=True)
 class SchemaCheck:
     fields: Tuple[FieldCheck, ...]
-    unknown_fields: Tuple[Tuple[str, bool], ...]  # utilization 底下不在已知清單的欄位：(名稱, 是否額度形狀)
+    new_fields: Tuple[Tuple[str, bool], ...]  # utilization 底下不在 OBSERVED_USAGE_FIELDS 的欄位：(名稱, 是否額度形狀)
     parses: bool  # 解析層實際解析得動；欄位清單沒列到的依賴壞掉時，靠這一項兜住
 
     @property
@@ -177,10 +177,10 @@ def check_schema(text: str) -> Union[SchemaCheck, TransientlyUnreadable, NoReadi
     fields = tuple(_check_field(raw, *spec) for spec in DEPENDED_FIELDS)
     usage = _values(raw, _USAGE)[0]
     usage = usage[0] if usage and isinstance(usage[0], dict) else {}
-    unknown = tuple((name, _is_limit_field(value)) for name, value in usage.items()
+    new = tuple((name, _is_limit_field(value)) for name, value in usage.items()
                     if name not in OBSERVED_USAGE_FIELDS)
     parses = not isinstance(parse_cache(raw["cachedUsageUtilization"]), SchemaMismatch)
-    return SchemaCheck(fields, unknown, parses)
+    return SchemaCheck(fields, new, parses)
 
 
 def _check_field(raw: dict, path: str, expected: str, required: bool) -> FieldCheck:

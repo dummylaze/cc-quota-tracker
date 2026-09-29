@@ -114,22 +114,22 @@ class SchemaCheckTest(HomeTestCase):
         self.assertIn("解析層無法解析", out)
         self.assertIn("不相容", out.splitlines()[-1])
 
-    def test_lists_unknown_fields_under_utilization(self):
+    def test_lists_new_fields_under_utilization(self):
         self.write_cache(brand_new_limit=limit_field(5), brand_new_flag=True,
                          five_hour=limit_field(10), amber_cistern=None)
         code, out = self.run_check()
-        self.assertEqual(code, 0)  # 未知欄位只是提示，不算不相容
-        unknown = out[out.index("未知欄位"):]
-        limit_line = next(ln for ln in unknown.splitlines() if "brand_new_limit" in ln)
+        self.assertEqual(code, 0)  # 新出現的欄位只是提示，不算不相容
+        new_part = out[out.index("新出現的欄位"):]
+        limit_line = next(ln for ln in new_part.splitlines() if "brand_new_limit" in ln)
         self.assertIn("其他限額", limit_line)
-        self.assertIn("brand_new_flag", unknown)
+        self.assertIn("brand_new_flag", new_part)
         for known in ("five_hour", "amber_cistern", "limits"):
-            self.assertNotIn(known, unknown)
+            self.assertNotIn(known, new_part)
 
-    def test_no_unknown_fields_says_so(self):
+    def test_no_new_fields_says_so(self):
         self.write_cache()
         out = self.run_check()[1]
-        self.assertIn("無", out[out.index("未知欄位"):].splitlines()[1])
+        self.assertIn("無", out[out.index("新出現的欄位"):].splitlines()[1])
 
     def test_output_has_no_account_id_or_email(self):
         self.write_cache(oauth="acct-secret-1", account_uuid="acct-secret-1")
