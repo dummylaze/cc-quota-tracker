@@ -93,7 +93,7 @@ Standby accounts show their **last observed** reading and how long ago that was 
 
 ## Credentials expire
 
-A credential snapshot's refresh token lives about 30 days. Each card shows the time left; when less than `expiryWarningDays` (default 7) remain, it warns you. To renew: log in to that account again in Claude Code, then run `add <label>` again. A card that says the credential snapshot is invalid means Claude Code rotated the token; renew it the same way. The tool never rewrites a credential snapshot on its own.
+A credential snapshot's refresh token lives about 30 days. Each card shows the time left; when less than `expiryWarningDays` (default 7) remain, it warns you. To renew (the card just says "renew it"): log in to that account again in Claude Code, then either right-click the window and choose *Manage the signed-in account…* with the same label, or run `add <label>` again. A card that says the credential snapshot is invalid means Claude Code rotated the token; renew it the same way. The tool never rewrites a credential snapshot on its own.
 
 ## Window and menu
 
