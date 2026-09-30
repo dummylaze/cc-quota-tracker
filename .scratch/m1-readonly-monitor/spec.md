@@ -1,6 +1,6 @@
 # M1 唯讀監控
 
-Status: ready-for-agent
+Status: resolved
 
 ## 問題陳述（Problem Statement）
 
