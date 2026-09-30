@@ -36,7 +36,7 @@ STRINGS = {
     "limit.no_open_window": "No open window",
     "limit.resets": "Resets: {when}",
     "limit.dollars_used": "Used ${used}",
-    "week.span": "This week {start} – {end}",
+    "week.span": "Week {start} – {end}",
     "week.passed": "{percent}% elapsed",
     "breakdown.title": "Where this week's usage went",
     "extra_usage": "Extra usage",
@@ -53,7 +53,7 @@ STRINGS = {
     "reading.none": "No reading yet",
     "reading.none_soon": "No reading yet; it will appear once Claude Code updates its usage cache",
     "reading.pending": "Reading pending; it will appear once Claude Code updates its usage cache",
-    "reading.lagging": "New conversation activity; usage not updated yet",
+    "reading.lagging": "New activity; usage not updated",
     "reading.locked": "Usage locked: {reason}",
     "note.observed": "Observed value: only accurate if this account hasn't been used since; "
                      "use on another machine isn't visible here",
@@ -64,8 +64,8 @@ STRINGS = {
     "snapshot.expired": "Credential snapshot expired ({when})",
     "snapshot.expires_in": "Credential snapshot expires in {left} ({when})",
     "snapshot.relogin": "{when}: sign in to this account again in Claude Code, then run {command} add {label}",
-    "snapshot.invalid": "Credential snapshot is no longer valid: Claude Code is signed in to this account; "
-                        "run {command} add {label} to manage it again",
+    "snapshot.renew": "{when}; renew it",
+    "snapshot.invalid": "Credential snapshot is no longer valid; renew it",
 
     # Banner
     "settings.invalid": "The values of {fields} in the settings file are invalid, so defaults are used for them; "

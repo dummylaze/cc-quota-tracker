@@ -5,7 +5,7 @@ from typing import Optional
 
 from . import COMMAND
 from .board import Board, Card, ReadingState, Role
-from .fmt import absolute, account_label, age, countdown
+from .fmt import absolute, age, countdown
 from .i18n import text
 
 LINE_TAG = "wrapped-line"  # 多行文字的逐行 item；同一段的各行共用最後一個 tag。測試靠它把各行接回一段
@@ -36,9 +36,8 @@ def notes(card: Card, board: Board, lang: str, expiry_info: bool = True):
 
 
 def _snapshot_note(card: Card, board: Board, lang: str):
-    label = account_label(card.account_key) if card.account_key else None
     if card.snapshot_invalid:
-        return text(lang, "snapshot.invalid", command=COMMAND, label=label), "critical", "critical"
+        return text(lang, "snapshot.invalid"), "critical", "critical"
     expires = card.snapshot_expires_at
     if expires is None:
         return None
@@ -49,7 +48,7 @@ def _snapshot_note(card: Card, board: Board, lang: str):
                       when=when))
     if not card.snapshot_expiring:
         return note, "sub", "fg"
-    note = text(lang, "snapshot.relogin", when=note, command=COMMAND, label=label)
+    note = text(lang, "snapshot.renew", when=note)
     return (note, "critical", "critical") if expired else (note, "warning", "fg")
 
 

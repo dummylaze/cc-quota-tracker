@@ -62,7 +62,8 @@ STRINGS = {
     "snapshot.expired": "憑證快照已過期（{when}）",
     "snapshot.expires_in": "憑證快照 {left}後到期（{when}）",
     "snapshot.relogin": "{when}：在 Claude Code 重新登入這個帳號，再執行 {command} add {label}",
-    "snapshot.invalid": "憑證快照已失效：Claude Code 目前登入的就是這個帳號，執行 {command} add {label} 重新納管",
+    "snapshot.renew": "{when}，請重新納管",
+    "snapshot.invalid": "憑證快照已失效，請重新納管",
 
     # 橫幅
     "settings.invalid": "設定檔的 {fields} 值不合法，這幾項改用預設值；請參考 README 的欄位說明修正。",

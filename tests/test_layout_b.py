@@ -130,9 +130,9 @@ class LayoutBExpandedTest(LayoutBTestCase):
         return next(i for i in self.canvas.find_all() if self.canvas.type(i) == "text" and self.visible(i)
                     and self.canvas.itemcget(i, "text") and text.startswith(self.canvas.itemcget(i, "text").rstrip()[:6]))
 
-    def test_expiry_warning_keeps_the_remedy_as_a_note(self):
+    def test_expiry_warning_keeps_a_short_prompt_as_a_note(self):
         shown = self.shown(EXPANDED_BOARDS[0], expanded=True)
-        self.assertTrue([t for t in shown if "後到期" in t and "add work" in t])
+        self.assertTrue([t for t in shown if "後到期" in t and t.endswith("請重新納管")])
         self.assertTrue(self.fills(THEMES["light"]["warning"]))
 
     def test_active_row_has_a_tinted_background_and_standby_rows_do_not(self):

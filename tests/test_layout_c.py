@@ -225,7 +225,7 @@ class LayoutCExpandedTest(LayoutCTestCase):
 
     def test_credential_expiry_warning_is_a_note(self):
         shown = self.shown(EXPANDED_BOARDS[0], expanded=True)
-        self.assertTrue([t for t in shown if "後到期" in t and "add work" in t])
+        self.assertTrue([t for t in shown if "後到期" in t and t.endswith("請重新納管")])
         self.assertTrue(self.fills(THEMES["light"]["warning"]))
 
     def test_expanded_items_exist_only_in_expanded_mode(self):

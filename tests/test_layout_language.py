@@ -142,5 +142,31 @@ class LayoutCEnglishTest(LayoutLanguageTestCase):
         self.assertIn("lab: No reading yet", shown)
 
 
+class NoOverlapTest(LayoutLanguageTestCase):
+    def overlaps(self, canvas):
+        boxes = [(canvas.itemcget(i, "text"), canvas.bbox(i)) for i in canvas.find_all()
+                 if canvas.type(i) == "text" and canvas.itemcget(i, "state") != "hidden" and canvas.itemcget(i, "text")]
+        return [(a, b) for n, (a, (ax1, ay1, ax2, ay2)) in enumerate(boxes) for b, (bx1, by1, bx2, by2) in boxes[n + 1:]
+                if ax1 < bx2 and bx1 < ax2 and ay1 < by2 and by1 < ay2]
+
+    def test_no_two_texts_overlap_in_either_language(self):
+        for make in LAYOUTS:
+            for lang in ("zh-TW", "en"):
+                for expanded in (False, True):
+                    for i, board in enumerate(BOARDS_EN):
+                        canvas = tk.Canvas(self.root)
+                        layout = make(canvas)
+                        layout.render(board, "light", expanded, lang)
+                        self.assertEqual(self.overlaps(canvas), [], (make.__name__, lang, expanded, i))
+                        layout.destroy()
+
+
+class LayoutALaggingNoteTest(LayoutLanguageTestCase):
+    def test_english_lagging_note_stays_on_one_line(self):
+        layout = LayoutA(self.canvas)
+        shown = self.shown(layout, BOARDS_EN[0], "en")
+        self.assertIn("New activity; usage not updated", shown)  # 折成兩行的話，整句不會出現在同一個 item
+
+
 if __name__ == "__main__":
     unittest.main()

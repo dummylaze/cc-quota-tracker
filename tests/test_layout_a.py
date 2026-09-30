@@ -229,10 +229,11 @@ class LayoutAExpandedTest(unittest.TestCase):
         self.assertEqual(self.canvas.itemcget(self.item_with_text("weekly_limit_reached"), "fill"),
                          THEMES["light"]["critical"])
 
-    def test_expiry_warning_has_a_dot_and_the_remedy(self):
+    def test_expiry_warning_has_a_dot_and_a_short_prompt_to_renew(self):
         self.shown()
         note = next(t for t in visible_texts(self.canvas) if "後到期" in t)
-        self.assertIn(f"{COMMAND} add work", note)
+        self.assertTrue(note.endswith("請重新納管"), note)
+        self.assertNotIn(COMMAND, note)  # 完整步驟寫在 README，卡片上只提醒
         dots = [i for i in self.canvas.find_all() if self.canvas.type(i) == "oval"
                 and self.canvas.itemcget(i, "state") != "hidden"
                 and self.canvas.itemcget(i, "fill") == THEMES["light"]["warning"]]
