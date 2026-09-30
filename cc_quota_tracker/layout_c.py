@@ -152,7 +152,7 @@ def _window(lim: Optional[Limit], board: Board, lang: str) -> _Value:
         return _Value(text(lang, "limit.reset_short"), "sub", foot=text(lang, "limit.next_reset_unknown"))
     if lim.percent is None:
         return _Value(text(lang, "limit.no_open_window"), "sub")
-    return _Value(f"{lim.percent}%", lim.severity.value, lim.percent, reset=reset_text(lim, board, lang))
+    return _Value(f"{lim.percent}%", lim.severity.value, lim.percent, reset=reset_text(lim, board, lang, short=True))
 
 
 def _windows(card: Card, board: Board, lang: str):

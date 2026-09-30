@@ -238,6 +238,8 @@ class LayoutCExpandedTest(LayoutCTestCase):
         self.assertEqual(shown.count(RESET_PREFIX), 3)  # work 兩個窗口，personal 只有週窗口
         self.assertIn("工作階段 42%", shown)
         self.assertIn("週 88%", shown)
+        self.assertIn("重置：2小時0分（", shown)  # 窄格不帶「後」，免得折行後它單獨留在下一行開頭
+        self.assertNotIn("分後", shown)
 
     def test_credential_expiry_warning_is_a_note(self):
         shown = self.shown(EXPANDED_BOARDS[0], expanded=True)

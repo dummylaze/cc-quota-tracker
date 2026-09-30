@@ -11,9 +11,9 @@ def account_label(account_key: str) -> str:
     return account_key.split(":", 1)[1]
 
 
-def until(when: datetime, now: datetime, fmt: CountdownFormat, lang: str) -> str:
-    """倒數＋絕對時間，例如「2小時15分後（14:00）」。"""
-    return text(lang, "until", countdown=countdown(when - now, fmt, lang), when=absolute(when, now))
+def until(when: datetime, now: datetime, fmt: CountdownFormat, lang: str, short: bool = False) -> str:
+    """倒數＋絕對時間，例如「2小時15分後（14:00）」。short 是窄欄位用的寫法（中文不帶「後」）。"""
+    return text(lang, "until.short" if short else "until", countdown=countdown(when - now, fmt, lang), when=absolute(when, now))
 
 
 def countdown(left: timedelta, fmt: CountdownFormat, lang: str) -> str:

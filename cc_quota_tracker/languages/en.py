@@ -6,6 +6,7 @@ STRINGS = {
     "countdown.hours_minutes": "{hours}h {minutes}m",
     "countdown.minutes": "{minutes}m",
     "until": "in {countdown} ({when})",
+    "until.short": "in {countdown} ({when})",
     "age.minutes": "{n} min ago",
     "age.hours": "{n} h ago",
     "age.days": "{n} d ago",
