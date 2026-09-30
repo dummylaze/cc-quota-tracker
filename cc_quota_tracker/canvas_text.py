@@ -4,8 +4,8 @@ import re
 from typing import Optional
 
 from . import COMMAND
-from .board import Board, Card, ReadingState, Role
-from .fmt import absolute, age, countdown
+from .board import Board, Card, Limit, ReadingState, Role
+from .fmt import absolute, age, countdown, until
 from .i18n import text
 
 LINE_TAG = "wrapped-line"  # 多行文字的逐行 item；同一段的各行共用最後一個 tag。測試靠它把各行接回一段
@@ -33,6 +33,21 @@ def notes(card: Card, board: Board, lang: str, expiry_info: bool = True):
         if snapshot:
             result.append(snapshot)
     return result
+
+
+def count_dot(shown):
+    """提示數量前的色點取最嚴重的那一條；沒有嚴重度的提示用 sub。"""
+    keys = {dot for _, dot, _ in shown}
+    return next((key for key in ("critical", "warning") if key in keys), "sub")
+
+
+def reset_text(lim: Limit, board: Board, lang: str) -> Optional[str]:
+    """窗口的重置倒數（「重置：2小時15分後（14:00）」）；已重置的窗口另有說明，這裡是 None。"""
+    if lim.reset:
+        return None
+    if lim.resets_at is not None:
+        return text(lang, "limit.resets", when=until(lim.resets_at, board.as_of, board.countdown_format, lang))
+    return None if lim.percent is None else text(lang, "limit.resets", when=text(lang, "common.unknown"))
 
 
 def _snapshot_note(card: Card, board: Board, lang: str):

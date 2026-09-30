@@ -12,8 +12,8 @@ import math
 from typing import Optional
 
 from .board import Board, Card, Limit, ReadingState, Role
-from .canvas_text import LINE_TAG, banner_lines, notes, wrap
-from .fmt import absolute, account_label, age, money, until
+from .canvas_text import LINE_TAG, banner_lines, notes, reset_text, wrap
+from .fmt import absolute, account_label, age, money
 from .fonts import FontSet
 from .i18n import ZH_TW, text
 from .tokens import FONTS, LINE_HEIGHT, RADIUS, SPACE, THEMES
@@ -394,15 +394,7 @@ def _limit_row(p: _Paint, row: _Row, name: str, lim: Limit, board: Board, c, lef
         value, font, color = text(p.lang, "limit.no_open_window"), "body", c["sub"]
     else:
         value, font, color = f"{lim.percent}%", "percent", c[lim.severity.value]
-    foot = _reset_text(lim, board, p.lang)
+    foot = reset_text(lim, board, p.lang)
     if dollars and lim.dollars and lim.dollars.used is not None:
         foot = " · ".join(filter(None, (foot, text(p.lang, "limit.dollars_used", used=f"{lim.dollars.used:g}"))))
     return p.row(row, left, right, y, name, value, font, color, lim.percent, color, foot, c)
-
-
-def _reset_text(lim: Limit, board: Board, lang: str) -> Optional[str]:
-    if lim.reset:
-        return None  # 已經寫在數值那一格
-    if lim.resets_at is not None:
-        return text(lang, "limit.resets", when=until(lim.resets_at, board.as_of, board.countdown_format, lang))
-    return None if lim.percent is None else text(lang, "limit.resets", when=text(lang, "common.unknown"))

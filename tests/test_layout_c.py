@@ -9,6 +9,8 @@ from cc_quota_tracker.tokens import THEMES
 from tests.fakehome import NOW
 from tests.test_layout_a import ACTIVE, BOARDS, EXPANDED_BOARDS, FULL, LAB, PERSONAL, visible_texts, window
 
+RESET_PREFIX = "重置："  # 窄格裡倒數會折成兩行，只比對開頭
+
 FOURTH = Card("claude:extra", Role.STANDBY, ReadingState.HAS_READING, reading_age=timedelta(days=1),
               limits=(window("session", 5), window("weekly_all", 60)))
 
@@ -121,12 +123,20 @@ class LayoutCCompactTest(LayoutCTestCase):
         self.assertIn("讀數 3 分鐘前", shown)
         self.assertNotIn("personal", shown)
 
-    def test_notes_and_abnormal_states_stay_visible(self):
+    def test_notes_collapse_into_a_count_with_the_most_severe_dot(self):
         shown = "\n".join(self.shown(Board(cards=(FULL, PERSONAL), as_of=NOW)))
-        self.assertIn("有新對話，額度尚未更新", shown)
-        self.assertIn("額度已鎖定：weekly_limit_reached", shown)
-        self.assertIn("後到期", shown)
-        self.assertTrue(self.fills(THEMES["light"]["critical"]))  # 鎖定提示的色點
+        self.assertIn("3 則提示", shown)
+        for text in ("有新對話，額度尚未更新", "額度已鎖定：weekly_limit_reached", "後到期"):
+            self.assertNotIn(text, shown)  # 完整文字展開才顯示
+        self.assertTrue(self.fills(THEMES["light"]["critical"]))  # 色點取最嚴重那條（鎖定）
+
+    def test_no_note_count_when_there_is_nothing_to_note(self):
+        self.assertNotIn("則提示", "".join(self.shown(BOARDS[0])))  # 只有到期時間的告知：不列提示
+
+    def test_compact_does_not_show_reset_countdowns(self):
+        shown = self.shown(BOARDS[0])
+        self.assertFalse([t for t in shown if "重置：" in t])
+        self.assertIn("工作階段 42%", shown)
 
     def test_unmanaged_account_explains_how_to_manage(self):
         shown = "\n".join(self.shown(BOARDS[2]))
@@ -222,6 +232,12 @@ class LayoutCExpandedTest(LayoutCTestCase):
         self.assertIn("週 已重置，下次重置時間未知", shown)
         self.assertIn("工作階段 無計時中窗口", shown)
         self.assertNotIn("0%", shown)
+
+    def test_expanded_legend_shows_each_window_reset_countdown_on_its_own_line(self):
+        shown = "\n".join(self.shown(Board(cards=(ACTIVE, PERSONAL), as_of=NOW), expanded=True))
+        self.assertEqual(shown.count(RESET_PREFIX), 3)  # work 兩個窗口，personal 只有週窗口
+        self.assertIn("工作階段 42%", shown)
+        self.assertIn("週 88%", shown)
 
     def test_credential_expiry_warning_is_a_note(self):
         shown = self.shown(EXPANDED_BOARDS[0], expanded=True)

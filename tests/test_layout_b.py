@@ -1,6 +1,7 @@
 """縫 ②：版面 B（密集表格／單行條）。同一個 widget 連續渲染看板、在精簡與展開、淺色與深色之間來回切換，item 數不能累積。"""
 import tkinter as tk
 import unittest
+from dataclasses import replace
 from datetime import timedelta
 
 from cc_quota_tracker.board import Board
@@ -8,7 +9,9 @@ from cc_quota_tracker.fmt import absolute
 from cc_quota_tracker.layout_b import EXPANDED_TAG, LayoutB
 from cc_quota_tracker.tokens import THEMES
 from tests.fakehome import NOW
-from tests.test_layout_a import ACTIVE, BOARDS, EXPANDED_BOARDS, FULL, LAB, PERSONAL, visible_texts
+from tests.test_layout_a import ACTIVE, BOARDS, EXPANDED_BOARDS, FULL, LAB, PERSONAL, visible_texts, window
+
+RESET_IN_2H = f"重置：2小時0分後（{absolute(NOW + timedelta(hours=2), NOW)}）"  # window() 預設兩小時後重置
 
 
 class LayoutBTestCase(unittest.TestCase):
@@ -63,6 +66,32 @@ class LayoutBCompactTest(LayoutBTestCase):
         self.assertIn("已重置，下次重置時間未知", shown)
         self.assertNotIn("0%", shown)
 
+    def test_each_window_shows_its_reset_countdown_in_small_text_under_its_bar(self):
+        shown = self.shown(BOARDS[0])
+        self.assertEqual(shown.count(RESET_IN_2H), 2)
+        bars = sorted(self.canvas.coords(i) for i in self.canvas.find_withtag("bar-fill") if self.visible(i))
+        foots = sorted((self.canvas.bbox(i) for i in self.canvas.find_all() if self.canvas.type(i) == "text"
+                        and self.visible(i) and self.canvas.itemcget(i, "text") == RESET_IN_2H))
+        self.assertEqual((len(foots), len(bars)), (2, 2))
+        for foot, bar in zip(foots, bars):
+            self.assertGreater(foot[1], bar[1])  # 在進度條下面
+            self.assertAlmostEqual(foot[0], bar[0], delta=8)  # 左緣對齊進度條（圓頭往外凸出半個線寬，所以有幾像素的差）
+
+    def test_reset_countdown_is_not_shown_when_there_is_no_open_window_or_it_has_reset(self):
+        shown = self.shown(BOARDS[3])
+        self.assertFalse([t for t in shown if t.startswith("重置：")])
+
+    def test_unknown_reset_time_is_said_so(self):
+        card = replace(ACTIVE, limits=(window("session", 30, resets_at=None), window("weekly_all", 40)))
+        shown = self.shown(Board(cards=(card,), as_of=NOW))
+        self.assertIn("重置：未知", shown)
+
+    def test_strip_is_one_line_taller_only_when_a_countdown_is_shown(self):
+        self.layout.render(BOARDS[3], "light")
+        one_line = int(self.canvas.cget("height"))
+        self.layout.render(BOARDS[0], "light")
+        self.assertGreater(int(self.canvas.cget("height")), one_line)
+
     def test_note_count_dot_takes_the_most_severe_color(self):
         self.shown(BOARDS[3])  # 憑證快照已失效：critical
         self.assertTrue(self.fills(THEMES["light"]["critical"]))
@@ -115,6 +144,10 @@ class LayoutBExpandedTest(LayoutBTestCase):
         self.assertIn(f"25天0小時後（{absolute(NOW + timedelta(days=25), NOW)}）", shown)
         self.assertIn(f"22天0小時後（{absolute(NOW + timedelta(days=22), NOW)}）", shown)
         self.assertFalse([t for t in shown if "憑證快照" in t])  # 只是告知的到期時間已在欄位裡，不再重複成提示
+
+    def test_each_table_cell_shows_its_reset_countdown_under_the_bar(self):
+        shown = self.shown(Board(cards=(ACTIVE, PERSONAL), as_of=NOW), expanded=True)
+        self.assertEqual(shown.count(RESET_IN_2H), 3)  # work 兩個窗口；personal 只有週窗口有計時中的窗口
 
     def test_notes_sit_under_their_own_row(self):
         self.shown(EXPANDED_BOARDS[0], expanded=True)

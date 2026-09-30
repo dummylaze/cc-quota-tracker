@@ -4,7 +4,7 @@ English | [正體中文](README.zh-TW.md)
 
 A small always-on-top desktop window (Windows) that shows how much quota each of your Claude accounts has left, all at once. Claude Code only shows the account you are logged into; this tool keeps the last reading of every other account you have set up, so you can see which one has room this week.
 
-- **Compact mode**: the active account's session window and weekly window — progress bar, reset countdown, reading age, credential expiry countdown.
+- **Compact mode**: the active account's session window and weekly window — progress bar and reading age; the reset countdown and credential expiry countdown depend on the layout (the card list shows both, the one-line strip shows the reset countdown, the ring gauge shows neither until expanded).
 - **Expanded mode**: one card per managed account, the active one highlighted; standby accounts show their last observed reading and how old it is.
 - Three layouts (card list, dense table / one-line strip, ring gauge), light / dark / follow-system theme, adjustable opacity, Traditional Chinese or English interface.
 

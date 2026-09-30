@@ -10,7 +10,7 @@ import math
 from typing import NamedTuple, Optional
 
 from .board import Board, Card, Limit, ReadingState, Role
-from .canvas_text import LINE_TAG, banner_lines, notes, wrap
+from .canvas_text import LINE_TAG, banner_lines, count_dot, notes, reset_text, wrap
 from .fmt import account_label, age
 from .fonts import FontSet
 from .i18n import ZH_TW, text
@@ -136,27 +136,29 @@ class _Note(_Group):
 
 
 class _Value(NamedTuple):
-    """一個窗口在畫面上的呈現。percent 為 None 時圈上沒有填色的弧；foot 是已重置時補充的「下次重置時間未知」。"""
+    """一個窗口在畫面上的呈現。percent 為 None 時圈上沒有填色的弧；foot 是已重置時補充的「下次重置時間未知」；
+    reset 是有計時中的窗口的重置倒數，只在展開模式寫在圖例裡。"""
     text: str
     color: str  # 顏色 token
     percent: Optional[int] = None
     foot: Optional[str] = None
+    reset: Optional[str] = None
 
 
-def _window(lim: Optional[Limit], lang: str) -> _Value:
+def _window(lim: Optional[Limit], board: Board, lang: str) -> _Value:
     if lim is None:
         return _Value(_NONE, "sub")
     if lim.reset:
         return _Value(text(lang, "limit.reset_short"), "sub", foot=text(lang, "limit.next_reset_unknown"))
     if lim.percent is None:
         return _Value(text(lang, "limit.no_open_window"), "sub")
-    return _Value(f"{lim.percent}%", lim.severity.value, lim.percent)
+    return _Value(f"{lim.percent}%", lim.severity.value, lim.percent, reset=reset_text(lim, board, lang))
 
 
-def _windows(card: Card, lang: str):
+def _windows(card: Card, board: Board, lang: str):
     """(工作階段窗口, 週窗口) 的呈現；還沒有讀數時兩個都是 None（圈是空的、不寫窗口說明）。"""
     limits = {lim.kind: lim for lim in card.limits} if card.reading_state is ReadingState.HAS_READING else {}
-    return [_window(limits.get(kind), lang) if limits else None for kind, _ in _WINDOWS]
+    return [_window(limits.get(kind), board, lang) if limits else None for kind, _ in _WINDOWS]
 
 
 def _label(card: Card, lang: str):
@@ -203,7 +205,8 @@ class _Ring(_Group):
 
 
 class _Cell(_Group):
-    """一個帳號一格：環、帳號標籤、狀態標籤、讀數年齡、兩個窗口的說明；使用中帳號加外框。提示由 render_notes 畫在該列下方。"""
+    """一個帳號一格：環、帳號標籤、狀態標籤、讀數年齡、兩個窗口的說明（展開模式多一行重置倒數）；使用中帳號加外框。
+    提示由 render_notes 畫在該列下方；精簡模式只畫提示的數量。"""
 
     def __init__(self, p, parent_tags):
         super().__init__(p, parent_tags)
@@ -217,14 +220,14 @@ class _Cell(_Group):
         self.legend = [_Lines(p, t, "small", center=True) for _ in _WINDOWS]
         self.notes = _Pool(lambda: _Note(p, t))
 
-    def render(self, card: Card, c, x, y, width):
+    def render(self, card: Card, board: Board, c, x, y, width, expanded: bool):
         """x、y 是這一格的左上角。回傳下緣。"""
         p = self.p
         pad, cx = p.px("ring_cell_pad"), x + width / 2
         inner_width = width - 2 * pad
         y += pad
         lang = p.lang
-        session, week = _windows(card, lang)
+        session, week = _windows(card, board, lang)
         size = p.px("ring_size")
         self.ring.render(cx, y + size / 2, session, week, c)
         y = self.label.render(cx, y + size + p.px("section_gap"), inner_width, _label(card, lang), c["fg"])
@@ -246,6 +249,8 @@ class _Cell(_Group):
                 lines.hide()
                 continue
             legend = f"{text(lang, name_key)} " + text(lang, "sep.clause").join(filter(None, (value.text, value.foot)))
+            if expanded and value.reset:
+                legend += "\n" + value.reset
             y = lines.render(cx, y + p.px("line_gap"), inner_width, legend, c[value.color])
         return y + pad
 
@@ -257,9 +262,17 @@ class _Cell(_Group):
             return
         p.rrect(self.frame, x, top, x + width, bottom, RADIUS["cell"], "", outline=c["accent"], width=p.px("highlight"))
 
-    def render_notes(self, card: Card, board: Board, c, left, right, y, named: bool):
-        """這一格的提示，畫在整列格子的下方、與格子的內容對齊左右邊。多個帳號並列時冠上帳號標籤，才看得出是哪一格的。回傳下緣。"""
+    def render_notes(self, card: Card, board: Board, c, left, right, y, named: bool, expanded: bool):
+        """這一格的提示，畫在整列格子的下方、與格子的內容對齊左右邊。多個帳號並列時冠上帳號標籤，才看得出是哪一格的。
+        精簡模式有讀數時只畫一行「● 3 則提示」，色點取最嚴重那條的顏色，完整文字展開才看得到。回傳下緣。"""
         p = self.p
+        if not expanded and card.role is not Role.UNMANAGED and card.reading_state is ReadingState.HAS_READING:
+            # 沒有讀數或未納管時，提示就是這張卡片的內容（怎麼納管、為什麼還沒有讀數），照常全文顯示
+            shown = notes(card, board, p.lang, expiry_info=False)
+            summary = [(text(p.lang, "notes.count", count=len(shown)), count_dot(shown), "fg")] if shown else []
+            for slot, note in zip(self.notes.fit(len(summary)), summary):
+                y = slot.render(note, c, left, right, y + p.px("section_gap"))
+            return y
         shown = notes(card, board, p.lang)
         if named:
             label = _label(card, p.lang)
@@ -307,12 +320,12 @@ class LayoutC:
         for start in range(0, len(cards), _COLUMNS):
             row = list(zip(cells[start:start + _COLUMNS], cards[start:start + _COLUMNS]))
             xs = [first_x + i * (cell_w + gap) for i in range(len(row))]
-            row_bottom = max(cell.render(card, c, x, y, cell_w) for (cell, card), x in zip(row, xs))
+            row_bottom = max(cell.render(card, board, c, x, y, cell_w, expanded) for (cell, card), x in zip(row, xs))
             for (cell, card), x in zip(row, xs):
                 cell.outline(card, c, x, y, cell_w, row_bottom, framed=expanded)
             y = row_bottom
             for cell, card in row:
-                y = cell.render_notes(card, board, c, note_left, note_right, y, named=len(cards) > 1)
+                y = cell.render_notes(card, board, c, note_left, note_right, y, named=len(cards) > 1, expanded=expanded)
             if start + _COLUMNS < len(cards):
                 y += gap
         # 最後一列底下沒有提示時，外框離卡片底邊也是 row_inset，四個角才同心

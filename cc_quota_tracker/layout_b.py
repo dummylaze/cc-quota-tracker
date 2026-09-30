@@ -9,7 +9,7 @@ import math
 from typing import NamedTuple, Optional
 
 from .board import Board, Card, Limit, ReadingState, Role
-from .canvas_text import LINE_TAG, banner_lines, notes, wrap
+from .canvas_text import LINE_TAG, banner_lines, count_dot, notes, reset_text, wrap
 from .fmt import absolute, account_label, age, until
 from .fonts import FontSet
 from .i18n import ZH_TW, text
@@ -141,28 +141,30 @@ class _Note(_Group):
 
 
 class _Value(NamedTuple):
-    """一個窗口在畫面上的呈現。percent 為 None 時不畫進度條；foot 是已重置時補充的「下次重置時間未知」。"""
+    """一個窗口在畫面上的呈現。percent 為 None 時不畫進度條；foot 是已重置時補充的「下次重置時間未知」；
+    reset 是有進度條的窗口的重置倒數，畫在進度條下面的小字。"""
     text: str
     font: str
     color: str  # 顏色 token
     percent: Optional[int] = None
     foot: Optional[str] = None
+    reset: Optional[str] = None
 
 
-def _window(lim: Optional[Limit], lang: str) -> _Value:
+def _window(lim: Optional[Limit], board: Board, lang: str) -> _Value:
     if lim is None:
         return _Value(_NONE, "small", "sub")
     if lim.reset:
         return _Value(text(lang, "limit.reset_short"), "small", "sub", foot=text(lang, "limit.next_reset_unknown"))
     if lim.percent is None:
         return _Value(text(lang, "limit.no_open_window"), "small", "sub")
-    return _Value(f"{lim.percent}%", "percent", lim.severity.value, lim.percent)
+    return _Value(f"{lim.percent}%", "percent", lim.severity.value, lim.percent, reset=reset_text(lim, board, lang))
 
 
-def _windows(card: Card, lang: str):
+def _windows(card: Card, board: Board, lang: str):
     """兩個窗口的呈現；還沒有讀數時整個是 None（精簡模式不顯示窗口，表格顯示「—」）。"""
     limits = {lim.kind: lim for lim in card.limits} if card.reading_state is ReadingState.HAS_READING else {}
-    return [_window(limits.get(kind), lang) if limits else None for kind, _ in _WINDOWS]
+    return [_window(limits.get(kind), board, lang) if limits else None for kind, _ in _WINDOWS]
 
 
 def _label(card: Card, lang: str):
@@ -194,14 +196,9 @@ def _expiry(card: Card, board: Board, lang: str):
     return until(expires, board.as_of, board.countdown_format, lang)
 
 
-def _count_dot(shown):
-    """提示數量前的色點取最嚴重的那一條；沒有嚴重度的提示用 sub。"""
-    keys = {dot for _, dot, _ in shown}
-    return next((key for key in ("critical", "warning") if key in keys), "sub")
-
-
 class _Strip(_Group):
-    """精簡模式的一行橫條：帳號標籤、兩個窗口（名稱、小進度條、百分比）、讀數年齡、提示數量。"""
+    """精簡模式的橫條：帳號標籤、兩個窗口（名稱、小進度條、百分比，進度條下面一行小字是重置倒數）、讀數年齡、提示數量。
+    所有窗口都沒有重置倒數時只有一行。"""
 
     def __init__(self, p, parent_tags):
         super().__init__(p, parent_tags)
@@ -210,7 +207,8 @@ class _Strip(_Group):
         self.windows = [(cv.create_text(0, 0, anchor="w", font=f["small"], tags=t),
                          cv.create_line(0, 0, 0, 0, capstyle="round", tags=t),
                          cv.create_line(0, 0, 0, 0, capstyle="round", tags=(*t, "bar-fill")),
-                         cv.create_text(0, 0, anchor="w", tags=t)) for _ in _WINDOWS]
+                         cv.create_text(0, 0, anchor="w", tags=t),
+                         cv.create_text(0, 0, anchor="w", font=f["small"], tags=t)) for _ in _WINDOWS]
         self.age = cv.create_text(0, 0, anchor="w", font=f["small"], tags=t)
         self.dot = cv.create_oval(0, 0, 0, 0, width=0, tags=t)
         self.count = cv.create_text(0, 0, anchor="w", font=f["small"], tags=t)
@@ -220,13 +218,15 @@ class _Strip(_Group):
         p, f, lang = self.p, self.p.fonts, self.p.lang
         label = _label(card, lang)
         parts = [("label", f["title"].measure(label), label)]
-        for i, ((_, name_key), window) in enumerate(zip(_WINDOWS, _windows(card, lang))):
+        for i, ((_, name_key), window) in enumerate(zip(_WINDOWS, _windows(card, board, lang))):
             if window is None:
                 continue
             name = text(lang, name_key)
             value = text(lang, "sep.clause").join(filter(None, (window.text, window.foot)))
             bar = p.px("cell_bar_width") + p.px("cell_gap") if window.percent is not None else 0
-            width = f["small"].measure(name) + p.px("cell_gap") + bar + f[window.font].measure(value)
+            # 進度條下面的倒數比「進度條＋百分比」寬時，這一段以倒數為準
+            width = f["small"].measure(name) + p.px("cell_gap") + max(
+                bar + f[window.font].measure(value), f["small"].measure(window.reset or ""))
             parts.append((i, width, (name, window, value)))
         shown_age = _age(card, lang)
         if shown_age:
@@ -246,8 +246,14 @@ class _Strip(_Group):
         p, f = self.p, self.p.fonts
         height = max(p.height("title"), p.height("percent"))
         mid = y + height / 2
+        parts, windows = self._parts(card, board), _windows(card, board, p.lang)
         p.hide(self.age, self.dot, self.count, *itertools.chain(*self.windows))  # 這一輪用到的下面再顯示
-        for part, width, content in self._parts(card, board):
+        if any(window.reset for window in windows if window):
+            foot_mid = y + height + p.px("line_gap") + p.height("small") / 2
+            height += p.px("line_gap") + p.height("small")
+        else:
+            foot_mid = None
+        for part, width, content in parts:
             if part == "label":
                 p.show(self.label, x, mid, text=content, fill=c["fg"])
             elif part == "age":
@@ -255,16 +261,18 @@ class _Strip(_Group):
             elif part == "count":
                 count, shown = content
                 dot = p.px("dot")
-                p.show(self.dot, x, mid - dot / 2, x + dot, mid + dot / 2, fill=c[_count_dot(shown)])
+                p.show(self.dot, x, mid - dot / 2, x + dot, mid + dot / 2, fill=c[count_dot(shown)])
                 p.show(self.count, x + dot + p.px("dot_gap"), mid, text=count, fill=c["fg"])
             else:
-                name_item, track, fill, value_item = self.windows[part]
+                name_item, track, fill, value_item, foot_item = self.windows[part]
                 name, window, value = content
                 p.show(name_item, x, mid, text=name, fill=c["sub"])
                 left = x + f["small"].measure(name) + p.px("cell_gap")
                 if window.percent is not None:
                     right = left + p.px("cell_bar_width")
                     p.bar(track, fill, left, right, mid, window.percent, c[window.color], c)
+                    if window.reset:
+                        p.show(foot_item, left, foot_mid, text=window.reset, fill=c["sub"])
                     left = right + p.px("cell_gap")
                 p.show(value_item, left, mid, text=value, font=f[window.font], fill=c[window.color])
             x += width + p.px("col_gap")
@@ -272,7 +280,7 @@ class _Strip(_Group):
 
 
 class _Cell(_Group):
-    """表格裡的一格窗口：數值、小進度條、附註（已重置時的「下次重置時間未知」）。"""
+    """表格裡的一格窗口：數值、小進度條、附註（有進度條的窗口是重置倒數；已重置時是「下次重置時間未知」）。"""
 
     def __init__(self, p, parent_tags):
         super().__init__(p, parent_tags)
@@ -294,9 +302,10 @@ class _Cell(_Group):
             y += p.px("bar_height")
         else:
             p.hide(self.track, self.fill)
-        if window.foot:
+        foot = window.reset or window.foot
+        if foot:
             y += p.px("line_gap")
-            p.show(self.foot, left, y, text=window.foot, fill=c["sub"])
+            p.show(self.foot, left, y, text=foot, fill=c["sub"])
             y += p.height("small")
         else:
             p.hide(self.foot)
@@ -335,8 +344,8 @@ class _TableRow(_Group):
         p.rrect(self.chip, chip_x, mid - chip_h / 2, chip_x + chip_w, mid + chip_h / 2, RADIUS["chip"], c[chip_bg])
         p.show(self.chip_text, chip_x + chip_w / 2, mid, text=chip, fill=c[chip_fg])
         bottom = below
-        for cell, (left, width), window in zip(self.cells, window_cols, _windows(card, lang)):
-            bottom = max(bottom, cell.render(window or _window(None, lang), c, left, width, mid, below))
+        for cell, (left, width), window in zip(self.cells, window_cols, _windows(card, board, lang)):
+            bottom = max(bottom, cell.render(window or _window(None, board, lang), c, left, width, mid, below))
         shown_age = _age(card, lang)
         p.show(self.age, age_x, mid, text=shown_age or _NONE, fill=c["sub"])
         expiry = _expiry(card, board, lang)
@@ -377,9 +386,10 @@ class _Table(_Group):
         for card in board.cards:
             chip = _chip_width(p, _chip(card, lang)[0])
             widths[0] = max(widths[0], f["title"].measure(_label(card, lang)) + p.px("chip_gap") + chip)
-            for i, window in enumerate(_windows(card, lang), start=1):
-                window = window or _window(None, lang)
-                widths[i] = max(widths[i], f[window.font].measure(window.text), f["small"].measure(window.foot or ""))
+            for i, window in enumerate(_windows(card, board, lang), start=1):
+                window = window or _window(None, board, lang)
+                widths[i] = max(widths[i], f[window.font].measure(window.text),
+                                f["small"].measure(window.reset or window.foot or ""))
             widths[3] = max(widths[3], f["small"].measure(_age(card, lang) or _NONE))
             widths[4] = max(widths[4], f["small"].measure(_expiry(card, board, lang)))
         return widths
