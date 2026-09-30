@@ -133,7 +133,7 @@ You can edit it with a text editor. Settings are re-read every 5 seconds and tak
 
 The window position is remembered separately and is not in this file.
 
-**A bad value** falls back to the default for that one field only (the two percentage thresholds fall back together unless `warningPercent` is less than `criticalPercent`). The window names an invalid field among `layout` through `font`; a bad value under `providers` quietly uses its default. If the whole file is not valid JSON, every default is used, the window says so, and the tool will not overwrite the file until you fix it (changes made from the right-click menu then last only until you quit).
+**A bad value** falls back to the default for that one field only (the two percentage thresholds fall back together unless `warningPercent` is less than `criticalPercent`). The window names the invalid field (a bad value under `providers` is named by its path, e.g. `providers.claude.warningPercent`; when the two thresholds are not in increasing order, both are named, even the one you did not write). If the whole file is not valid JSON, every default is used, the window says so, and the tool will not overwrite the file until you fix it (changes made from the right-click menu then last only until you quit).
 
 Progress bar colours follow the severity Claude itself reports (`normal` / `warning` / `critical`); the percentage thresholds above are only a fallback when it reports none.
 

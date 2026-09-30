@@ -13,7 +13,7 @@ from . import claude_provider as provider
 from .board import Board, Card, CountdownFormat, Limit, Preferences, ReadingState, Role, Severity
 from .credstore import FileCredentialStore
 from .permissions import is_private, make_private
-from .settings import (COUNTDOWN_FORMAT_FIELD, PROVIDERS_FIELD, PathSource, ResolvedPaths, path_fields,
+from .settings import (COUNTDOWN_FORMAT_FIELD, PathSource, ResolvedPaths, path_fields,
                        read_preferences, read_settings)
 
 STATE_DIR = ".state"  # 納管目錄底下放工具狀態的子目錄，與憑證快照分開
@@ -388,8 +388,9 @@ class Core:
 
     def _apply_settings(self, fields: dict) -> None:
         self._countdown_format = _countdown_format(fields.get(COUNTDOWN_FORMAT_FIELD))
-        self._provider_settings = provider.read_settings(fields.get(PROVIDERS_FIELD))
-        self._preferences, self._invalid_settings = read_preferences(fields)
+        self._provider_settings, provider_invalid = provider.read_settings(fields)
+        self._preferences, invalid = read_preferences(fields)
+        self._invalid_settings = tuple(sorted((*invalid, *provider_invalid)))
 
     def _read(self) -> Optional[provider.ParseResult]:
         """來源檔案沒變時不重新解析，沿用上一次的解析結果，結構判定仍算一輪。

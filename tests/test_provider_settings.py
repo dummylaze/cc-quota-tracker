@@ -84,5 +84,55 @@ class PercentThresholdSettingTest(HomeTestCase):
         self.assertEqual(self.severity_of(85), Severity.CRITICAL)
 
 
+class InvalidProviderSettingsAreNamedTest(HomeTestCase):
+    """使用者故事 79：providers 底下的值不合法時，和偏好一樣被指名（路徑式名稱），只那一項用預設。"""
+
+    def invalid(self, providers):
+        self.write_settings(providers=providers)
+        return self.core.poll().invalid_settings
+
+    def test_each_invalid_field_is_named_with_its_path(self):
+        for field, value in (("expiryWarningDays", 0), ("expiryWarningDays", "7"), ("expiryWarningDays", None),
+                             ("warningPercent", 101), ("criticalPercent", True)):
+            with self.subTest(field=field, value=value):
+                self.assertEqual(self.invalid(claude(**{field: value})), (f"providers.claude.{field}",))
+
+    def test_missing_fields_and_valid_values_are_not_reported(self):
+        self.assertEqual(self.invalid(claude()), ())
+        self.assertEqual(self.invalid(claude(expiryWarningDays=10, warningPercent=40, criticalPercent=50)), ())
+        self.assertEqual(self.invalid({"other": {"expiryWarningDays": 0}}), ())  # 不認得的供應商：不是這個工具管的
+
+    def test_malformed_containers_are_named_at_their_own_level(self):
+        for providers, name in (("claude", "providers"), ([], "providers"), (None, "providers"),
+                                ({"claude": 10}, "providers.claude"), ({"claude": None}, "providers.claude"),
+                                ({"claude": []}, "providers.claude"), ({"claude": ""}, "providers.claude")):
+            with self.subTest(providers=providers):
+                self.assertEqual(self.invalid(providers), (name,))
+
+    def test_inverted_thresholds_name_both_fields(self):
+        self.assertEqual(self.invalid(claude(warningPercent=90, criticalPercent=80)),
+                         ("providers.claude.criticalPercent", "providers.claude.warningPercent"))
+
+    def test_thresholds_that_end_up_reversed_or_equal_name_both_even_the_one_not_written(self):
+        both = ("providers.claude.criticalPercent", "providers.claude.warningPercent")
+        for fields in ({"warningPercent": 0, "criticalPercent": 50},  # 0 不合法 → 預設 60，高過合法的 50
+                       {"warningPercent": 90},  # critical 沒寫 → 預設 85
+                       {"warningPercent": 70, "criticalPercent": 70}):
+            with self.subTest(fields=fields):
+                self.assertEqual(self.invalid(claude(**fields)), both)
+
+    def test_the_root_name_matches_the_settings_file_field(self):
+        from cc_quota_tracker.settings import PROVIDERS_FIELD
+        self.assertEqual(self.invalid(None), (PROVIDERS_FIELD,))  # 與設定檔欄位名稱脫鉤的話，這裡會變成 ()
+
+    def test_invalid_provider_and_preference_fields_are_listed_together_sorted(self):
+        self.write_settings(mode="sideways", providers=claude(expiryWarningDays=0))
+        self.assertEqual(self.core.poll().invalid_settings, ("mode", "providers.claude.expiryWarningDays"))
+
+    def test_fixing_the_value_clears_the_report(self):
+        self.assertEqual(self.invalid(claude(expiryWarningDays=0)), ("providers.claude.expiryWarningDays",))
+        self.assertEqual(self.invalid(claude(expiryWarningDays=10)), ())
+
+
 if __name__ == "__main__":
     unittest.main()

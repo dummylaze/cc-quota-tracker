@@ -36,6 +36,8 @@ class ProviderSettings:
 
 
 _DEFAULT = ProviderSettings()
+_SETTINGS_ROOT = "providers"  # 設定檔裡這組設定的欄位名稱；與 settings.PROVIDERS_FIELD 相同（settings 匯入本模組，不能反過來）
+_FIELD_RANGES = (("expiryWarningDays", 1, None), ("warningPercent", 1, 100), ("criticalPercent", 1, 100))  # 設定檔欄位名稱與合法範圍
 # 第一次啟動時寫進設定檔的 providers.claude
 SETTINGS_DEFAULTS = {"expiryWarningDays": _DEFAULT.expiry_warning_days,
                      "warningPercent": _DEFAULT.warning_percent, "criticalPercent": _DEFAULT.critical_percent}
@@ -229,16 +231,26 @@ def _type_name(value) -> str:
     return next(name for name, kind in _TYPES if isinstance(value, kind))
 
 
-def read_settings(providers) -> ProviderSettings:
-    """providers 是設定檔的 providers 欄位。個別欄位不合法就用預設；兩個門檻不是由小到大時兩個都用預設。"""
-    fields = providers.get(PROVIDER) if isinstance(providers, dict) else None
-    fields = fields if isinstance(fields, dict) else {}
-    days = _whole(fields.get("expiryWarningDays"), 1, None) or _DEFAULT.expiry_warning_days
-    warning = _whole(fields.get("warningPercent"), 1, 100) or _DEFAULT.warning_percent
-    critical = _whole(fields.get("criticalPercent"), 1, 100) or _DEFAULT.critical_percent
+def read_settings(fields: dict) -> Tuple[ProviderSettings, Tuple[str, ...]]:
+    """fields 是整份設定檔。回傳 providers.claude 的設定，以及值不合法的欄位名稱（路徑式，如 providers.claude.warningPercent；
+    缺少的欄位不算，寫了 null 算）。個別欄位不合法就用預設；兩個門檻不是由小到大時兩個都用預設，兩個都算不合法。"""
+    prefix = f"{_SETTINGS_ROOT}.{PROVIDER}"
+    if _SETTINGS_ROOT in fields and not isinstance(fields[_SETTINGS_ROOT], dict):
+        return _DEFAULT, (_SETTINGS_ROOT,)
+    providers = fields.get(_SETTINGS_ROOT, {})
+    if PROVIDER in providers and not isinstance(providers[PROVIDER], dict):
+        return _DEFAULT, (prefix,)
+    claude = providers.get(PROVIDER, {})
+    values = {name: _whole(claude.get(name), low, high) for name, low, high in _FIELD_RANGES}
+    invalid = {name for name, value in values.items() if name in claude and value is None}
+    days = values["expiryWarningDays"] or _DEFAULT.expiry_warning_days
+    warning = values["warningPercent"] or _DEFAULT.warning_percent
+    critical = values["criticalPercent"] or _DEFAULT.critical_percent
     if warning >= critical:
         warning, critical = _DEFAULT.warning_percent, _DEFAULT.critical_percent
-    return ProviderSettings(days, warning, critical)
+        invalid |= {"warningPercent", "criticalPercent"}
+    return (ProviderSettings(days, warning, critical),
+            tuple(sorted(f"{prefix}.{name}" for name in invalid)))
 
 
 def grade(severity: Optional[Severity], percent: Optional[int], settings: ProviderSettings) -> Severity:
