@@ -4,7 +4,7 @@
 
 **Blocked by:** 18, 22, 23
 
-**Status:** ready-for-human
+**Status:** resolved
 
 - [x] 討論題目在開始時與使用者一起列出，細節屆時再談
 - [x] 每一輪的決定寫進本票的 Comments；成為通用規則的，寫回 spec〈畫面層〉
