@@ -6,7 +6,7 @@ STRINGS = {
     "countdown.hours_minutes": "{hours}小時{minutes}分",
     "countdown.minutes": "{minutes}分",
     "until": "{countdown}後（{when}）",
-    "until.short": "{countdown}（{when}）",  # 窄格裡「後」會被折到下一行開頭，拿掉
+    "until.short": "{countdown}（{when}）",  # 重置倒數用：中文不帶「後」
     "age.minutes": "{n} 分鐘前",
     "age.hours": "{n} 小時前",
     "age.days": "{n} 天前",

@@ -41,12 +41,12 @@ def count_dot(shown):
     return next((key for key in ("critical", "warning") if key in keys), "sub")
 
 
-def reset_text(lim: Limit, board: Board, lang: str, short: bool = False) -> Optional[str]:
-    """窗口的重置倒數（「重置：2小時15分後（14:00）」）；已重置的窗口另有說明，這裡是 None。"""
+def reset_text(lim: Limit, board: Board, lang: str) -> Optional[str]:
+    """窗口的重置倒數（「重置：2小時15分（14:00）」，中文不帶「後」，三種版面一致）；已重置的窗口另有說明，這裡是 None。"""
     if lim.reset:
         return None
     if lim.resets_at is not None:
-        return text(lang, "limit.resets", when=until(lim.resets_at, board.as_of, board.countdown_format, lang, short))
+        return text(lang, "limit.resets", when=until(lim.resets_at, board.as_of, board.countdown_format, lang, short=True))
     return None if lim.percent is None else text(lang, "limit.resets", when=text(lang, "common.unknown"))
 
 

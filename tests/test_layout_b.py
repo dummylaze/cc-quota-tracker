@@ -11,7 +11,7 @@ from cc_quota_tracker.tokens import THEMES
 from tests.fakehome import NOW
 from tests.test_layout_a import ACTIVE, BOARDS, EXPANDED_BOARDS, FULL, LAB, PERSONAL, visible_texts, window
 
-RESET_IN_2H = f"重置：2小時0分後（{absolute(NOW + timedelta(hours=2), NOW)}）"  # window() 預設兩小時後重置
+RESET_IN_2H = f"重置：2小時0分（{absolute(NOW + timedelta(hours=2), NOW)}）"  # window() 預設兩小時後重置
 
 
 class LayoutBTestCase(unittest.TestCase):
