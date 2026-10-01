@@ -6,7 +6,7 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** needs-triage
+**Status:** wontfix
 
 ## Comments
 
@@ -46,3 +46,9 @@
 ### 優先順序（2026-10-02）
 
 - 使用者決定：下一個階段先做本票（statusLine 資料源），從工具內切換帳號排在之後。理由：直接解決日常使用的痛點，切換功能也會用到同一套帳號歸屬判斷。
+
+### Grill 結論（2026-10-02）：wontfix
+
+- VS Code 面板模式不會執行 `statusLine`（實測，面板對話期間 statusLine 寫出的檔案近 50 小時沒有更新），而面板是主要使用情境；hook 事件也不帶額度資料。statusLine 資料源只對終端機使用有效，划不來。
+- 改走「查詢額度」：工具請 Claude Code 送 `get_usage`，由 Claude Code 寫回額度快取。見 `docs/adr/0010-usage-query-via-claude-code.md`；規格與票開在新 feature `.scratch/usage-query/`。
+- 票面題 3～7（檔案格式、歸屬、合併、多 session、落後讀數定義）隨本票一起不做；題 8 見 `.scratch/usage-refresh-hint/issues/01-usage-refresh-hint.md` 的 Comments。

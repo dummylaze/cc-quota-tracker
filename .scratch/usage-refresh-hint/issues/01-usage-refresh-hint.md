@@ -6,7 +6,7 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** needs-triage
+**Status:** wontfix
 
 - [ ] 三種版面的卡片上，落後讀數與讀數待更新的提示後面加一個簡短的 `/usage` 提示（兩個語系）；「尚無讀數」不加
 - [ ] 命令列 `list` 在這兩種狀態下，寫出完整的一句：在 Claude Code 執行 `/usage` 可以更新額度快取
@@ -68,3 +68,10 @@
 - 改變落後讀數的判定方式（持續對話時幾乎一直亮的問題）
 - 「尚無讀數」的提示
 - 其他提示的文案
+
+### Grill 結論（2026-10-02）：wontfix
+
+- 被「查詢額度」取代：卡片上落後提示旁加按鈕，工具請 Claude Code 代查（`docs/adr/0010-usage-query-via-claude-code.md`）。查詢失敗時的訊息會附「可改在 Claude Code 執行 `/usage`」，涵蓋本票原本的用途。
+- 本票的 `list` 說明與 README 段落，由新 feature `.scratch/usage-query/` 的 spec 吸收。
+- 用詞：本票票面把「更新額度快取」寫成「刷新」，與 `CONTEXT.md` 的「刷新」（憑證）撞名；新 spec 一律用「查詢額度」。
+- 本票最後一項待驗（終端機 `/usage` 是否也更新額度快取）不再需要；`get_usage` 已實測會寫回額度快取。
