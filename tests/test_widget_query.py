@@ -123,22 +123,66 @@ class AutoQueryMenuTest(QueryWiringTestCase):
         self.assertEqual(self.settings()["providers"]["claude"]["autoUsageQueryMinutes"], 15)
         self.assertIs(self.stored(), True)
 
-    def test_an_unreadable_settings_file_is_left_alone_and_the_check_mark_goes_back(self):
-        self.use_the_real_core()
-        self.write_settings_text("{ not json")
-        self.toggle()
-        self.assertEqual(self.settings_file().read_text(encoding="utf-8"), "{ not json")
-        self.assertFalse(self.checked())
+    def toggle_with_dialog(self, label="自動查詢額度"):
+        with mock.patch("cc_quota_tracker.widget.messagebox.showerror") as showerror:
+            self.toggle(label)
+        return showerror
 
-    def test_a_providers_value_that_is_not_an_object_is_not_overwritten(self):
+    def test_an_unreadable_settings_file_is_left_alone_and_the_user_is_told(self):
+        self.use_the_real_core()
+        for content in ("{ not json", "[]", ""):  # 不是合法 JSON，或不是 JSON 物件
+            with self.subTest(content=content):
+                self.write_settings_text(content)
+                showerror = self.toggle_with_dialog()
+                self.assertEqual(self.settings_file().read_text(encoding="utf-8"), content)
+                self.assertFalse(self.checked())  # 勾選回到實際生效的那一邊
+                showerror.assert_called_once()
+                self.assertEqual(showerror.call_args.args[1],
+                                 "設定檔無法讀取，或內容不是合法的設定。\n自動查詢的開關沒有變動。")
+
+    def test_a_providers_value_that_is_not_an_object_is_not_overwritten_and_the_user_is_told(self):
         self.use_the_real_core()
         for providers in ("claude", [], {"claude": 10}):
             with self.subTest(providers=providers):
                 self.write_settings(providers=providers)
                 before = self.settings_file().read_text(encoding="utf-8")
-                self.toggle()
+                showerror = self.toggle_with_dialog()
                 self.assertEqual(self.settings_file().read_text(encoding="utf-8"), before)
                 self.assertFalse(self.checked())
+                showerror.assert_called_once()
+                self.assertEqual(showerror.call_args.args[1],
+                                 "設定檔的 providers 或 providers.claude 不是物件。\n自動查詢的開關沒有變動。")
+
+    def test_a_write_that_fails_tells_the_user_why(self):
+        self.use_the_real_core()
+        before = self.settings_file().read_text(encoding="utf-8")
+        with mock.patch("cc_quota_tracker.settings.atomic.write_atomic", side_effect=OSError("檔案被鎖住")):
+            showerror = self.toggle_with_dialog()
+        self.assertEqual(self.settings_file().read_text(encoding="utf-8"), before)
+        self.assertFalse(self.checked())
+        showerror.assert_called_once()
+        self.assertEqual(showerror.call_args.args[1], "無法寫入設定檔：檔案被鎖住\n自動查詢的開關沒有變動。")
+
+    def test_the_messages_follow_the_language(self):
+        self.use_the_real_core()
+        self.system_language = "en-US"  # 跟隨系統：設定檔讀不懂時語系也不會掉回預設
+        self.widget.refresh()
+        self.write_settings_text("{ not json")
+        self.assertEqual(self.toggle_with_dialog("Auto-query usage").call_args.args[1],
+                         "The settings file can't be read, or its content isn't valid settings.\n"
+                         "The auto-query switch is unchanged.")
+        self.write_settings(providers="claude")
+        self.assertEqual(self.toggle_with_dialog("Auto-query usage").call_args.args[1],
+                         "providers or providers.claude in the settings file isn't an object.\n"
+                         "The auto-query switch is unchanged.")
+        self.write_settings()
+        with mock.patch("cc_quota_tracker.settings.atomic.write_atomic", side_effect=OSError("locked")):
+            self.assertEqual(self.toggle_with_dialog("Auto-query usage").call_args.args[1],
+                             "Couldn't write the settings file: locked\nThe auto-query switch is unchanged.")
+
+    def test_a_successful_toggle_shows_no_dialog(self):
+        self.use_the_real_core()
+        self.assertFalse(self.toggle_with_dialog().called)
 
     def test_the_toggle_polls_at_once_so_the_change_does_not_wait_for_the_next_round(self):
         self.use_the_real_core()

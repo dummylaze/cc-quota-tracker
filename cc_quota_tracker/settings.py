@@ -40,6 +40,13 @@ PREFERENCE_FIELDS = {
 _COUNTDOWN_FORMATS = tuple(f.value for f in CountdownFormat)
 
 
+class WriteResult(Enum):
+    """GUI 改設定檔的結果。寫入階段的失敗不在這裡：照常丟 OSError，由呼叫端處理。"""
+    WRITTEN = "written"
+    UNREADABLE = "unreadable"  # 設定檔讀不到，或不是合法的 JSON 物件
+    MALFORMED = "malformed"  # 設定檔讀得懂，但要改的那一層不是物件（providers 或 providers.<供應商>）
+
+
 class PathSource(Enum):
     SETTINGS_FILE = "settings_file"
     ENV = "env"
@@ -150,12 +157,13 @@ def write_preference(settings_file: Path, field: str, value) -> bool:
     def change(fields: dict) -> bool:
         fields[field] = value
         return True
-    return _rewrite(settings_file, change)
+    return _rewrite(settings_file, change) is WriteResult.WRITTEN
 
 
-def write_provider_setting(settings_file: Path, provider: str, field: str, value) -> bool:
+def write_provider_setting(settings_file: Path, provider: str, field: str, value) -> WriteResult:
     """GUI 改一項供應商設定（providers.<provider>.<field>），規則同 write_preference。
-    providers 或該供應商的設定寫成了不是物件的值時也不寫，回傳 False：那是使用者填錯的內容，不替他蓋掉。"""
+    providers 或該供應商的設定寫成了不是物件的值時也不寫（MALFORMED）：那是使用者填錯的內容，不替他蓋掉；
+    讀不懂的設定檔同樣不寫（UNREADABLE）。兩者要讓使用者分得出來，所以不像 write_preference 只回傳布林。"""
     def change(fields: dict) -> bool:
         providers = fields.setdefault(PROVIDERS_FIELD, {})
         if not isinstance(providers, dict) or not isinstance(providers.setdefault(provider, {}), dict):
@@ -165,18 +173,18 @@ def write_provider_setting(settings_file: Path, provider: str, field: str, value
     return _rewrite(settings_file, change)
 
 
-def _rewrite(settings_file: Path, change) -> bool:
+def _rewrite(settings_file: Path, change) -> WriteResult:
     if settings_file.exists():
         fields = read_settings(settings_file)
         if fields is None:
-            return False
+            return WriteResult.UNREADABLE
     else:
         settings_file.parent.mkdir(parents=True, exist_ok=True)
         fields = copy.deepcopy(DEFAULTS)  # 改動不能漏回模組層級的預設值
     if not change(fields):
-        return False
+        return WriteResult.MALFORMED
     atomic.write_atomic(settings_file, json.dumps(fields, indent=2, ensure_ascii=False).encode("utf-8"))
-    return True
+    return WriteResult.WRITTEN
 
 
 def _dir_field(settings_file: Path, fields: dict, field: str) -> Optional[Path]:

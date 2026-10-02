@@ -25,7 +25,7 @@ from .fmt import account_label
 from .i18n import text
 from .render_text import add_warning
 from .claude_provider import AUTO_QUERY_FIELD, PROVIDER
-from .settings import PREFERENCE_FIELDS, ResolvedPaths, write_preference, write_provider_setting
+from .settings import PREFERENCE_FIELDS, ResolvedPaths, WriteResult, write_preference, write_provider_setting
 from .tokens import TRANSPARENT_KEY
 
 POLL_MS = 5000  # 固定值，不開放設定
@@ -42,7 +42,9 @@ _THEMES = (("theme.system", "system"), ("theme.light", "light"), ("theme.dark", 
 _LANGUAGES = (("language.system", "system"), (None, "zh-TW"), (None, "en"))
 _LANGUAGE_NAMES = {"zh-TW": "正體中文", "en": "English"}  # 各語系用自己的名稱，選錯語系的人也找得到自己看得懂的那一項
 _OPACITIES = PREFERENCE_FIELDS["opacity"][1]
-_PERSONALIZE_KEY = r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"  # 登錄機碼，在 HKEY_CURRENT_USER 底下
+_AUTO_QUERY_NOT_WRITTEN = {WriteResult.UNREADABLE: "dialog.auto_query_unreadable",
+                           WriteResult.MALFORMED: "dialog.auto_query_malformed"}  # 開關沒寫進設定檔的原因 → 語系鍵
+_PERSONALIZE_KEY =r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"  # 登錄機碼，在 HKEY_CURRENT_USER 底下
 
 
 def enable_dpi_awareness():
@@ -197,11 +199,18 @@ class Widget:
 
     def _toggle_auto_query(self):
         """右鍵選單的「自動查詢額度」：寫回 providers.claude.autoUsageQuery 並立刻 poll，核心讀到新值，下一輪起生效。
-        設定檔讀不懂或寫不進去時不寫，勾選狀態由看板拉回。"""
+        設定檔讀不懂、格式不對或寫不進去時不寫，跳對話框說明原因；勾選狀態由看板拉回實際生效的那一邊
+        （不像偏好那樣暫存在記憶體重試：這個開關會花請求額度，以設定檔為準）。"""
+        message = None
         try:
-            write_provider_setting(self._paths.settings_file, PROVIDER, AUTO_QUERY_FIELD, self._auto_query_var.get())
-        except OSError:
-            pass
+            result = write_provider_setting(self._paths.settings_file, PROVIDER, AUTO_QUERY_FIELD,
+                                            self._auto_query_var.get())
+            if result is not WriteResult.WRITTEN:
+                message = text(self._lang, _AUTO_QUERY_NOT_WRITTEN[result])
+        except OSError as e:
+            message = text(self._lang, "dialog.auto_query_write_failed", error=e)
+        if message is not None:
+            messagebox.showerror(_TITLE, message, parent=self.root)
         self.refresh()
 
     def sync_autostart(self):

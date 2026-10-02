@@ -140,6 +140,9 @@ STRINGS = {
     "dialog.confirm_replace": "已經有帳號標籤「{label}」，要用這個檔案取代它的憑證快照嗎？",
     "dialog.managed_dir_missing": "納管目錄還不存在：{directory}\n納管第一個帳號時會建立。",
     "dialog.autostart_failed": "無法變更開機自動啟動：{error}",
+    "dialog.auto_query_unreadable": "設定檔無法讀取，或內容不是合法的設定。\n自動查詢的開關沒有變動。",
+    "dialog.auto_query_malformed": "設定檔的 providers 或 providers.claude 不是物件。\n自動查詢的開關沒有變動。",
+    "dialog.auto_query_write_failed": "無法寫入設定檔：{error}\n自動查詢的開關沒有變動。",
 
     # 命令列
     "cli.usage": "用法：\n"

@@ -163,6 +163,11 @@ STRINGS = {
     "dialog.managed_dir_missing": "The managed directory doesn't exist yet: {directory}\n"
                                   "It is created when you manage the first account.",
     "dialog.autostart_failed": "Couldn't change start at login: {error}",
+    "dialog.auto_query_unreadable": "The settings file can't be read, or its content isn't valid settings.\n"
+                                    "The auto-query switch is unchanged.",
+    "dialog.auto_query_malformed": "providers or providers.claude in the settings file isn't an object.\n"
+                                   "The auto-query switch is unchanged.",
+    "dialog.auto_query_write_failed": "Couldn't write the settings file: {error}\nThe auto-query switch is unchanged.",
 
     # Command line
     "cli.usage": "Usage:\n"
