@@ -36,6 +36,7 @@
 - 納管與匯入的檢查放在 `_store` 最前面，比「寫入憑證快照之前」更早：連建立納管目錄都不做。
 - 測試用的鎖檔模擬收進 `tests/fakehome.py` 的 `HomeTestCase.locked`，三個測試檔共用。
 - 審查時列出、本票沒測的邊界：`readings.json` 被鎖住時的納管／移除（程式會跳過讀數修剪，綁定照寫）、命令列 `remove` 在綁定檔鎖住時的結束碼（`remove` 不丟例外，走成功路徑）。
+- 上面兩個邊界的測試已列進 `.scratch/managed-directory/issues/06-add-import-remove.md` 的驗收清單，重構時補。
 
 ## Agent Brief
 
