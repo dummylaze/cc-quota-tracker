@@ -192,12 +192,12 @@ class Widget:
     def _sync_query_menu(self):
         """選單的「查詢額度」隨看板的查詢狀態：進行中與冷卻中不可點，其餘任何時候都可用（不必落後）。
         「自動查詢額度」的勾選一律取自看板（設定檔目前的值），所以寫不進設定檔時會回到實際生效的那一邊。
-        狀態沒變就不碰選單項：Windows 上改動彈出中的選單項會重建原生選單，展開中的子選單被收掉、整個選單跟著關閉。"""
+        狀態沒變就不碰選單項：Windows 上改動彈出中的選單項會重建原生選單，展開中的子選單被收掉、整個選單跟著關閉，
+        游標所在項目的反白也被清掉。游標停在這一項時 Tk 把它設成 active，那仍是可點，只比較可不可點。"""
         status = self._board.usage_query if self._board is not None else None
         busy = status is not None and (status.in_progress or status.cooling_down)
-        state = "disabled" if busy else "normal"
-        if self._menu.entrycget(self._query_index, "state") != state:
-            self._menu.entryconfigure(self._query_index, state=state)
+        if (self._menu.entrycget(self._query_index, "state") == "disabled") != busy:
+            self._menu.entryconfigure(self._query_index, state="disabled" if busy else "normal")
         self._auto_query_var.set(status is not None and status.auto_enabled)
 
     def _toggle_auto_query(self):

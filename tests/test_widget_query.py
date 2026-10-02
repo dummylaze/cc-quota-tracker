@@ -60,6 +60,13 @@ class MenuTest(QueryWiringTestCase):
             self.show(ACTIVE, cooling_down=True)
         self.assertEqual(configure.call_count, 1)  # 只有 normal → disabled 那一次
 
+    def test_polling_leaves_the_entry_alone_while_the_pointer_is_on_it(self):
+        # 游標停在項目上時 Tk 把它的 state 設成 active；那仍是可點，不是狀態改變
+        self.widget._menu.activate(self.menu_item("查詢額度"))
+        with mock.patch.object(self.widget._menu, "entryconfigure", wraps=self.widget._menu.entryconfigure) as configure:
+            self.show(ACTIVE)
+        self.assertEqual(configure.call_count, 0)
+
     def test_the_label_follows_the_language(self):
         self.widget.set_preference("language", "en")
         self.assertEqual(self.query_state("Query usage"), "normal")
