@@ -12,8 +12,8 @@ from typing import Callable, FrozenSet, NamedTuple, Optional, Set, Tuple
 from . import atomic
 from . import claude_provider as provider
 from . import usage_query
-from .board import (Board, Card, CountdownFormat, Limit, Preferences, QueryFailure, ReadingState, Role, Severity,
-                    UsageQueryResult)
+from .board import (Board, Card, CountdownFormat, Limit, Preferences, QueryFailure, QueryStatus, ReadingState, Role,
+                    Severity, UsageQueryResult)
 from .credstore import FileCredentialStore
 from .permissions import is_private, make_private
 from .settings import (CLAUDE_CONFIG_DIR, COUNTDOWN_FORMAT_FIELD, PathSource, ResolvedPaths, path_fields,
@@ -27,6 +27,7 @@ _RESERVED_NAMES = {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 10)
 SCHEMA_CHANGE_ROUNDS = 3  # 結構不符連續這麼多輪才判定為結構變更；偶發一次不亮橫幅
 # 沒落後時多久重掃一次對話紀錄：落後提示最多晚這麼久出現，換來不必每輪 poll 都 stat 所有對話紀錄
 LAG_SCAN_INTERVAL = timedelta(seconds=60)
+QUERY_COOLDOWN = timedelta(seconds=30)  # 固定值：手動查詢完成（成功或失敗）後，這麼久之內不能再觸發
 QUERY_CHECK_SECONDS = 0.05  # 同步查詢時，多久看一次子行程與額度快取（真實時間）
 
 
@@ -96,8 +97,12 @@ class Core:
         self._reading: Optional[provider.UsageReading] = None
         self._result: provider.ParseResult = provider.NoReading()
         self._mismatch_rounds = 0
+        self._query: Optional[usage_query.UsageQuery] = None  # 進行中的查詢；查詢狀態都只存在記憶體
+        self._cooldown_until: Optional[datetime] = None
+        self._last_query_failure: Optional[UsageQueryResult] = None
 
     def poll(self) -> Board:
+        self._poll_query()  # 先於 _refresh：查詢剛寫回的額度快取，這一輪就讀得到
         self._refresh()
         self._reread_settings()
         accounts = self._maintain_bindings(self._accounts())
@@ -112,25 +117,64 @@ class Core:
                      restart_required=self._path_fields != self._paths.path_fields,
                      settings_unreadable=self._settings_unreadable,
                      as_of=self._clock(), countdown_format=self._countdown_format,
-                     preferences=self._preferences, invalid_settings=self._invalid_settings)
+                     preferences=self._preferences, invalid_settings=self._invalid_settings,
+                     usage_query=self._query_status())
+
+    def start_query(self) -> bool:
+        """不阻塞的手動查詢入口，給 GUI 用：立刻返回，之後由 poll 檢查子行程。進行中或冷卻中回傳 False、什麼都不做。
+        開不起來（找不到 claude）也算受理：失敗與冷卻照常記進查詢狀態。"""
+        if self._query is not None or self._cooling_down():
+            return False
+        self._reread_settings()
+        query = self._open_query()
+        if query is None:
+            self._finish_query(UsageQueryResult(QueryFailure.COMMAND_NOT_FOUND))
+        else:
+            self._query = query
+        return True
 
     def query_usage(self) -> UsageQueryResult:
         """同步查詢一次額度：請 Claude Code 寫回額度快取，等到成功、失敗或逾時。設定檔改了，這一次就照新的值。"""
         self._reread_settings()
-        command = usage_query.find_command(self._provider_settings, os.environ)
-        if command is None:
-            return UsageQueryResult(QueryFailure.COMMAND_NOT_FOUND)
-        query = usage_query.UsageQuery(command, self._query_env(), self._source,
-                                       self._clock() + usage_query.TIMEOUT)
-        try:
-            query.start()
-        except OSError:
+        query = self._open_query()
+        if query is None:
             return UsageQueryResult(QueryFailure.COMMAND_NOT_FOUND)
         while True:
             result = query.check(self._clock())
             if result is not None:
                 return result
             time.sleep(QUERY_CHECK_SECONDS)
+
+    def _open_query(self) -> Optional[usage_query.UsageQuery]:
+        """開子行程送出查詢；找不到、開不起來回傳 None。"""
+        command = usage_query.find_command(self._provider_settings, os.environ)
+        if command is None:
+            return None
+        query = usage_query.UsageQuery(command, self._query_env(), self._source, self._clock() + usage_query.TIMEOUT)
+        try:
+            query.start()
+        except OSError:
+            return None
+        return query
+
+    def _poll_query(self) -> None:
+        if self._query is None:
+            return
+        result = self._query.check(self._clock())
+        if result is not None:
+            self._query = None
+            self._finish_query(result)
+
+    def _finish_query(self, result: UsageQueryResult) -> None:
+        self._last_query_failure = result if result.failure else None
+        self._cooldown_until = self._clock() + QUERY_COOLDOWN
+
+    def _cooling_down(self) -> bool:
+        return self._cooldown_until is not None and self._clock() < self._cooldown_until
+
+    def _query_status(self) -> QueryStatus:
+        return QueryStatus(in_progress=self._query is not None, cooling_down=self._cooling_down(),
+                           last_failure=self._last_query_failure)
 
     def _query_env(self) -> dict:
         """讓查詢寫回的正是本工具在讀的那份額度快取：Claude Code 目錄是 home 預設時拿掉 CLAUDE_CONFIG_DIR，

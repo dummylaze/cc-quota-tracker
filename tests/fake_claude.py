@@ -2,7 +2,8 @@
 
 劇本與紀錄放在環境變數 FAKE_CLAUDE_DIR 指的目錄（由 claude.cmd 設定）：
 - script.json：{"usage": "write" | "error" | "silent" | "hang" | "crash", "cache": 額度快取所在的檔案,
-  "cache_text": 寫回的內容, "message": 錯誤訊息, "exit": 結束代碼}
+  "cache_text": 寫回的內容, "message": 錯誤訊息, "exit": 結束代碼,
+  "gate": 選填，這個檔案出現之前不回應 get_usage（讓測試停在查詢進行中）}
 - record.json：收到的參數、CLAUDE_CONFIG_DIR、工作目錄、pid、有沒有主控台視窗，給測試斷言
 永遠不碰真實的額度快取：寫回的路徑一律由劇本指定。
 """
@@ -41,6 +42,8 @@ def main():
         if subtype == "initialize":
             respond(request_id)
         elif subtype == "get_usage":
+            while "gate" in script and not Path(script["gate"]).exists():
+                time.sleep(0.02)
             if usage == "hang":
                 time.sleep(60)
             elif usage == "error":
