@@ -4,7 +4,6 @@
 主題選「跟隨系統」時每輪讀一次 Windows 的應用程式深淺色；語系同理，選「跟隨系統」時每輪問一次作業系統的介面語言；
 切換語系只改既有選單項與版面 item 的文字，不重建選單、也不重建版面；
 視窗位置存在納管目錄的工具狀態，不進設定檔。開機自動啟動的開關狀態每次開選單時問登錄，不存在設定檔也不另存一份。"""
-import json
 import os
 import subprocess
 import sys
@@ -14,14 +13,14 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, simpledialog
 from typing import Callable, Optional, Tuple
 
-from . import atomic, i18n
+from . import i18n
 from .board import Board, Preferences
-from .core import STATE_DIR, BindingsUnreadable, InvalidLabel, NoCredential
+from .core import BindingsUnreadable, InvalidLabel, NoCredential
 from .entry import CLICKABLE_TAG
 from .layout_a import LayoutA
 from .layout_b import LayoutB
 from .layout_c import LayoutC
-from .permissions import make_private
+from .managed_directory import ManagedDirectory
 from .fmt import account_label
 from .i18n import text
 from .render_text import add_warning
@@ -101,7 +100,7 @@ class Widget:
         self._system_language = system_language
         self._lang = i18n.resolve("system", system_language())  # 目前套用中的語系；第一次套用偏好時會校正
         self._menu_labels = []  # (選單, 項目序號, 語系鍵)：換語系時逐項改字，選單本身不重建
-        self._position_file = paths.managed_dir / STATE_DIR / "window.json"
+        self._managed = ManagedDirectory(paths.managed_dir)
         self._board: Optional[Board] = None
         self._prefs: Optional[Preferences] = None  # 目前套用中的偏好；None 表示還沒套用過
         self._in_memory = {}  # 設定檔讀不懂時 GUI 的改動（欄位 → 值）：只在記憶體生效，修好設定檔後以設定檔為準
@@ -385,28 +384,17 @@ class Widget:
         self.root.destroy()
 
     def _restore_position(self, on_screen: Callable[[int, int], bool]):
-        try:
-            saved = json.loads(self._position_file.read_text(encoding="utf-8"))
-            x, y = saved["x"], saved["y"]
-            valid = all(type(v) is int for v in (x, y))
-        except (OSError, ValueError, TypeError, KeyError):
-            valid = False
-        position = (x, y) if valid and on_screen(x + _GRIP, y + _GRIP) else DEFAULT_POSITION
+        saved = self._managed.read_window_position()  # 讀不到或讀不懂都回到預設位置
+        position = saved if saved and on_screen(saved[0] + _GRIP, saved[1] + _GRIP) else DEFAULT_POSITION
         self.root.geometry("+%d+%d" % position)
         self._position = position
 
     def _save_position(self):
-        """位置變了才寫。工具狀態目錄由核心建立並收緊權限；還不存在（還沒 poll 成功過）就不記。"""
+        """位置變了才寫。這次沒記住（還沒 poll 成功過、寫不成、收不緊權限）就不更新，下次移動或結束時再記。"""
         self.root.update_idletasks()
         position = (self.root.winfo_x(), self.root.winfo_y())
-        if position == self._position or not self._position_file.parent.is_dir():
-            return
-        try:
-            atomic.write_atomic(self._position_file, json.dumps({"x": position[0], "y": position[1]}).encode("utf-8"),
-                                before_replace=make_private)
-        except OSError:
-            return  # 下次移動或結束時再記
-        self._position = position
+        if position != self._position and self._managed.write_window_position(*position):
+            self._position = position
 
     def _press(self, event):
         self._dx = event.x_root - self.root.winfo_x()

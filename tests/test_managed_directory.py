@@ -1,5 +1,6 @@
 """縫 ④：納管目錄 module 的 interface。用暫存目錄建立真實的納管目錄，注入故障，只看回傳值與檔案內容。"""
 import json
+import sys
 import tempfile
 import unittest
 from datetime import datetime, timezone
@@ -7,7 +8,7 @@ from pathlib import Path
 from unittest import mock
 
 from cc_quota_tracker.managed_directory import ManagedDirectory, Observed
-from tests.fakehome import HomeTestCase
+from tests.fakehome import HomeTestCase, WindowsAclAssertions
 
 AT = datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc)
 
@@ -110,6 +111,90 @@ class AppendSwitchTest(ManagedDirectoryTestCase):
                 self.managed.append_switch(AT, "acct-1")
         self.assertFalse(self.switch_log.exists())
         self.assertEqual(list(self.switch_log.parent.glob("*.tmp")), [])
+
+
+class ReadWindowPositionTest(ManagedDirectoryTestCase):
+    def setUp(self):
+        super().setUp()
+        self.position_file = self.path / ".state" / "window.json"
+
+    def test_missing_file_reads_as_nothing(self):
+        self.assertIsNone(self.managed.read_window_position())
+
+    def test_file_written_before_the_move_into_the_module_is_readable(self):
+        self.put(self.position_file, json.dumps({"x": 321, "y": -123}))
+        self.assertEqual(self.managed.read_window_position(), (321, -123))
+
+    def test_unparsable_content_reads_as_nothing(self):
+        self.put(self.position_file, "nonsense")
+        self.assertIsNone(self.managed.read_window_position())
+
+    def test_content_that_is_not_an_object_reads_as_nothing(self):
+        self.put(self.position_file, "[1, 2]")
+        self.assertIsNone(self.managed.read_window_position())
+
+    def test_missing_or_wrongly_typed_coordinates_read_as_nothing(self):
+        for content in ({"x": 1}, {"y": 1}, {"x": "1", "y": 2}, {"x": 1.5, "y": 2}, {"x": True, "y": 2}, {"x": None, "y": 2}):
+            with self.subTest(content=content):
+                self.put(self.position_file, json.dumps(content))
+                self.assertIsNone(self.managed.read_window_position())
+
+    def test_locked_file_reads_as_nothing(self):
+        self.put(self.position_file, json.dumps({"x": 1, "y": 2}))
+        with HomeTestCase.locked("window.json"):
+            self.assertIsNone(self.managed.read_window_position())
+
+
+class WriteWindowPositionTest(ManagedDirectoryTestCase):
+    def setUp(self):
+        super().setUp()
+        self.state_dir = self.path / ".state"
+        self.position_file = self.state_dir / "window.json"
+
+    def stored(self):
+        return json.loads(self.position_file.read_text(encoding="utf-8"))
+
+    def test_state_directory_not_there_yet_remembers_nothing_and_creates_nothing(self):
+        self.assertFalse(self.managed.write_window_position(10, 20))
+        self.assertFalse(self.path.exists())
+
+    def test_written_position_reads_back(self):
+        self.state_dir.mkdir(parents=True)
+        self.assertTrue(self.managed.write_window_position(321, 123))
+        self.assertEqual(self.stored(), {"x": 321, "y": 123})
+        self.assertEqual(self.managed.read_window_position(), (321, 123))
+
+    def test_failed_replace_remembers_nothing_and_keeps_the_previous_position(self):
+        self.state_dir.mkdir(parents=True)
+        self.managed.write_window_position(1, 2)
+        before = self.position_file.read_bytes()
+        with mock.patch("cc_quota_tracker.atomic.os.replace", side_effect=PermissionError("locked")):
+            self.assertFalse(self.managed.write_window_position(3, 4))
+        self.assertEqual(self.position_file.read_bytes(), before)
+        self.assertEqual(list(self.state_dir.glob("*.tmp")), [])
+
+    def test_permissions_that_cannot_be_tightened_remember_nothing(self):
+        self.state_dir.mkdir(parents=True)
+        with mock.patch("cc_quota_tracker.managed_directory.make_private"), \
+                mock.patch("cc_quota_tracker.managed_directory.is_private", return_value=False):
+            self.assertFalse(self.managed.write_window_position(3, 4))
+        self.assertFalse(self.position_file.exists())
+        self.assertEqual(list(self.state_dir.glob("*.tmp")), [])
+
+    def test_retry_after_a_failure_remembers_the_new_position(self):
+        self.state_dir.mkdir(parents=True)
+        with mock.patch("cc_quota_tracker.atomic.os.replace", side_effect=PermissionError("locked")):
+            self.managed.write_window_position(3, 4)
+        self.assertTrue(self.managed.write_window_position(3, 4))
+        self.assertEqual(self.stored(), {"x": 3, "y": 4})
+
+
+@unittest.skipUnless(sys.platform == "win32", "Windows ACL")
+class WindowPositionPermissionTest(ManagedDirectoryTestCase, WindowsAclAssertions):
+    def test_position_file_is_private(self):
+        self.managed.write_observed(AT, Observed())  # 工具狀態目錄由其他寫入建立並收緊
+        self.assertTrue(self.managed.write_window_position(5, 6))
+        self.assert_private(self.path / ".state" / "window.json")
 
 
 if __name__ == "__main__":

@@ -577,6 +577,23 @@ class PositionTest(WidgetTestCase):
         self.root.update_idletasks()
         self.assertEqual((self.root.winfo_x(), self.root.winfo_y()), DEFAULT_POSITION)
 
+    def test_position_is_not_remembered_before_the_tool_state_directory_exists(self):
+        shutil.rmtree(self.state_file().parent)
+        self.root.geometry("+321+123")
+        self.root.update_idletasks()
+        self.widget._save_position()
+        self.assertFalse(self.state_file().parent.exists())
+
+    def test_permissions_that_cannot_be_tightened_remember_nothing_and_the_window_keeps_working(self):
+        self.root.geometry("+321+123")
+        self.root.update_idletasks()
+        with mock.patch("cc_quota_tracker.managed_directory.make_private"), \
+                mock.patch("cc_quota_tracker.managed_directory.is_private", return_value=False):
+            self.widget._save_position()
+        self.assertFalse(self.state_file().exists())
+        self.widget._save_position()  # 下一次移動或結束時再試，這次權限收得緊了
+        self.assertEqual(json.loads(self.state_file().read_text(encoding="utf-8")), {"x": 321, "y": 123})
+
 
 if __name__ == "__main__":
     unittest.main()

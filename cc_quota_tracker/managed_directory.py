@@ -8,13 +8,13 @@
 
 已知限制：GUI 與命令列是兩個程序，同時寫同一個檔案時沒有跨程序的鎖；兩者在同一輪內交錯時，後寫的會蓋掉先寫的。
 
-過渡：綁定、待命讀數、憑證快照與視窗位置還在核心與視窗程式裡，它們用 STATE_DIR、tighten、mkdir_private、
+過渡：綁定、待命讀數與憑證快照還在核心裡，它們用 STATE_DIR、tighten、mkdir_private、
 ManagedDirectory.write_state；隨後續的票搬進來之後，這幾個就收回 module 內部。
 """
 import json
 from datetime import datetime
 from pathlib import Path
-from typing import NamedTuple, Optional
+from typing import NamedTuple, Optional, Tuple
 
 from . import atomic
 from .permissions import is_private, make_private
@@ -50,9 +50,10 @@ class ManagedDirectory:
 
     def __init__(self, path: Path):
         self._path = Path(path)
-        state = self._path / STATE_DIR
-        self._observed = state / "observed.json"  # 最後運作時間與上一輪的觀測
-        self._switch_log = state / "switches.jsonl"
+        self._state_dir = self._path / STATE_DIR
+        self._observed = self._state_dir / "observed.json"  # 最後運作時間與上一輪的觀測
+        self._switch_log = self._state_dir / "switches.jsonl"
+        self._window_position = self._state_dir / "window.json"
 
     def read_observed(self) -> Optional[Observed]:
         """讀不到回傳 None（呼叫端這一輪不判定）；不存在或讀不懂就當成沒有上一輪。"""
@@ -73,9 +74,30 @@ class ManagedDirectory:
         atomic.append(self._switch_log, (line + "\n").encode("utf-8"),
                       before_replace=lambda tmp: tighten(tmp, new=True))
 
+    def read_window_position(self) -> Optional[Tuple[int, int]]:
+        """讀不到、不存在或讀不懂都回傳 None（視窗回到預設位置，不必區分原因）。"""
+        state = self._read_state(self._window_position) or {}
+        x, y = state.get("x"), state.get("y")
+        return (x, y) if type(x) is int and type(y) is int else None
+
+    def write_window_position(self, x: int, y: int) -> bool:
+        """回傳這次有沒有記住。工具狀態目錄還不存在（還沒成功 poll 過）、寫不成、收不緊權限都是「這次沒記住」，
+        不丟例外也不建目錄；呼叫端下次移動或結束時再試。"""
+        if not self._state_dir.is_dir():
+            return False
+        try:
+            self._write_json(self._window_position, {"x": x, "y": y})
+        except OSError:
+            return False
+        return True
+
     def write_state(self, path: Path, data: dict) -> None:
         """工具狀態一律原子寫入，暫存檔在替換前就收緊權限。"""
         self._mkdir_state_dir()
+        self._write_json(path, data)
+
+    @staticmethod
+    def _write_json(path: Path, data: dict) -> None:
         atomic.write_atomic(path, json.dumps(data, indent=2).encode("utf-8"),
                             before_replace=lambda tmp: tighten(tmp, new=True))
 
@@ -95,7 +117,7 @@ class ManagedDirectory:
     def _mkdir_state_dir(self) -> None:
         """poll 在還沒納管任何帳號時也會寫工具狀態，納管目錄可能還不存在。"""
         mkdir_private(self._path)
-        mkdir_private(self._path / STATE_DIR)
+        mkdir_private(self._state_dir)
 
 
 def _text(value) -> Optional[str]:
