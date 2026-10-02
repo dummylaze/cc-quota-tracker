@@ -4,10 +4,18 @@
 
 **Blocked by:** `01-usage-query-core.md`、`02-usage-query-cli.md`、`04-manual-query-entry-layout-a.md`、`05-auto-usage-query.md`、`06-query-entry-layouts-b-c.md`、`07-pre-switch-lagging.md`
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] 兩個語言版本的內容對應一致，同一次編輯
-- [ ] 開頭承諾、查詢額度段落、三個欄位的表格、範圍外措辭、〈適用情境與已知限制〉都已更新
-- [ ] 全文用「查詢額度」，不用「刷新」指這件事
-- [ ] 不出現任何真實帳號、email、token 片段或本機使用者名稱
-- [ ] 文字與實作行為逐項對照一致（預設值、下限、冷卻、暫停）
+- [x] 兩個語言版本的內容對應一致，同一次編輯
+- [x] 開頭承諾、查詢額度段落、三個欄位的表格、範圍外措辭、〈適用情境與已知限制〉都已更新
+- [x] 全文用「查詢額度」，不用「刷新」指這件事
+- [x] 不出現任何真實帳號、email、token 片段或本機使用者名稱
+- [x] 文字與實作行為逐項對照一致（預設值、下限、冷卻、暫停）
+
+## Comments
+
+- 逐項對照實作的值：預設（`claudeCommand` null、`autoUsageQuery` false、`autoUsageQueryMinutes` 15）、下限 5、手動冷卻 30 秒（右鍵選單共用）、連續 3 次自動查詢失敗暫停（手動失敗不累計）、逾時 20 秒。
+- 順手修正既有英文句：把 "new conversation, quota not yet updated" 改成實際文案 "New activity; usage not updated"，"refreshes its cache" 改成 "updates its cache"（避開「刷新」一詞）。
+- AI 自補（spec 沒逐項要求，審查判為合理）：開頭功能列表加「查詢額度」、命令列清單加 `query`、右鍵選單加兩項、〈範圍外〉加「查詢待命帳號」、`claudeCommand` 與開機自動啟動只看得到使用者層級 `PATH` 的提醒。
+- spec 的「不讀查詢的回應」比實作絕對（實作會讀回應以得知何時關閉輸入與 Claude Code 回報的錯誤），README 改成「不拿回應當資料來源，成敗只看額度快取的觀測時間」，與 ADR-0010 一致。spec 本身不改。
+- spec〈測試決策〉的三項手動驗證不屬於本票：真實 Claude Code 按鈕（04 已驗）、開機自動啟動找 `claude`（02 已驗，README 的 `claudeCommand` 說明即其退路）、閒置一小時（05 仍未勾，tracker 的 S5 警告即此）。
