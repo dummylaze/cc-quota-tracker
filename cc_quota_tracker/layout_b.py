@@ -1,15 +1,16 @@
 """版面 B（密集表格／單行條）。精簡模式是使用中帳號的一行橫條；展開模式是表格，一列一個帳號，提示接在該列下方，
-使用中帳號那一列加淡色底。不與版面 A 共用版面程式碼；提示與橫幅的文案、折行取自 canvas_text；其餘文案取自語系檔，語系由 render 傳入、存在 _Paint.lang，切換語系只是重畫。
+使用中帳號那一列加淡色底。不與版面 A 共用版面程式碼；提示與橫幅的文案、折行取自 canvas_text，「更新」入口（item、點擊、游標）取自 entry；其餘文案取自語系檔，語系由 render 傳入、存在 _Paint.lang，切換語系只是重畫。
 
 物件生命週期同版面 A：固定部分的 item 一次建好，之後每輪只改座標、文字、顏色與顯示狀態；數量跟著看板走的部分
 （表格的列、提示、多行文字的行）由 _Pool 補建或刪到剛好，所以 item 數只由看板與模式決定。單行條只在精簡模式存在、
 表格只在展開模式存在：切換模式時建立要用的那一個、刪掉另一個。每組 item 都帶自己與上層的 tag，destroy() 刪掉全部。"""
 import itertools
 import math
-from typing import NamedTuple, Optional
+from typing import Callable, NamedTuple, Optional
 
 from .board import Board, Card, Limit, ReadingState, Role
-from .canvas_text import LINE_TAG, banner_lines, count_dot, notes, reset_text, wrap
+from .canvas_text import LINE_TAG, banner_lines, card_notes, count_dot, notes, query_entry, query_notes, reset_text, wrap
+from .entry import UpdateEntry
 from .fmt import absolute, account_label, age, until
 from .fonts import FontSet
 from .i18n import ZH_TW, text
@@ -197,10 +198,11 @@ def _expiry(card: Card, board: Board, lang: str):
 
 
 class _Strip(_Group):
-    """精簡模式的橫條：帳號標籤、兩個窗口（名稱、小進度條、百分比，進度條下面一行小字是重置倒數）、讀數年齡、提示數量。
-    所有窗口都沒有重置倒數時只有一行。"""
+    """精簡模式的橫條：帳號標籤、兩個窗口（名稱、小進度條、百分比，進度條下面一行小字是重置倒數）、讀數年齡、提示數量、
+    「更新」入口（落後或讀數待更新時，接在提示數量之後）。所有窗口都沒有重置倒數時只有一行；查詢的狀態與失敗原因
+    不收進提示數量，另起一行接在橫條底下。"""
 
-    def __init__(self, p, parent_tags):
+    def __init__(self, p, parent_tags, on_query):
         super().__init__(p, parent_tags)
         cv, f, t = p.cv, p.fonts, self.tags
         self.label = cv.create_text(0, 0, anchor="w", font=f["title"], tags=t)
@@ -212,9 +214,17 @@ class _Strip(_Group):
         self.age = cv.create_text(0, 0, anchor="w", font=f["small"], tags=t)
         self.dot = cv.create_oval(0, 0, 0, 0, width=0, tags=t)
         self.count = cv.create_text(0, 0, anchor="w", font=f["small"], tags=t)
+        self.entry = UpdateEntry(p, t, on_query)
+        self.status_notes = _Pool(lambda: _Note(p, t))
+
+    def _entry_and_status(self, card: Card, board: Board):
+        """(入口, 狀態提示)：入口是 (語系鍵, 可不可點) 或 None；狀態提示是查詢中、失敗原因、自動查詢已暫停。"""
+        status = board.usage_query
+        entry = query_entry(card, status)
+        return entry, query_notes(card, status, self.p.lang, entry is not None)
 
     def _parts(self, card: Card, board: Board):
-        """要顯示的各段，由左而右：[(段, 寬度, 內容)]；段是 "label"、窗口的序號、"age" 或 "count"。"""
+        """要顯示的各段，由左而右：[(段, 寬度, 內容)]；段是 "label"、窗口的序號、"age"、"count" 或 "entry"。"""
         p, f, lang = self.p, self.p.fonts, self.p.lang
         label = _label(card, lang)
         parts = [("label", f["title"].measure(label), label)]
@@ -235,19 +245,31 @@ class _Strip(_Group):
         if shown:
             count = text(lang, "notes.count", count=len(shown))
             parts.append(("count", p.px("dot") + p.px("dot_gap") + f["small"].measure(count), (count, shown)))
+        entry, _ = self._entry_and_status(card, board)
+        if entry:
+            parts.append(("entry", self.entry.width(), entry))
         return parts
 
     def width(self, card: Card, board: Board):
+        """橫條的寬度。有狀態提示時至少與版面 A 的卡片同寬（扣掉內距），失敗原因才不會折成很多行。"""
+        p = self.p
         parts = self._parts(card, board)
-        return sum(width for _, width, _ in parts) + self.p.px("col_gap") * (len(parts) - 1)
+        width = sum(width for _, width, _ in parts) + p.px("col_gap") * (len(parts) - 1)
+        if self._entry_and_status(card, board)[1]:
+            width = max(width, p.px("card_width") - 2 * p.px("card_pad_x"))
+        return width
 
     def render(self, card: Card, board: Board, c, x, y):
         """回傳下緣。"""
         p, f = self.p, self.p.fonts
         height = max(p.height("title"), p.height("percent"))
-        mid = y + height / 2
+        mid, x_start = y + height / 2, x
+        edge = x_start + self.width(card, board)  # 橫條的右緣
         parts, windows = self._parts(card, board), _windows(card, board, p.lang)
         p.hide(self.age, self.dot, self.count, *itertools.chain(*self.windows))  # 這一輪用到的下面再顯示
+        entry, status = self._entry_and_status(card, board)
+        if entry is None:
+            self.entry.hide()  # 有入口時不先藏：藏了再顯示會把懸停中的手形游標收掉
         if any(window.reset for window in windows if window):
             foot_mid = y + height + p.px("line_gap") + p.height("small") / 2
             height += p.px("line_gap") + p.height("small")
@@ -263,6 +285,8 @@ class _Strip(_Group):
                 dot = p.px("dot")
                 p.show(self.dot, x, mid - dot / 2, x + dot, mid + dot / 2, fill=c[count_dot(shown)])
                 p.show(self.count, x + dot + p.px("dot_gap"), mid, text=count, fill=c["fg"])
+            elif part == "entry":
+                self.entry.place(content, c, edge, mid)  # 靠右對齊橫條的右緣（被狀態提示撐寬時也與它對齊）
             else:
                 name_item, track, fill, value_item, foot_item = self.windows[part]
                 name, window, value = content
@@ -276,7 +300,10 @@ class _Strip(_Group):
                     left = right + p.px("cell_gap")
                 p.show(value_item, left, mid, text=value, font=f[window.font], fill=c[window.color])
             x += width + p.px("col_gap")
-        return y + height
+        bottom = y + height
+        for i, (slot, note) in enumerate(zip(self.status_notes.fit(len(status)), status)):
+            bottom = slot.render(note, c, x_start, edge, bottom + p.px("section_gap" if i == 0 else "line_gap"))
+        return bottom
 
 
 class _Cell(_Group):
@@ -313,9 +340,10 @@ class _Cell(_Group):
 
 
 class _TableRow(_Group):
-    """表格的一列：帳號標籤與狀態標籤、兩格窗口、讀數年齡、憑證到期倒數，底下接提示；使用中帳號加淡色底。"""
+    """表格的一列：帳號標籤與狀態標籤、兩格窗口、讀數年齡、憑證到期倒數，底下接提示；使用中帳號加淡色底。
+    有「更新」入口時，它與落後（或讀數待更新）那條提示同一行靠右，查詢的狀態與失敗原因接在那條提示底下。"""
 
-    def __init__(self, p, parent_tags):
+    def __init__(self, p, parent_tags, on_query):
         super().__init__(p, parent_tags)
         cv, f, t = p.cv, p.fonts, self.tags
         self.band = cv.create_polygon(0, 0, 0, 0, 0, 0, tags=t)
@@ -326,6 +354,7 @@ class _TableRow(_Group):
         self.age = cv.create_text(0, 0, anchor="w", font=f["small"], tags=t)
         self.expiry = cv.create_text(0, 0, anchor="w", font=f["small"], tags=t)
         self.note_rows = _Pool(lambda: _Note(p, t))
+        self.entry = UpdateEntry(p, t, on_query)
 
     def render(self, card: Card, board: Board, c, columns, x1, x2, y):
         """columns 是各欄的 (左緣, 寬度)；x1、x2 是卡片的左右緣。回傳這一列的下緣。"""
@@ -352,9 +381,15 @@ class _TableRow(_Group):
         p.show(self.expiry, expiry_x, mid, text=expiry, fill=c["sub" if expiry == _NONE else "fg"])
         y = bottom
         left, right = x1 + p.px("card_pad_x"), x2 - p.px("card_pad_x")
-        shown = notes(card, board, lang, expiry_info=False)
+        shown, host = card_notes(card, board, lang, expiry_info=False)
+        entry, reserve = query_entry(card, board.usage_query), 0
         for i, (slot, note) in enumerate(zip(self.note_rows.fit(len(shown)), shown)):
-            y = slot.render(note, c, left, right, y + p.px("section_gap" if i == 0 else "line_gap"))
+            y += p.px("section_gap" if i == 0 else "line_gap")
+            if i == host:
+                reserve = self.entry.place(entry, c, right, y + p.pitch("small") / 2)
+            y = slot.render(note, c, left, right - reserve if i == host else right, y)
+        if host is None:
+            self.entry.hide()
         y += p.px("row_pad_y")
         if card.role is Role.STANDBY:
             p.hide(self.band)
@@ -371,11 +406,11 @@ def _chip_width(p: _Paint, chip):
 class _Table(_Group):
     """展開模式的表格：欄名一列，接著一列一個帳號。"""
 
-    def __init__(self, p, parent_tags):
+    def __init__(self, p, parent_tags, on_query):
         super().__init__(p, (*parent_tags, EXPANDED_TAG))
         cv, f, t = p.cv, p.fonts, self.tags
         self.headers = [cv.create_text(0, 0, anchor="w", font=f["small"], tags=t) for _ in _HEADERS]
-        self.rows = _Pool(lambda: _TableRow(p, t))
+        self.rows = _Pool(lambda: _TableRow(p, t, on_query))
 
     def columns(self, board: Board):
         """各欄寬度：欄名與這一輪每一列內容的最大寬度；窗口欄至少容得下小進度條。"""
@@ -411,8 +446,10 @@ class _Table(_Group):
 
 
 class LayoutB:
-    def __init__(self, canvas):
+    def __init__(self, canvas, on_query: Optional[Callable[[], None]] = None):
+        """on_query：使用者按下「更新」時呼叫；None 就什麼都不做（只畫、不接線的呼叫端，例如測試）。"""
         self.cv = canvas
+        self._on_query = on_query
         self._p = p = _Paint(canvas)
         self._panel = canvas.create_polygon(0, 0, 0, 0, 0, 0, tags=TAG)
         self._banner_bg = canvas.create_polygon(0, 0, 0, 0, 0, 0, tags=TAG)
@@ -441,7 +478,7 @@ class LayoutB:
                 self._strip.destroy()
                 self._strip = None
             if self._table is None:
-                self._table = _Table(p, (TAG,))
+                self._table = _Table(p, (TAG,), self._on_query)
             widths = self._table.columns(board)
             width = sum(widths) + p.px("col_gap") * (len(widths) - 1) + 2 * pad_x
         else:
@@ -449,7 +486,7 @@ class LayoutB:
                 self._table.destroy()
                 self._table = None
             if self._strip is None:
-                self._strip = _Strip(p, (TAG,))
+                self._strip = _Strip(p, (TAG,), self._on_query)
             card = board.cards[0]  # 核心保證第一張是使用中帳號（或未納管帳號）
             width = self._strip.width(card, board) + 2 * pad_x
         top = self._banner_box(board, c, pad, pad, width)

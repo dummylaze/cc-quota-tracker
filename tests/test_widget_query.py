@@ -222,6 +222,31 @@ class EntryTest(QueryWiringTestCase):
         self.assertEqual(self.widget.menu_state().mode, before)
 
 
+    def test_clicking_the_entry_starts_a_query_on_every_layout_and_mode(self):
+        for layout in ("table", "ring", "cards"):
+            for mode in ("compact", "expanded"):
+                self.widget.set_preference("layout", layout)
+                self.widget.set_preference("mode", mode)
+                self.show(LAGGING)
+                self.started.clear()
+                x, y = self.entry_center()
+                self.widget.canvas.event_generate("<Motion>", x=x, y=y)
+                self.widget.canvas.event_generate("<Button-1>", x=x, y=y)
+                self.root.update()
+                self.assertEqual(self.started, [True], (layout, mode))
+
+    def test_double_clicking_the_entry_does_not_toggle_the_mode_on_tables_and_rings(self):
+        for layout in ("table", "ring"):
+            self.widget.set_preference("layout", layout)
+            self.show(LAGGING)
+            x, y = self.entry_center()
+            self.widget.canvas.event_generate("<Motion>", x=x, y=y)
+            self.root.update()
+            before = self.widget.menu_state().mode
+            self.widget._double_click(None)
+            self.assertEqual(self.widget.menu_state().mode, before, layout)
+
+
 class PollIntervalTest(QueryWiringTestCase):
     def delay_after(self, **status):
         self.show(ACTIVE, **status)

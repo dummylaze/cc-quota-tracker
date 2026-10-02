@@ -13,6 +13,7 @@ from typing import Callable, Optional
 
 from .board import Board, Card, Limit, ReadingState, Role
 from .canvas_text import LINE_TAG, banner_lines, card_notes, query_entry, reset_text, wrap
+from .entry import CLICKABLE_TAG, UpdateEntry
 from .fmt import absolute, account_label, age, money
 from .fonts import FontSet
 from .i18n import ZH_TW, text
@@ -20,7 +21,6 @@ from .tokens import FONTS, LINE_HEIGHT, RADIUS, SPACE, THEMES
 
 TAG = "layout-a"
 EXPANDED_TAG = "layout-a-expanded"  # 展開專用的 item
-CLICKABLE_TAG = "clickable"  # 自己處理點擊的 item：視窗的雙擊切換模式在它上面不作用；「更新」只有可點時才帶
 _WINDOWS = (("session", "window.session"), ("weekly_all", "window.weekly_all"))  # 兩種模式都固定顯示這兩個窗口；值是語系鍵
 _NOTE_SLOTS = 5  # 一張卡片的提示最多幾條：讀數說明或未納管、落後、鎖定、憑證快照、查詢的狀態與失敗原因，實際同時最多 4 條
 _ids = itertools.count()
@@ -274,18 +274,9 @@ class _CardView(_Group):
         self.age = cv.create_text(0, 0, anchor="e", font=f["small"], tags=t)
         self.windows = [_Row(p, t) for _ in _WINDOWS]
         self.notes = [_Note(p, t) for _ in range(_NOTE_SLOTS)]
-        self.entry = cv.create_text(0, 0, anchor="e", tags=t)  # 「更新」入口：落後或讀數待更新時，緊靠在那條提示的同一行右側
-        cv.tag_bind(self.entry, "<Button-1>", lambda e: self._click_entry())
-        cv.tag_bind(self.entry, "<Enter>", lambda e: cv.configure(cursor="hand2" if self._entry_clickable else ""))
-        cv.tag_bind(self.entry, "<Leave>", lambda e: cv.configure(cursor=""))
-        self._entry_clickable = False
+        self.entry = UpdateEntry(p, t, on_query)  # 落後或讀數待更新時，緊靠在那條提示的同一行右側
         self.extras: Optional[_Extras] = None
         self._on_toggle_others = on_toggle_others
-        self._on_query = on_query
-
-    def _click_entry(self):
-        if self._entry_clickable:  # 查詢中與冷卻中不可點，item 沒有 CLICKABLE_TAG，這裡再擋一次
-            self._on_query()
 
     def render(self, card: Card, board: Board, c, x, y, expanded, others_open):
         p = self.p
@@ -323,35 +314,18 @@ class _CardView(_Group):
         p = self.p
         entry = query_entry(card, board.usage_query)
         shown, host = card_notes(card, board, p.lang)
-        was_clickable, reserve = self._entry_clickable, 0
+        reserve = 0
         for i, slot in enumerate(self.notes):
             if i >= len(shown):
                 slot.hide()
                 continue
             y += p.px("section_gap" if i == 0 else "line_gap")
             if i == host:
-                reserve = self._place_entry(entry, c, right, y)
+                reserve = self.entry.place(entry, c, right, y + p.pitch("small") / 2)
             y = slot.render(shown[i], c, left, right - reserve if i == host else right, y)
         if host is None:
-            p.hide(self.entry)
-            self._entry_clickable = False
-        if was_clickable and not self._entry_clickable:
-            p.cv.configure(cursor="")  # 懸停期間入口變成不可點或被藏起來：<Leave> 不會觸發，手形游標要自己收掉
+            self.entry.hide()
         return y
-
-    def _place_entry(self, entry, c, right, top) -> int:
-        """把入口放在 top 起的那一行右緣，回傳它佔掉的寬度（含與提示之間的空隙）。寬度取兩種標籤的較大者，
-        提示的折行才不會隨進行中與否變來變去。"""
-        p = self.p
-        key, clickable = entry
-        font = p.fonts["link"]
-        width = max(font.measure(text(p.lang, label)) for label in ("query.entry", "query.entry_busy"))
-        self._entry_clickable = clickable
-        tags = (*self.tags, CLICKABLE_TAG) if clickable else self.tags  # 不可點時不帶 CLICKABLE_TAG，雙擊照常切換模式
-        p.cv.itemconfigure(self.entry, tags=tags)
-        p.show(self.entry, right, top + p.pitch("small") / 2, text=text(p.lang, key),
-               font=font if clickable else p.fonts["small"], fill=c["fg"] if clickable else c["sub"])
-        return width + p.px("entry_gap")
 
     def _header(self, card: Card, c, left, right, y):
         p, f = self.p, self.p.fonts
@@ -380,12 +354,11 @@ class LayoutA:
     def __init__(self, canvas, on_query: Optional[Callable[[], None]] = None):
         """on_query：使用者按下「更新」時呼叫；None 就什麼都不做（只畫、不接線的呼叫端，例如測試）。"""
         self.cv = canvas
-        self._on_query = on_query
         self._p = p = _Paint(canvas)
         self._panel = canvas.create_polygon(0, 0, 0, 0, 0, 0, tags=TAG)
         self._banner_bg = canvas.create_polygon(0, 0, 0, 0, 0, 0, tags=TAG)
         self._banner = _Text(p, (TAG,), "body")
-        self._cards = _Pool(lambda: _CardView(p, self.toggle_other_limits, self._query))
+        self._cards = _Pool(lambda: _CardView(p, self.toggle_other_limits, on_query))
         self._others_open = False
         self._last = None
 
@@ -411,10 +384,6 @@ class LayoutA:
         total_w, total_h = width + 2 * pad, y + pad
         p.rrect(self._panel, 0, 0, total_w, total_h, RADIUS["panel"], c["panel"])
         self.cv.configure(width=total_w, height=total_h)
-
-    def _query(self):
-        if self._on_query is not None:
-            self._on_query()
 
     def toggle_other_limits(self):
         """開合其他限額的摺疊區，以上一次的看板重畫。"""

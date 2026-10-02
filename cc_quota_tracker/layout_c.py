@@ -1,16 +1,17 @@
 """版面 C（環形儀表）。一個帳號一格：外圈是週窗口、內圈是工作階段窗口，中央顯示工作階段百分比，底下是帳號標籤、
 狀態標籤、讀數年齡與兩個窗口的文字說明。精簡模式只有使用中帳號那一格；展開模式每列三格，使用中帳號那一格加外框，
-提示接在該列的格子下方、冠上帳號標籤。外框離卡片邊 row_inset，圓角與卡片同心。不與其他版面共用版面程式碼；提示與橫幅的文案、折行取自 canvas_text；其餘文案取自語系檔，語系由 render 傳入、存在 _Paint.lang，切換語系只是重畫。
+提示接在該列的格子下方、冠上帳號標籤。外框離卡片邊 row_inset，圓角與卡片同心。不與其他版面共用版面程式碼；提示與橫幅的文案、折行取自 canvas_text，「更新」入口（item、點擊、游標）取自 entry；其餘文案取自語系檔，語系由 render 傳入、存在 _Paint.lang，切換語系只是重畫。
 
 物件生命週期同版面 A、B：一格裡固定部分的 item 一次建好，之後每輪只改座標、文字、顏色與顯示狀態；數量跟著看板走的部分
 （格子、提示、多行文字的行）由 _Pool 補建或刪到剛好，所以 item 數只由看板與模式決定。第二格起只在展開模式存在，
 帶 EXPANDED_TAG。每組 item 都帶自己與上層的 tag，destroy() 刪掉全部。"""
 import itertools
 import math
-from typing import NamedTuple, Optional
+from typing import Callable, NamedTuple, Optional
 
 from .board import Board, Card, Limit, ReadingState, Role
-from .canvas_text import LINE_TAG, banner_lines, count_dot, notes, reset_text, wrap
+from .canvas_text import LINE_TAG, banner_lines, card_notes, count_dot, notes, query_entry, query_notes, reset_text, wrap
+from .entry import UpdateEntry
 from .fmt import account_label, age
 from .fonts import FontSet
 from .i18n import ZH_TW, text
@@ -206,9 +207,10 @@ class _Ring(_Group):
 
 class _Cell(_Group):
     """一個帳號一格：環、帳號標籤、狀態標籤、讀數年齡、兩個窗口的說明（展開模式多一行重置倒數）；使用中帳號加外框。
-    提示由 render_notes 畫在該列下方；精簡模式只畫提示的數量。"""
+    提示由 render_notes 畫在該列下方；精簡模式只畫提示的數量。「更新」入口與落後（或讀數待更新）那條提示同一行靠右，
+    精簡模式沒有那條提示時靠在提示數量那一行；查詢的狀態與失敗原因接在它底下。"""
 
-    def __init__(self, p, parent_tags):
+    def __init__(self, p, parent_tags, on_query):
         super().__init__(p, parent_tags)
         cv, f, t = p.cv, p.fonts, self.tags
         self.frame = cv.create_polygon(0, 0, 0, 0, 0, 0, tags=t)
@@ -219,6 +221,7 @@ class _Cell(_Group):
         self.age = cv.create_text(0, 0, anchor="n", font=f["small"], tags=t)
         self.legend = [_Lines(p, t, "small", center=True) for _ in _WINDOWS]
         self.notes = _Pool(lambda: _Note(p, t))
+        self.entry = UpdateEntry(p, t, on_query)
 
     def render(self, card: Card, board: Board, c, x, y, width, expanded: bool):
         """x、y 是這一格的左上角。回傳下緣。"""
@@ -265,25 +268,33 @@ class _Cell(_Group):
     def render_notes(self, card: Card, board: Board, c, left, right, y, named: bool, expanded: bool):
         """這一格的提示，畫在整列格子的下方、與格子的內容對齊左右邊。多個帳號並列時冠上帳號標籤，才看得出是哪一格的。
         精簡模式有讀數時只畫一行「● 3 則提示」，色點取最嚴重那條的顏色，完整文字展開才看得到。回傳下緣。"""
-        p = self.p
+        p, status = self.p, board.usage_query
+        entry = query_entry(card, status)
         if not expanded and card.role is not Role.UNMANAGED and card.reading_state is ReadingState.HAS_READING:
             # 沒有讀數或未納管時，提示就是這張卡片的內容（怎麼納管、為什麼還沒有讀數），照常全文顯示
             shown = notes(card, board, p.lang, expiry_info=False)
             summary = [(text(p.lang, "notes.count", count=len(shown)), count_dot(shown), "fg")] if shown else []
-            for slot, note in zip(self.notes.fit(len(summary)), summary):
-                y = slot.render(note, c, left, right, y + p.px("section_gap"))
-            return y
-        shown = notes(card, board, p.lang)
-        if named:
-            label = _label(card, p.lang)
-            shown = [(text(p.lang, "note.named", label=label, text=note), dot, fg) for note, dot, fg in shown]
-        for i, (slot, note) in enumerate(zip(self.notes.fit(len(shown)), shown)):
-            y = slot.render(note, c, left, right, y + p.px("section_gap" if i == 0 else "line_gap"))
+            host = 0 if summary and entry else None
+            lines = summary + query_notes(card, status, p.lang, host is not None)
+        else:
+            lines, host = card_notes(card, board, p.lang)
+            if named:
+                label = _label(card, p.lang)
+                lines = [(text(p.lang, "note.named", label=label, text=note), dot, fg) for note, dot, fg in lines]
+        reserve = 0
+        for i, (slot, note) in enumerate(zip(self.notes.fit(len(lines)), lines)):
+            y += p.px("section_gap" if i == 0 else "line_gap")
+            if i == host:
+                reserve = self.entry.place(entry, c, right, y + p.pitch("small") / 2)
+            y = slot.render(note, c, left, right - reserve if i == host else right, y)
+        if host is None:
+            self.entry.hide()
         return y
 
 
 class LayoutC:
-    def __init__(self, canvas):
+    def __init__(self, canvas, on_query: Optional[Callable[[], None]] = None):
+        """on_query：使用者按下「更新」時呼叫；None 就什麼都不做（只畫、不接線的呼叫端，例如測試）。"""
         self.cv = canvas
         self._p = p = _Paint(canvas)
         self._panel = canvas.create_polygon(0, 0, 0, 0, 0, 0, tags=TAG)
@@ -292,7 +303,7 @@ class LayoutC:
         self._shadow = canvas.create_polygon(0, 0, 0, 0, 0, 0, tags=TAG)
         self._card = canvas.create_polygon(0, 0, 0, 0, 0, 0, tags=TAG)
         # 補建時 len(self._cells) 就是新格的序號：第二格起帶 EXPANDED_TAG
-        self._cells = _Pool(lambda: _Cell(p, (TAG, EXPANDED_TAG) if len(self._cells) else (TAG,)))
+        self._cells = _Pool(lambda: _Cell(p, (TAG, EXPANDED_TAG) if len(self._cells) else (TAG,), on_query))
 
     def set_font(self, custom):
         """換字型（設定檔的 font，None 用內建字型）：只改既有字型物件的家族，item 不重建；呼叫端接著要重新 render。"""

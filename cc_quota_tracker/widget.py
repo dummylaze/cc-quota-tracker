@@ -17,7 +17,8 @@ from typing import Callable, Optional, Tuple
 from . import atomic, i18n
 from .board import Board, Preferences
 from .core import STATE_DIR, InvalidLabel, NoCredential
-from .layout_a import CLICKABLE_TAG, LayoutA
+from .entry import CLICKABLE_TAG
+from .layout_a import LayoutA
 from .layout_b import LayoutB
 from .layout_c import LayoutC
 from .permissions import make_private
@@ -297,8 +298,7 @@ class Widget:
             if self.layout is not None:
                 self.layout.destroy()
             make = _LAYOUTS[prefs.layout]
-            # 「更新」入口目前只有版面 A 有；B、C 補上時一起改成都傳 on_query
-            self.layout = make(self.canvas, on_query=self.query_usage) if make is LayoutA else make(self.canvas)
+            self.layout = make(self.canvas, on_query=self.query_usage)
         if new_layout or prefs.font != previous.font:
             self.layout.set_font(prefs.font)  # 字型存不存在只有畫面層知道；找不到時版面自己在橫幅提示
         if self._board is not None:

@@ -10,6 +10,7 @@ from .i18n import text
 
 LINE_TAG = "wrapped-line"  # 多行文字的逐行 item；同一段的各行共用最後一個 tag。測試靠它把各行接回一段
 QUERY_MESSAGE_LIMIT = 60  # Claude Code 回報的原始訊息在卡片上最多顯示幾個字，超過就截斷；卡片很窄，不能讓它撐開版面
+ENTRY_LABELS = ("query.entry", "query.entry_busy")  # 「更新」入口的兩種標籤（語系鍵）：閒置與進行中；版面預留寬度取兩者較大者
 _QUERY_REASONS = {
     QueryFailure.COMMAND_NOT_FOUND: "query.note.command_not_found",
     QueryFailure.TIMEOUT: "query.note.timeout",
@@ -48,8 +49,8 @@ def query_entry(card: Card, status: QueryStatus) -> Optional[Tuple[str, bool]]:
     if card.role is Role.STANDBY or not (card.lagging or card.reading_state is ReadingState.PENDING):
         return None
     if status.in_progress:
-        return "query.entry_busy", False
-    return "query.entry", not status.cooling_down
+        return ENTRY_LABELS[1], False
+    return ENTRY_LABELS[0], not status.cooling_down
 
 
 def query_notes(card: Card, status: QueryStatus, lang: str, has_entry: bool):
@@ -80,13 +81,14 @@ def _failure_reason(failure: QueryFailure, message: Optional[str], lang: str) ->
     return text(lang, "query.note.reported_error", message=message)
 
 
-def card_notes(card: Card, board: Board, lang: str):
+def card_notes(card: Card, board: Board, lang: str, expiry_info: bool = True):
     """有「更新」入口的版面用：(提示清單, 入口所在那條提示的序號)。入口所在的是落後或讀數待更新那一條；
     序號是 None 表示這張卡片沒有入口。查詢的狀態與失敗原因接在那條提示底下，沒有入口時排在最前面。
-    入口所在那一條的文字在這裡產生也在這裡認出來，兩處的語系鍵放在一起，改文案不會讓入口靜默消失。"""
+    入口所在那一條的文字在這裡產生也在這裡認出來，兩處的語系鍵放在一起，改文案不會讓入口靜默消失。
+    expiry_info 同 notes()。"""
     status = board.usage_query
     has_entry = query_entry(card, status) is not None
-    shown = notes(card, board, lang, short_pending=has_entry)
+    shown = notes(card, board, lang, expiry_info, short_pending=has_entry)
     host = None
     if has_entry:
         host_texts = (text(lang, "reading.pending_short"), text(lang, "reading.lagging"))
