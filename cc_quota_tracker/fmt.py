@@ -37,6 +37,11 @@ def absolute(when: datetime, now: datetime) -> str:
     return local.strftime("%H:%M" if abs(when - now) < timedelta(days=1) else "%m-%d %H:%M")
 
 
+def date_time(value: Optional[datetime], lang: str) -> str:
+    """完整的本地日期時間（含年份）；沒有值就是「未知」。"""
+    return value.astimezone().strftime("%Y-%m-%d %H:%M") if value else text(lang, "common.unknown")
+
+
 def age(value: timedelta, lang: str) -> str:
     minutes = int(value.total_seconds() // 60)
     if minutes < 60:

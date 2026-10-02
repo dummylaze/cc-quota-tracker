@@ -6,8 +6,10 @@ from pathlib import Path
 from typing import Optional
 
 from . import COMMAND, claude_provider, i18n
+from .board import QueryFailure
 from .claude_provider import FieldStatus, NoReading, SchemaCheck
 from .core import Core, InvalidLabel, NoCredential, UnknownLabel
+from .fmt import date_time
 from .i18n import text
 from .render_text import add_warning, render
 from .settings import (CLAUDE_CONFIG_DIR, CLAUDE_DIR_FIELD, MANAGED_DIR_FIELD, InvalidPathSetting, PathProblem,
@@ -31,7 +33,7 @@ def configured_language(settings_file: Optional[Path]) -> str:
 def main(argv=None) -> int:
     args = sys.argv[1:] if argv is None else argv
     command, params = (args[0], args[1:]) if args else (None, [])
-    if (command, len(params)) not in {("add", 1), ("remove", 1), ("list", 0), ("check", 0), ("gui", 0)}:
+    if (command, len(params)) not in {("add", 1), ("remove", 1), ("list", 0), ("query", 0), ("check", 0), ("gui", 0)}:
         print(text(configured_language(None), "cli.usage", command=COMMAND), file=sys.stderr)  # 還沒解析路徑，讀不到設定檔
         return 2
     try:
@@ -53,9 +55,11 @@ def main(argv=None) -> int:
     if command == "list":
         print(render(core.poll(), lang))
         return 0
-    label = params[0]
     if paths.settings_unreadable:  # list 由看板帶出這個提示
         print(text(lang, "notice", text=text(lang, "settings.unreadable")), file=sys.stderr)
+    if command == "query":
+        return query(core, lang)
+    label = params[0]
     try:
         if command == "add":
             result = core.add(label)
@@ -75,6 +79,29 @@ def main(argv=None) -> int:
         print(text(lang, "error.unknown_label", label=label), file=sys.stderr)
         return 1
     return 0
+
+
+_QUERY_REASONS = {
+    QueryFailure.COMMAND_NOT_FOUND: "query.reason.command_not_found",
+    QueryFailure.TIMEOUT: "query.reason.timeout",
+    QueryFailure.NOT_WRITTEN: "query.reason.not_written",
+}
+
+
+def query(core: Core, lang: str) -> int:
+    """同步查詢一次額度：成功印出新的觀測時間、結束代碼 0；失敗印出原因與 /usage 退路、結束代碼 1。
+    命令列與視窗是不同的程序，不共享冷卻。"""
+    result = core.query_usage()
+    if result.failure is None:
+        print(text(lang, "query.success", time=date_time(result.observed_at, lang)))
+        return 0
+    if result.failure is QueryFailure.REPORTED_ERROR:  # Claude Code 的原始訊息，不翻譯
+        reason = (text(lang, "query.reason.reported_error", message=result.message) if result.message
+                  else text(lang, "query.reason.reported_error_no_message"))
+    else:
+        reason = text(lang, _QUERY_REASONS[result.failure])
+    print(text(lang, "query.failed", reason=reason), file=sys.stderr)
+    return 1
 
 
 def gui(paths: ResolvedPaths) -> int:

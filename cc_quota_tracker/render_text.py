@@ -1,11 +1,8 @@
 """把看板渲染成終端機文字；所有文案都在這一層套用，語系由呼叫端指定（i18n）。"""
-from datetime import datetime
-from typing import Optional
-
 from . import COMMAND
 from .board import Board, Card, Limit, ReadingState, Role
 from .core import AddWarning
-from .fmt import absolute, account_label, age, countdown, money, until
+from .fmt import absolute, account_label, age, countdown, date_time, money, until
 from .i18n import ZH_TW, text
 
 _WINDOW_NAMES = {"session": "window.session", "weekly_all": "window.weekly_all", "weekly_scoped": "window.weekly_scoped"}
@@ -27,7 +24,7 @@ def render(board: Board, lang: str = ZH_TW) -> str:
     lines = [_render_card(c, board, lang) for c in board.cards]
     if board.schema_changed:
         key = "list.schema_changed" if board.last_reading_at else "list.schema_changed_none"
-        lines.insert(0, text(lang, "notice", text=text(lang, key, time=_time(board.last_reading_at, lang))))
+        lines.insert(0, text(lang, "notice", text=text(lang, key, time=date_time(board.last_reading_at, lang))))
     if board.wrong_location_suspected:
         lines.insert(0, text(lang, "notice", text=text(lang, "board.wrong_location")))
     if board.invalid_settings:
@@ -35,6 +32,8 @@ def render(board: Board, lang: str = ZH_TW) -> str:
         lines.insert(0, text(lang, "notice", text=text(lang, "settings.invalid", fields=fields)))
     if board.settings_unreadable:
         lines.insert(0, text(lang, "notice", text=text(lang, "settings.unreadable")))
+    if any(c.lagging or c.reading_state is ReadingState.PENDING for c in board.cards):
+        lines.append(text(lang, "list.query_hint", command=COMMAND))
     labels = [account_label(key) for key in board.managed_accounts]
     lines.append(text(lang, "list.managed", labels=text(lang, "sep.item").join(labels)) if labels
                  else text(lang, "list.none_managed"))
@@ -86,7 +85,7 @@ def _body(card: Card, board: Board, lang: str) -> list:
         lines += ["  " + _limit_line(lim, board, lang) for lim in card.other_limits]
     if card.weekly_breakdown:
         b = card.weekly_breakdown
-        lines.append(text(lang, "list.breakdown", start=_time(b.started_at, lang), end=_time(b.ends_at, lang)))
+        lines.append(text(lang, "list.breakdown", start=date_time(b.started_at, lang), end=date_time(b.ends_at, lang)))
         lines += [f"  {row.label}  {row.percent}%" for row in b.rows]
     if card.extra_usage:
         e = card.extra_usage
@@ -109,7 +108,3 @@ def _limit_line(lim: Limit, board: Board, lang: str) -> str:
     if lim.dollars and lim.dollars.used is not None:
         line += "  " + text(lang, "limit.dollars_used", used=f"{lim.dollars.used:g}")
     return line
-
-
-def _time(value: Optional[datetime], lang: str) -> str:
-    return value.astimezone().strftime("%Y-%m-%d %H:%M") if value else text(lang, "common.unknown")

@@ -102,6 +102,8 @@ STRINGS = {
                            "the last successful reading follows ({time})",
     "list.schema_changed_none": "The usage cache structure has changed and this tool can't read the new structure; "
                                 "there is no successful reading yet",
+    "list.query_hint": "Reading is lagging or pending: run {command} query to ask Claude Code for the latest usage, "
+                       "or run /usage in Claude Code.",
 
     # Results and errors of managing accounts: shared by the command line and the window
     "add_warning.label_looks_like_email": "Note: this account label looks like an email address, and it is shown "
@@ -167,7 +169,17 @@ STRINGS = {
                  "  {command} list            print the board\n"
                  "  {command} check           check that Claude Code's usage cache structure is still compatible "
                  "with this tool, and list the directories actually used\n"
+                 "  {command} query           ask Claude Code for the latest usage once and wait for it; "
+                 "exit code 0 on success, 1 on failure\n"
                  "  {command} gui             open the floating window; run with pythonw to avoid a console window",
+    "query.success": "Usage updated. Latest observed time: {time}",
+    "query.failed": "Usage query failed: {reason}\nYou can run /usage in Claude Code instead.",
+    "query.reason.command_not_found": "Couldn't find the claude executable. Make sure it is on PATH, or set the full "
+                                      "path in providers.claude.claudeCommand in the settings file.",
+    "query.reason.timeout": "Claude Code timed out before finishing the query.",
+    "query.reason.reported_error": "Claude Code reported an error: {message}",  # the original message, never translated
+    "query.reason.reported_error_no_message": "Claude Code reported an error without a message.",
+    "query.reason.not_written": "Claude Code finished, but the usage cache wasn't updated.",
     "cli.settings_file_location": "Settings file: {path}",
     "path.not_absolute": "{field} in the settings file must be a full absolute path; write null to leave it unset.",
     "path.not_a_directory": "The directory {field} in the settings file points to doesn't exist. This tool won't "

@@ -89,6 +89,7 @@ STRINGS = {
     "list.snapshot_invalid": "憑證快照已失效，請重新納管：Claude Code 目前登入的就是這個帳號，執行 {command} add {label}",
     "list.schema_changed": "額度快取結構已變更，本工具讀不懂新的結構；以下是最後一次成功的讀數（{time}）",
     "list.schema_changed_none": "額度快取結構已變更，本工具讀不懂新的結構；目前沒有成功的讀數",
+    "list.query_hint": "讀數落後或待更新：可以執行 {command} query 查詢最新額度，或在 Claude Code 執行 /usage。",
 
     # 納管帳號的結果與錯誤：命令列與視窗共用
     "add_warning.label_looks_like_email": "注意：這個帳號標籤看起來像 email，它會顯示在畫面上。"
@@ -143,7 +144,16 @@ STRINGS = {
                  "  {command} remove <帳號標籤>  移除納管帳號\n"
                  "  {command} list               列出看板\n"
                  "  {command} check              檢查 Claude Code 的額度快取結構是否仍與本工具相容，並列出實際使用的目錄\n"
+                 "  {command} query              查詢一次最新額度並等它結束；成功結束代碼 0，失敗 1\n"
                  "  {command} gui                開啟懸浮視窗；改用 pythonw 執行就不會出現主控台視窗",
+    "query.success": "額度已更新，最新觀測時間：{time}",
+    "query.failed": "查詢額度失敗：{reason}\n可改在 Claude Code 執行 /usage。",
+    "query.reason.command_not_found": "找不到 claude 執行檔。請確認有在 PATH 裡，或在設定檔的 providers.claude.claudeCommand "
+                                      "填入完整路徑。",
+    "query.reason.timeout": "Claude Code 逾時沒有完成查詢。",
+    "query.reason.reported_error": "Claude Code 回報錯誤：{message}",  # message 是 Claude Code 的原始訊息，不翻譯
+    "query.reason.reported_error_no_message": "Claude Code 回報錯誤，沒有附上訊息。",
+    "query.reason.not_written": "Claude Code 已結束，但額度快取沒有更新。",
     "cli.settings_file_location": "設定檔位置：{path}",
     "path.not_absolute": "設定檔的 {field} 必須是完整的絕對路徑；不指定請寫 null。",
     "path.not_a_directory": "設定檔的 {field} 指向的目錄不存在。本工具不會改用預設位置，以免讀到另一組帳號。",
