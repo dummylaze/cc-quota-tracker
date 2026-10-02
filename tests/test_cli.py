@@ -48,6 +48,15 @@ class CliTest(CliTestCase):
         self.assertEqual(code, 2)
         self.assertIn("../work", err)
 
+    def test_add_with_locked_bindings_file_fails_with_its_path(self):
+        self.log_in()
+        self.run_cli("add", "work")
+        with self.locked("bindings.json"):
+            code, _, err = self.run_cli("add", "home")
+        self.assertEqual(code, 1)
+        self.assertIn("鎖住", err)
+        self.assertIn(str(self.home / ".claude-multi" / ".state" / "bindings.json"), err)
+
     def test_remove_unknown_label_fails(self):
         code, _, err = self.run_cli("remove", "work")
         self.assertEqual(code, 1)
@@ -141,6 +150,9 @@ class CliLanguageTest(CliTestCase):
         self.log_in()
         self.assertIn("can't be used as a file name", self.run_cli("add", "../work")[2])
         self.assertIn("There is no managed account with the label \"work\"", self.run_cli("remove", "work")[2])
+        self.run_cli("add", "work")
+        with self.locked("bindings.json"):
+            self.assertIn("may have it locked", self.run_cli("add", "home")[2])
 
     def test_usage_and_path_problems_are_in_english(self):
         self.assertIn(f"{COMMAND} add <label>", self.run_cli(system_language="en-US")[2])

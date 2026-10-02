@@ -16,7 +16,7 @@ from typing import Callable, Optional, Tuple
 
 from . import atomic, i18n
 from .board import Board, Preferences
-from .core import STATE_DIR, InvalidLabel, NoCredential
+from .core import STATE_DIR, BindingsUnreadable, InvalidLabel, NoCredential
 from .entry import CLICKABLE_TAG
 from .layout_a import LayoutA
 from .layout_b import LayoutB
@@ -325,6 +325,9 @@ class Widget:
         except NoCredential:
             messagebox.showerror(_TITLE, text(lang, "error.no_credential"), parent=self.root)
             return
+        except BindingsUnreadable as e:
+            messagebox.showerror(_TITLE, text(lang, "error.bindings_unreadable", path=e.path), parent=self.root)
+            return
         warnings = [add_warning(lang, w, "menu") for w in sorted(result.warnings, key=lambda w: w.value)]
         self._report(text(lang, "account.added", label=label), warnings)
 
@@ -350,6 +353,9 @@ class Widget:
             return
         except NoCredential:
             messagebox.showerror(_TITLE, text(lang, "error.not_a_credential_file"), parent=self.root)
+            return
+        except BindingsUnreadable as e:
+            messagebox.showerror(_TITLE, text(lang, "error.bindings_unreadable", path=e.path), parent=self.root)
             return
         warnings = [add_warning(lang, w, "import") for w in sorted(result.warnings, key=lambda w: w.value)]
         self._report(text(lang, "account.imported", label=label), warnings)

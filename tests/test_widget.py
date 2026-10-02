@@ -475,6 +475,37 @@ class LanguageTest(WidgetTestCase):
         self.assertIn("looks like an email address", message)
 
 
+class ManageAccountsTest(WidgetTestCase):
+    def setUp(self):
+        super().setUp()
+        self.log_in()
+        self.core.add("work")
+
+    def assertLockedBindingsError(self, box):
+        message = box.showerror.call_args.args[1]
+        self.assertIn("鎖住", message)
+        self.assertIn(str(self.home / ".claude-multi" / ".state" / "bindings.json"), message)
+        box.showinfo.assert_not_called()
+
+    def test_adding_with_a_locked_bindings_file_shows_an_error_with_its_path(self):
+        with self.locked("bindings.json"), mock.patch("cc_quota_tracker.widget.messagebox") as box, \
+                mock.patch("cc_quota_tracker.widget.simpledialog") as ask:
+            ask.askstring.return_value = "home"
+            self.widget.add_current_account()
+        self.assertLockedBindingsError(box)
+
+    def test_importing_with_a_locked_bindings_file_shows_an_error_with_its_path(self):
+        source = self.home / "home.json"
+        source.write_bytes(self.write_credentials(refresh="rt-2").read_bytes())
+        with self.locked("bindings.json"), mock.patch("cc_quota_tracker.widget.messagebox") as box, \
+                mock.patch("cc_quota_tracker.widget.simpledialog") as ask, \
+                mock.patch("cc_quota_tracker.widget.filedialog") as files:
+            files.askopenfilename.return_value = str(source)
+            ask.askstring.return_value = "home"
+            self.widget.import_credential_file()
+        self.assertLockedBindingsError(box)
+
+
 class ThemeTest(WidgetTestCase):
     def fills(self):
         return {self.widget.canvas.itemcget(i, "fill") for i in self.widget.canvas.find_all()}

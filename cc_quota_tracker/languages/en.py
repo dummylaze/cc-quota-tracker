@@ -131,6 +131,9 @@ STRINGS = {
     "error.not_a_credential_file": "This file isn't a Claude Code credential file (no refreshToken under "
                                    "claudeAiOauth); nothing was imported.",
     "error.unknown_label": "There is no managed account with the label \"{label}\".",
+    "error.bindings_unreadable": "Couldn't read the bindings file ({path}) right now; another program (such as "
+                                 "antivirus software) may have it locked. No credential snapshot was changed. "
+                                 "Try again in a moment.",
 
     # Right-click menu and dialogs
     "menu.layout": "Layout",

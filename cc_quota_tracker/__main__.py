@@ -8,7 +8,7 @@ from typing import Optional
 from . import COMMAND, claude_provider, i18n
 from .board import QueryFailure
 from .claude_provider import FieldStatus, NoReading, SchemaCheck
-from .core import Core, InvalidLabel, NoCredential, UnknownLabel
+from .core import BindingsUnreadable, Core, InvalidLabel, NoCredential, UnknownLabel
 from .fmt import date_time
 from .i18n import text
 from .render_text import add_warning, render
@@ -74,6 +74,9 @@ def main(argv=None) -> int:
         return 2
     except NoCredential:
         print(text(lang, "error.no_credential"), file=sys.stderr)
+        return 1
+    except BindingsUnreadable as e:
+        print(text(lang, "error.bindings_unreadable", path=e.path), file=sys.stderr)
         return 1
     except UnknownLabel:
         print(text(lang, "error.unknown_label", label=label), file=sys.stderr)

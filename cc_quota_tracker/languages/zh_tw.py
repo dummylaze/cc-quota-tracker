@@ -110,6 +110,8 @@ STRINGS = {
     "error.no_credential": "讀不到目前登入的憑證。請先在 Claude Code 登入要納管的帳號，再執行一次。",
     "error.not_a_credential_file": "這個檔案不是 Claude Code 的憑證檔（讀不出 claudeAiOauth 的 refreshToken），沒有匯入。",
     "error.unknown_label": "沒有帳號標籤為「{label}」的納管帳號。",
+    "error.bindings_unreadable": "綁定檔（{path}）暫時讀不到，可能被其他程式（例如防毒軟體）鎖住。"
+                                 "憑證快照沒有變更，請稍後再試一次。",
 
     # 右鍵選單與對話框
     "menu.layout": "版面",

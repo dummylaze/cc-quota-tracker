@@ -68,6 +68,14 @@ class NoCredential(Exception):
     """讀不到目前登入的憑證（尚未登入、或憑證檔讀不懂），無法納管。"""
 
 
+class BindingsUnreadable(Exception):
+    """綁定檔存在但暫時讀不到（例如被防毒或其他程式鎖住）：納管寫回綁定會洗掉其他帳號的綁定，所以整個拒絕。"""
+
+    def __init__(self, path: Path):
+        super().__init__(str(path))
+        self.path = path
+
+
 class UnknownLabel(LookupError):
     """沒有這個帳號標籤的憑證快照。"""
 
@@ -243,12 +251,15 @@ class Core:
         return self._store(label, data, None)
 
     def _store(self, label: str, data: bytes, account_id: Optional[str]) -> AddResult:
+        bindings = self._load_bindings()
+        if bindings is None:  # 先確認讀得到才寫憑證快照：讀不到就什麼都不動
+            raise BindingsUnreadable(self._bindings)
         fixed = self._mkdir_private(self._managed_dir)
         key = self._write_snapshot(self._snapshot(label), data)
-        bindings = self._read_bindings()
         if account_id:
             bindings[key] = {"accountId": account_id}
         # 沒有識別碼：同一憑證指紋原有的綁定仍然有效；沒有的話留給之後補學。照樣寫回，順帶清掉被換掉的舊憑證指紋
+        # （有其他憑證快照讀不出憑證指紋時不清，留給之後的 poll）
         self._write_bindings(bindings)
         # 事後驗證：連同既有的憑證快照一起檢查，不符就修正並告警
         checked = [self._bindings.parent, self._bindings] + [self._snapshot(l) for l in self._labels()]
@@ -264,7 +275,9 @@ class Core:
         if label not in self._labels():
             raise UnknownLabel(label)
         atomic.remove(self._snapshot(label))
-        self._write_bindings(self._read_bindings())
+        bindings = self._load_bindings()
+        if bindings is not None:  # 讀不到就不寫：留下的孤兒綁定由之後的 poll 清掉
+            self._write_bindings(bindings)
 
     def _write_snapshot(self, snapshot: Path, data: bytes) -> str:
         """替換前先驗證暫存檔讀得出憑證指紋：讀到寫到一半的憑證時，既有的憑證快照維持原樣。"""
@@ -295,8 +308,12 @@ class Core:
         return bindings if isinstance(bindings, dict) else {}
 
     def _write_bindings(self, bindings: dict) -> None:
-        """綁定以憑證指紋為鍵；只留還有憑證快照對應的憑證指紋，重新納管換掉的舊憑證指紋一併清掉。"""
+        """綁定以憑證指紋為鍵；只留還有憑證快照對應的憑證指紋，重新納管換掉的舊憑證指紋一併清掉。
+        有憑證快照讀不出憑證指紋（寫到一半、被鎖住）時不修剪綁定與讀數，留給之後的 poll。"""
         live = {FileCredentialStore(self._snapshot(label)).fingerprint() for label in self._labels()}
+        if None in live:
+            self._write_state(self._bindings, bindings)
+            return
         kept = {k: v for k, v in bindings.items() if k in live}
         self._write_state(self._bindings, kept)
         stored = self._load_readings()

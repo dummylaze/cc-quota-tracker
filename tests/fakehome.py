@@ -154,6 +154,17 @@ class HomeTestCase(unittest.TestCase):
         self.write_cache(**cache)
         return self.core.poll().cards[0]
 
+    @staticmethod
+    def locked(name):
+        """模擬檔名為 name 的檔案被其他程式鎖住：讀它的文字內容丟 PermissionError。"""
+        real = Path.read_text
+
+        def read_text(path, *args, **kwargs):
+            if path.name == name:
+                raise PermissionError("locked by another process")
+            return real(path, *args, **kwargs)
+        return mock.patch.object(Path, "read_text", read_text)
+
 
 def acl_entries(path):
     """icacls 列出的 ACE：只取第一個空行之前，第一行去掉開頭的路徑。"""

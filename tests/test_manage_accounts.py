@@ -6,12 +6,13 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from cc_quota_tracker.core import AddWarning, InvalidLabel, NoCredential, UnknownLabel
+from cc_quota_tracker.core import AddWarning, BindingsUnreadable, InvalidLabel, NoCredential, UnknownLabel
 from tests.fakehome import HomeTestCase, WindowsAclAssertions
 
 # SHA-256 前 16 個十六進位字元，事先算好的字面值
 KEY_RT1 = "a33d8c625833429d"  # refreshToken "rt-1"
 KEY_RT2 = "1f23b7dadfb229cb"  # refreshToken "rt-2"
+KEY_RT3 = "a9647bb04ede2838"  # refreshToken "rt-3"
 
 
 class ManageTestCase(HomeTestCase):
@@ -195,6 +196,82 @@ class ImportTest(ManageTestCase):
             self.core.import_snapshot(self.credential_file(), "../escape")
         result = self.core.import_snapshot(self.credential_file(), "me@example.com")
         self.assertIn(AddWarning.LABEL_LOOKS_LIKE_EMAIL, result.warnings)
+
+
+class LockedFileTest(ManageTestCase):
+    """綁定檔或其他憑證快照暫時讀不到（被防毒或其他程式鎖住）時，納管與移除不得洗掉其他帳號的綁定與待命讀數。"""
+
+    def setUp(self):
+        super().setUp()
+        self.log_in(refresh="rt-1", account_uuid="acct-1")
+        self.core.add("work")
+        self.write_cache(oauth="acct-1", account_uuid="acct-1")
+        self.core.poll()
+        self.log_in(refresh="rt-2", account_uuid="acct-2")
+        self.core.add("home")
+        self.write_cache(oauth="acct-2", account_uuid="acct-2")
+        self.core.poll()
+        self.log_in(refresh="rt-3", account_uuid="acct-3")
+
+    def readings(self):
+        path = self.home / ".claude-multi" / ".state" / "readings.json"
+        return json.loads(path.read_text(encoding="utf-8"))
+
+    def managed_files(self):
+        root = self.home / ".claude-multi"
+        return {p.relative_to(root): p.read_bytes() for p in root.rglob("*") if p.is_file()}
+
+    def credential_file(self, refresh):
+        path = self.home / "Downloads" / "work.json"
+        path.parent.mkdir(exist_ok=True)
+        path.write_bytes(self.write_credentials(refresh=refresh).read_bytes())
+        return path
+
+    def test_add_with_unreadable_bindings_file_changes_nothing(self):
+        before = self.managed_files()
+        with self.locked("bindings.json"), self.assertRaises(BindingsUnreadable) as raised:
+            self.core.add("third")
+        self.assertEqual(raised.exception.path, self.home / ".claude-multi" / ".state" / "bindings.json")
+        self.assertEqual(self.managed_files(), before)
+
+    def test_import_over_an_existing_label_with_unreadable_bindings_file_changes_nothing(self):
+        source = self.credential_file(refresh="rt-3")
+        before = self.managed_files()
+        with self.locked("bindings.json"), self.assertRaises(BindingsUnreadable):
+            self.core.import_snapshot(source, "work")
+        self.assertEqual(self.managed_files(), before)
+
+    def test_remove_with_unreadable_bindings_file_deletes_the_snapshot_only(self):
+        before = (self.home / ".claude-multi" / ".state" / "bindings.json").read_bytes()
+        with self.locked("bindings.json"):
+            self.core.remove("home")
+        self.assertFalse(self.snapshot("home").exists())
+        self.assertEqual((self.home / ".claude-multi" / ".state" / "bindings.json").read_bytes(), before)
+        self.core.poll()  # 恢復可讀後，孤兒綁定由 poll 清掉
+        self.assertEqual(self.bindings(), {KEY_RT1: {"accountId": "acct-1"}})
+
+    def test_add_while_another_snapshot_is_unreadable_only_adds_its_own_binding(self):
+        with self.locked("work.json"):
+            self.core.add("third")
+        self.assertEqual(set(self.bindings()), {KEY_RT1, KEY_RT2, KEY_RT3})
+        self.assertEqual(set(self.readings()), {"acct-1", "acct-2"})
+
+    def test_import_while_another_snapshot_is_unreadable_prunes_nothing(self):
+        source = self.credential_file(refresh="rt-3")
+        with self.locked("work.json"):
+            self.core.import_snapshot(source, "third")
+        self.assertEqual(set(self.bindings()), {KEY_RT1, KEY_RT2})
+        self.assertEqual(set(self.readings()), {"acct-1", "acct-2"})
+
+    def test_remove_while_another_snapshot_is_unreadable_prunes_nothing(self):
+        with self.locked("work.json"):
+            self.core.remove("home")
+        self.assertFalse(self.snapshot("home").exists())
+        self.assertIn(KEY_RT1, self.bindings())
+        self.assertIn("acct-1", self.readings())
+        self.core.poll()  # 都讀得到之後，孤兒綁定與它的讀數由 poll 清掉
+        self.assertEqual(self.bindings(), {KEY_RT1: {"accountId": "acct-1"}})
+        self.assertEqual(set(self.readings()), {"acct-1"})
 
 
 class AtomicWriteTest(ManageTestCase):

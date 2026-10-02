@@ -2,8 +2,6 @@
 import json
 import os
 import unittest
-from pathlib import Path
-from unittest import mock
 
 from cc_quota_tracker.board import ReadingState, Role
 from tests.fakehome import HomeTestCase, claude_json, usage_cache
@@ -109,13 +107,7 @@ class LearnBindingTest(BindingTestCase):
         self.drop_in("home")
         self.write_cache(oauth="acct-2", account_uuid="acct-2")
         before = (self.home / ".claude-multi" / ".state" / "bindings.json").read_bytes()
-        real = Path.read_text
-
-        def locked(path, *args, **kwargs):
-            if path.name == "bindings.json":
-                raise PermissionError("locked by another process")
-            return real(path, *args, **kwargs)
-        with mock.patch.object(Path, "read_text", locked):
+        with self.locked("bindings.json"):
             self.core.poll()
         self.assertEqual((self.home / ".claude-multi" / ".state" / "bindings.json").read_bytes(), before)
         self.assertEqual(self.card("claude:home").reading_state, ReadingState.HAS_READING)  # 下一輪補上
