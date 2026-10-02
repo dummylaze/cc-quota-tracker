@@ -29,6 +29,7 @@ SCHEMA_CHANGE_ROUNDS = 3  # 結構不符連續這麼多輪才判定為結構變�
 LAG_SCAN_INTERVAL = timedelta(seconds=60)
 QUERY_COOLDOWN = timedelta(seconds=30)  # 固定值：手動查詢完成（成功或失敗）後，這麼久之內不能再觸發
 QUERY_CHECK_SECONDS = 0.05  # 同步查詢時，多久看一次子行程與額度快取（真實時間）
+AUTO_QUERY_PAUSE_AFTER = 3  # 固定值：查詢連續失敗這麼多次，自動查詢就暫停；一次成功（含手動）才恢復
 
 
 class _LagScan(NamedTuple):
@@ -72,7 +73,9 @@ class UnknownLabel(LookupError):
 
 
 class Core:
-    def __init__(self, paths: ResolvedPaths, clock: Callable[[], datetime]):
+    def __init__(self, paths: ResolvedPaths, clock: Callable[[], datetime], auto_query: bool = True):
+        """auto_query：poll 可以依設定自動查詢額度。只有常駐的視窗該開；命令列的 poll 一次就結束，不該留下查詢。"""
+        self._auto_query = auto_query
         self._source = paths.claude_json
         self._credentials = paths.claude_dir / provider.CREDENTIALS
         self._transcripts = paths.claude_dir / provider.TRANSCRIPTS
@@ -100,6 +103,9 @@ class Core:
         self._query: Optional[usage_query.UsageQuery] = None  # 進行中的查詢；查詢狀態都只存在記憶體
         self._cooldown_until: Optional[datetime] = None
         self._last_query_failure: Optional[UsageQueryResult] = None
+        self._last_query_started: Optional[datetime] = None  # 工具上一次查詢的開始時間（手動、自動都算）
+        self._query_is_auto = False  # 進行中的查詢是不是自動觸發的：手動查詢才有冷卻
+        self._consecutive_failures = 0  # 查詢連續失敗的次數，一次成功歸零
 
     def poll(self) -> Board:
         self._poll_query()  # 先於 _refresh：查詢剛寫回的額度快取，這一輪就讀得到
@@ -109,7 +115,9 @@ class Core:
         self._remember(accounts)
         active, invalid = self._observe(accounts)
         reading = self._reading
-        return Board(cards=self._cards(accounts, active, invalid),
+        cards = self._cards(accounts, active, invalid)
+        self._maybe_auto_query(cards[0])  # 在建看板之前：這一輪啟動的查詢，這一輪的看板就顯示進行中
+        return Board(cards=cards,
                      schema_changed=self._mismatch_rounds >= SCHEMA_CHANGE_ROUNDS,
                      last_reading_at=reading.observed_at if reading else None,
                      managed_accounts=tuple(a.key for a in accounts),
@@ -126,12 +134,29 @@ class Core:
         if self._query is not None or self._cooling_down():
             return False
         self._reread_settings()
+        self._launch(auto=False)
+        return True
+
+    def _launch(self, auto: bool) -> None:
+        self._last_query_started = self._clock()
         query = self._open_query()
         if query is None:
-            self._finish_query(UsageQueryResult(QueryFailure.COMMAND_NOT_FOUND))
+            self._finish_query(UsageQueryResult(QueryFailure.COMMAND_NOT_FOUND), auto)
         else:
-            self._query = query
-        return True
+            self._query, self._query_is_auto = query, auto
+
+    def _maybe_auto_query(self, active: Card) -> None:
+        """自動查詢，全部成立才查：已開啟、使用中帳號的卡片落後或讀數待更新、沒有查詢在進行、沒有暫停，
+        且距離「工具上一次查詢的開始」與「目前讀數的觀測時間」兩者中較晚的那個已滿一個間隔
+        （後者讓使用者自己打的 /usage 也算一次）。閒置時讀數不落後，所以自然不查。"""
+        settings, reading = self._provider_settings, self._reading
+        if (not self._auto_query or not settings.auto_usage_query or self._query is not None
+                or self._consecutive_failures >= AUTO_QUERY_PAUSE_AFTER or reading is None
+                or not (active.lagging or active.reading_state is ReadingState.PENDING)):
+            return
+        since = max(filter(None, (self._last_query_started, reading.observed_at)))
+        if self._clock() - since >= timedelta(minutes=settings.auto_usage_query_minutes):
+            self._launch(auto=True)
 
     def query_usage(self) -> UsageQueryResult:
         """同步查詢一次額度：請 Claude Code 寫回額度快取，等到成功、失敗或逾時。設定檔改了，這一次就照新的值。"""
@@ -163,18 +188,24 @@ class Core:
         result = self._query.check(self._clock())
         if result is not None:
             self._query = None
-            self._finish_query(result)
+            self._finish_query(result, self._query_is_auto)
 
-    def _finish_query(self, result: UsageQueryResult) -> None:
+    def _finish_query(self, result: UsageQueryResult, auto: bool) -> None:
+        """冷卻只管手動查詢（避免連按）；自動查詢有自己的間隔。"""
         self._last_query_failure = result if result.failure else None
-        self._cooldown_until = self._clock() + QUERY_COOLDOWN
+        self._consecutive_failures = self._consecutive_failures + 1 if result.failure else 0
+        if not auto:
+            self._cooldown_until = self._clock() + QUERY_COOLDOWN
 
     def _cooling_down(self) -> bool:
         return self._cooldown_until is not None and self._clock() < self._cooldown_until
 
     def _query_status(self) -> QueryStatus:
+        auto = self._provider_settings.auto_usage_query
         return QueryStatus(in_progress=self._query is not None, cooling_down=self._cooling_down(),
-                           last_failure=self._last_query_failure)
+                           last_failure=self._last_query_failure, auto_enabled=auto,
+                           auto_paused=auto and self._consecutive_failures >= AUTO_QUERY_PAUSE_AFTER,
+                           interval_below_floor=self._provider_settings.interval_below_floor)
 
     def _query_env(self) -> dict:
         """讓查詢寫回的正是本工具在讀的那份額度快取：Claude Code 目錄是 home 預設時拿掉 CLAUDE_CONFIG_DIR，

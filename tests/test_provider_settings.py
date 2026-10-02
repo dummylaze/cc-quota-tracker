@@ -84,6 +84,58 @@ class PercentThresholdSettingTest(HomeTestCase):
         self.assertEqual(self.severity_of(85), Severity.CRITICAL)
 
 
+class AutoUsageQuerySettingsTest(HomeTestCase):
+    """自動查詢的兩個設定：預設值、不合法值、低於下限（不改寫設定檔），改了下一輪生效。"""
+
+    def status(self, **fields):
+        self.write_settings(providers=claude(**fields))
+        return self.core.poll().usage_query
+
+    def test_off_by_default_with_a_fifteen_minute_interval(self):
+        status = self.core.poll().usage_query
+        self.assertEqual((status.auto_enabled, status.auto_paused, status.interval_below_floor),
+                         (False, False, False))
+
+    def test_the_switch_is_read_from_the_settings_file_and_follows_edits(self):
+        self.assertTrue(self.status(autoUsageQuery=True).auto_enabled)
+        self.assertFalse(self.status(autoUsageQuery=False).auto_enabled)
+
+    def test_a_non_boolean_switch_is_invalid_and_falls_back_to_off(self):
+        for value in (1, 0, "true", None, [True]):
+            with self.subTest(value=value):
+                self.write_settings(providers=claude(autoUsageQuery=value))
+                board = self.core.poll()
+                self.assertFalse(board.usage_query.auto_enabled)
+                self.assertEqual(board.invalid_settings, ("providers.claude.autoUsageQuery",))
+
+    def test_a_non_positive_integer_interval_is_invalid_and_falls_back_to_the_default(self):
+        for value in (0, -3, 7.5, "15", True, None, [15]):
+            with self.subTest(value=value):
+                self.write_settings(providers=claude(autoUsageQuery=True, autoUsageQueryMinutes=value))
+                board = self.core.poll()
+                self.assertEqual(board.invalid_settings, ("providers.claude.autoUsageQueryMinutes",))
+                self.assertFalse(board.usage_query.interval_below_floor)  # 改用預設 15，不是下限
+
+    def test_an_interval_below_the_floor_is_flagged_only_while_auto_query_is_on(self):
+        for minutes in (1, 4):
+            with self.subTest(minutes=minutes):
+                status = self.status(autoUsageQuery=True, autoUsageQueryMinutes=minutes)
+                self.assertTrue(status.interval_below_floor)
+                self.assertEqual(self.core.poll().invalid_settings, ())  # 低於下限不是不合法
+        self.assertFalse(self.status(autoUsageQuery=False, autoUsageQueryMinutes=1).interval_below_floor)
+
+    def test_the_floor_itself_and_larger_intervals_are_fine(self):
+        for minutes in (5, 15, 600):
+            with self.subTest(minutes=minutes):
+                self.assertFalse(self.status(autoUsageQuery=True, autoUsageQueryMinutes=minutes).interval_below_floor)
+
+    def test_the_tool_never_rewrites_a_value_below_the_floor(self):
+        self.write_settings(providers=claude(autoUsageQuery=True, autoUsageQueryMinutes=1))
+        before = self.settings_file().read_bytes()
+        self.core.poll()
+        self.assertEqual(self.settings_file().read_bytes(), before)
+
+
 class InvalidProviderSettingsAreNamedTest(HomeTestCase):
     """使用者故事 79：providers 底下的值不合法時，和偏好一樣被指名（路徑式名稱），只那一項用預設。"""
 

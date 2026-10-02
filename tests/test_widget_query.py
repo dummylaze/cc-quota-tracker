@@ -70,6 +70,84 @@ class MenuTest(QueryWiringTestCase):
         self.assertEqual(self.polls, polls)
 
 
+class AutoQueryMenuTest(QueryWiringTestCase):
+    """右鍵選單的「自動查詢額度」開關：寫回設定檔的 providers.claude.autoUsageQuery，重新啟動後保留。"""
+
+    def checked(self):
+        return self.widget._auto_query_var.get()
+
+    def toggle(self, label="自動查詢額度"):
+        self.widget._menu.invoke(self.menu_item(label))
+
+    def stored(self):
+        return self.settings()["providers"]["claude"]["autoUsageQuery"]
+
+    def use_the_real_core(self):
+        """開關要真的被核心讀回去：換掉測試用的假看板，直接 poll 核心。"""
+        self.counting.poll = self.core.poll
+
+    def test_the_item_follows_the_language(self):
+        self.widget.set_preference("language", "en")
+        self.assertIn("Auto-query usage", self.widget.menu_labels())
+
+    def test_the_check_mark_shows_what_the_board_says(self):
+        self.assertFalse(self.checked())
+        self.show(ACTIVE, auto_enabled=True)
+        self.assertTrue(self.checked())
+        self.show(ACTIVE, auto_enabled=False)
+        self.assertFalse(self.checked())
+
+    def test_choosing_it_writes_the_setting_and_keeps_the_other_fields(self):
+        self.use_the_real_core()
+        before = self.settings()
+        self.toggle()
+        after = self.settings()
+        self.assertIs(self.stored(), True)
+        before["providers"]["claude"]["autoUsageQuery"] = True
+        self.assertEqual(after, before)  # 只動了這一個欄位
+        self.assertTrue(self.checked())
+        self.toggle()
+        self.assertIs(self.stored(), False)
+        self.assertFalse(self.checked())
+
+    def test_the_core_reads_the_new_value_at_once_and_it_survives_a_restart(self):
+        self.use_the_real_core()
+        self.toggle()
+        self.assertTrue(self.core.poll().usage_query.auto_enabled)
+        self.start()  # 重新啟動：核心與視窗都重建，只剩設定檔
+        self.assertTrue(self.core.poll().usage_query.auto_enabled)
+
+    def test_a_missing_settings_file_is_rebuilt_with_the_defaults(self):
+        self.settings_file().unlink()
+        self.toggle()
+        self.assertEqual(self.settings()["providers"]["claude"]["autoUsageQueryMinutes"], 15)
+        self.assertIs(self.stored(), True)
+
+    def test_an_unreadable_settings_file_is_left_alone_and_the_check_mark_goes_back(self):
+        self.use_the_real_core()
+        self.write_settings_text("{ not json")
+        self.toggle()
+        self.assertEqual(self.settings_file().read_text(encoding="utf-8"), "{ not json")
+        self.assertFalse(self.checked())
+
+    def test_a_providers_value_that_is_not_an_object_is_not_overwritten(self):
+        self.use_the_real_core()
+        for providers in ("claude", [], {"claude": 10}):
+            with self.subTest(providers=providers):
+                self.write_settings(providers=providers)
+                before = self.settings_file().read_text(encoding="utf-8")
+                self.toggle()
+                self.assertEqual(self.settings_file().read_text(encoding="utf-8"), before)
+                self.assertFalse(self.checked())
+
+    def test_the_toggle_polls_at_once_so_the_change_does_not_wait_for_the_next_round(self):
+        self.use_the_real_core()
+        polls = self.polls
+        self.counting.poll = lambda: self.poll(self.core.poll())
+        self.toggle()
+        self.assertEqual(self.polls, polls + 1)
+
+
 class EntryTest(QueryWiringTestCase):
     def entry_center(self):
         self.root.geometry("+-3000+-3000")

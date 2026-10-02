@@ -120,6 +120,7 @@ STRINGS = {
     "menu.opacity": "透明度",
     "menu.autostart": "開機自動啟動",
     "menu.query": "查詢額度",
+    "menu.auto_query": "自動查詢額度",
     "menu.add": "納管目前登入的帳號…",
     "menu.import": "匯入憑證檔…",
     "menu.open_dir": "開啟納管目錄",
@@ -165,6 +166,8 @@ STRINGS = {
     "query.note.reported_error": "Claude Code 回報「{message}」",  # message 是 Claude Code 的原始訊息，不翻譯
     "query.note.reported_error_no_message": "Claude Code 回報錯誤",
     "query.note.not_written": "Claude Code 沒有更新額度快取",
+    "query.note.auto_paused": "自動查詢已暫停：{reason}。手動更新成功後恢復",
+    "banner.auto_query_floor": "providers.claude.autoUsageQueryMinutes 低於下限，以 {minutes} 分鐘執行",
     "cli.settings_file_location": "設定檔位置：{path}",
     "path.not_absolute": "設定檔的 {field} 必須是完整的絕對路徑；不指定請寫 null。",
     "path.not_a_directory": "設定檔的 {field} 指向的目錄不存在。本工具不會改用預設位置，以免讀到另一組帳號。",

@@ -24,7 +24,8 @@ from .permissions import make_private
 from .fmt import account_label
 from .i18n import text
 from .render_text import add_warning
-from .settings import PREFERENCE_FIELDS, ResolvedPaths, write_preference
+from .claude_provider import AUTO_QUERY_FIELD, PROVIDER
+from .settings import PREFERENCE_FIELDS, ResolvedPaths, write_preference, write_provider_setting
 from .tokens import TRANSPARENT_KEY
 
 POLL_MS = 5000  # 固定值，不開放設定
@@ -148,6 +149,7 @@ class Widget:
         self._theme_var = tk.StringVar(self.root)
         self._opacity_var = tk.IntVar(self.root)
         self._autostart_var = tk.BooleanVar(self.root)
+        self._auto_query_var = tk.BooleanVar(self.root)
         self._add_choices(menu, "menu.layout", _LAYOUT_NAMES, self._layout_var, "layout")
         self._add_entry(menu, "checkbutton", "menu.topmost", variable=self._topmost_var,
                         command=lambda: self.set_preference("alwaysOnTop", self._topmost_var.get()))
@@ -165,6 +167,8 @@ class Widget:
         menu.add_separator()
         self._add_entry(menu, "command", "menu.query", command=self.query_usage)
         self._query_index = menu.index("end")
+        self._add_entry(menu, "checkbutton", "menu.auto_query", variable=self._auto_query_var,
+                        command=self._toggle_auto_query)
         self._add_entry(menu, "command", "menu.add", command=self.add_current_account)
         self._add_entry(menu, "command", "menu.import", command=self.import_credential_file)
         self._add_entry(menu, "command", "menu.open_dir", command=self.open_managed_dir)
@@ -183,11 +187,22 @@ class Widget:
         return replace(self._prefs, layout=self._layout_var.get(), always_on_top=self._topmost_var.get(), mode=self._mode_var.get(),
                        language=self._language_var.get(), theme=self._theme_var.get(), opacity=self._opacity_var.get())
 
-    def _sync_query_item(self):
-        """選單的「查詢額度」隨看板的查詢狀態：進行中與冷卻中不可點，其餘任何時候都可用（不必落後）。"""
+    def _sync_query_menu(self):
+        """選單的「查詢額度」隨看板的查詢狀態：進行中與冷卻中不可點，其餘任何時候都可用（不必落後）。
+        「自動查詢額度」的勾選一律取自看板（設定檔目前的值），所以寫不進設定檔時會回到實際生效的那一邊。"""
         status = self._board.usage_query if self._board is not None else None
         busy = status is not None and (status.in_progress or status.cooling_down)
         self._menu.entryconfigure(self._query_index, state="disabled" if busy else "normal")
+        self._auto_query_var.set(status is not None and status.auto_enabled)
+
+    def _toggle_auto_query(self):
+        """右鍵選單的「自動查詢額度」：寫回 providers.claude.autoUsageQuery 並立刻 poll，核心讀到新值，下一輪起生效。
+        設定檔讀不懂或寫不進去時不寫，勾選狀態由看板拉回。"""
+        try:
+            write_provider_setting(self._paths.settings_file, PROVIDER, AUTO_QUERY_FIELD, self._auto_query_var.get())
+        except OSError:
+            pass
+        self.refresh()
 
     def sync_autostart(self):
         """勾選狀態以登錄的實際值為準：每次開選單前對一次，使用者自己在別處刪掉啟動項時才不會不同步。"""
@@ -261,7 +276,7 @@ class Widget:
         if lang != self._lang:
             self._lang = lang
             self._relabel_menu()
-        self._sync_query_item()
+        self._sync_query_menu()
         self._layout_var.set(prefs.layout)
         self._topmost_var.set(prefs.always_on_top)
         self._mode_var.set(prefs.mode)

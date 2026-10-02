@@ -4,7 +4,7 @@ import re
 from typing import Optional, Tuple
 
 from . import COMMAND
-from .board import Board, Card, Limit, QueryFailure, QueryStatus, ReadingState, Role
+from .board import AUTO_QUERY_FLOOR_MINUTES, Board, Card, Limit, QueryFailure, QueryStatus, ReadingState, Role
 from .fmt import absolute, age, countdown, until
 from .i18n import text
 
@@ -62,7 +62,9 @@ def query_notes(card: Card, status: QueryStatus, lang: str, has_entry: bool):
         result.append((text(lang, "query.entry_busy"), "sub", "sub"))
     failure = status.last_failure
     if failure is not None and failure.failure is not None:
-        result.append((text(lang, "query.note.failed", reason=_failure_reason(failure.failure, failure.message, lang)),
+        # 自動查詢暫停時，暫停取代一般的失敗提示（同一個原因不重複顯示）
+        note = "query.note.auto_paused" if status.auto_paused else "query.note.failed"
+        result.append((text(lang, note, reason=_failure_reason(failure.failure, failure.message, lang)),
                        "critical", "fg"))
     return result
 
@@ -137,6 +139,8 @@ def banner_lines(board: Board, lang: str, missing_font: Optional[str] = None):
         lines.append(text(lang, "font.missing", font=missing_font))
     if board.restart_required:
         lines.append(text(lang, "banner.restart_required"))
+    if board.usage_query.interval_below_floor:
+        lines.append(text(lang, "banner.auto_query_floor", minutes=AUTO_QUERY_FLOOR_MINUTES))
     if board.wrong_location_suspected:
         lines.append(text(lang, "board.wrong_location"))
     if board.schema_changed:

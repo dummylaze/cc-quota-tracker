@@ -1,4 +1,5 @@
 """設定檔與路徑解析（ADR-0008）：命令列與 GUI 啟動時都走這裡，取得同一組路徑。"""
+import copy
 import json
 import os
 from dataclasses import dataclass
@@ -146,14 +147,34 @@ def _allowed(value, allowed: tuple) -> bool:
 def write_preference(settings_file: Path, field: str, value) -> bool:
     """GUI 改一項偏好：先重讀設定檔、只改那一欄，再原子寫入，不蓋掉使用者剛手改的內容。
     設定檔不是合法的 JSON 物件時不寫，回傳 False，改動只在記憶體生效；設定檔不見了就以預設值重建。"""
+    def change(fields: dict) -> bool:
+        fields[field] = value
+        return True
+    return _rewrite(settings_file, change)
+
+
+def write_provider_setting(settings_file: Path, provider: str, field: str, value) -> bool:
+    """GUI 改一項供應商設定（providers.<provider>.<field>），規則同 write_preference。
+    providers 或該供應商的設定寫成了不是物件的值時也不寫，回傳 False：那是使用者填錯的內容，不替他蓋掉。"""
+    def change(fields: dict) -> bool:
+        providers = fields.setdefault(PROVIDERS_FIELD, {})
+        if not isinstance(providers, dict) or not isinstance(providers.setdefault(provider, {}), dict):
+            return False
+        providers[provider][field] = value
+        return True
+    return _rewrite(settings_file, change)
+
+
+def _rewrite(settings_file: Path, change) -> bool:
     if settings_file.exists():
         fields = read_settings(settings_file)
         if fields is None:
             return False
     else:
         settings_file.parent.mkdir(parents=True, exist_ok=True)
-        fields = dict(DEFAULTS)
-    fields[field] = value
+        fields = copy.deepcopy(DEFAULTS)  # 改動不能漏回模組層級的預設值
+    if not change(fields):
+        return False
     atomic.write_atomic(settings_file, json.dumps(fields, indent=2, ensure_ascii=False).encode("utf-8"))
     return True
 

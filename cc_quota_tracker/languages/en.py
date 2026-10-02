@@ -141,6 +141,7 @@ STRINGS = {
     "menu.opacity": "Opacity",
     "menu.autostart": "Start at login",
     "menu.query": "Query usage",
+    "menu.auto_query": "Auto-query usage",
     "menu.add": "Manage the signed-in account…",
     "menu.import": "Import credential file…",
     "menu.open_dir": "Open managed directory",
@@ -191,6 +192,8 @@ STRINGS = {
     "query.note.reported_error": "Claude Code reported \"{message}\"",  # the original message, never translated
     "query.note.reported_error_no_message": "Claude Code reported an error",
     "query.note.not_written": "Claude Code didn't update the usage cache",
+    "query.note.auto_paused": "Auto-query paused: {reason}. A successful manual update resumes it",
+    "banner.auto_query_floor": "providers.claude.autoUsageQueryMinutes is below the minimum; running every {minutes} minutes",
     "cli.settings_file_location": "Settings file: {path}",
     "path.not_absolute": "{field} in the settings file must be a full absolute path; write null to leave it unset.",
     "path.not_a_directory": "The directory {field} in the settings file points to doesn't exist. This tool won't "

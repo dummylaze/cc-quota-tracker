@@ -144,6 +144,31 @@ class EntryTest(QueryLayoutTestCase):
         self.assertIn("更新", texts)
 
 
+class FloorHintTest(QueryLayoutTestCase):
+    """間隔低於下限的提示在看板橫幅（三個版面共用 banner_lines），不改寫設定檔，所以帶出欄位名稱與實際執行的分鐘數。"""
+
+    def test_the_banner_names_the_field_and_the_minutes_it_really_runs_at(self):
+        shown = self.render(board_of(ACTIVE, auto_enabled=True, interval_below_floor=True))
+        self.assertIn("providers.claude.autoUsageQueryMinutes 低於下限，以 5 分鐘執行", shown)
+        shown = self.render(board_of(ACTIVE, auto_enabled=True, interval_below_floor=True), "en")
+        self.assertIn("providers.claude.autoUsageQueryMinutes is below the minimum; running every 5 minutes", shown)
+
+    def test_no_banner_when_the_interval_is_fine(self):
+        for status in ({}, {"auto_enabled": True}):
+            shown = self.render(board_of(ACTIVE, **status))
+            self.assertFalse([t for t in shown if "autoUsageQueryMinutes" in t], status)
+
+    def test_it_sits_beside_the_other_banner_lines_without_overlap(self):
+        board = replace(board_of(LAGGING, auto_enabled=True, interval_below_floor=True), invalid_settings=("mode",),
+                        restart_required=True)
+        for lang in ("zh-TW", "en"):
+            self.render(board, lang)
+            boxes = _boxes(self.canvas)
+            for n, (_, a) in enumerate(boxes):
+                for _, b in boxes[n + 1:]:
+                    self.assertFalse(_overlap(a, b), lang)
+
+
 class StatusTest(QueryLayoutTestCase):
     def test_each_failure_reason_reads_differently_and_points_to_usage(self):
         for lang, tail in (("zh-TW", "在 Claude Code 執行 /usage"), ("en", "Try /usage in Claude Code instead")):
@@ -181,6 +206,42 @@ class StatusTest(QueryLayoutTestCase):
         line = next(t for t in self.render(board_of(LAGGING, last_failure=result)) if "查詢失敗" in t)
         self.assertIn("Claude Code 回報錯誤", line)
 
+    def test_a_paused_auto_query_replaces_the_failure_line_and_keeps_the_reason(self):
+        for lang, paused, failed, resume in (("zh-TW", "自動查詢已暫停：", "查詢失敗", "手動更新成功後恢復"),
+                                             ("en", "Auto-query paused: ", "Update failed", "A successful manual update resumes it")):
+            seen = {}
+            for failure, result in FAILURES.items():
+                shown = self.render(board_of(LAGGING, last_failure=result, auto_enabled=True, auto_paused=True), lang)
+                (line,) = [t for t in shown if t.startswith(paused)]
+                self.assertIn(resume, line)
+                self.assertFalse([t for t in shown if t.startswith(failed)], (lang, failure))  # 不重複顯示
+                seen[failure] = line
+            self.assertEqual(len(set(seen.values())), 4, lang)  # 四類原因讀起來各不相同
+            self.assertIn("Not logged in", seen[QueryFailure.REPORTED_ERROR])  # Claude Code 的原始訊息照原文
+            self.assertIn("claude", seen[QueryFailure.COMMAND_NOT_FOUND])
+
+    def test_the_paused_line_shows_on_a_card_that_is_not_lagging_too(self):
+        shown = self.render(board_of(ACTIVE, last_failure=FAILURES[QueryFailure.TIMEOUT], auto_enabled=True, auto_paused=True))
+        self.assertTrue([t for t in shown if t.startswith("自動查詢已暫停：")])
+        self.assertEqual(self.entries(), [])
+
+    def test_a_long_raw_message_is_cut_on_the_paused_line_too(self):
+        result = UsageQueryResult(QueryFailure.REPORTED_ERROR, message="x" * 61)
+        line = next(t for t in self.render(board_of(LAGGING, last_failure=result, auto_enabled=True, auto_paused=True))
+                    if t.startswith("自動查詢已暫停"))
+        self.assertIn("x" * 60 + "…", line)
+        self.assertNotIn("x" * 61, line)
+
+    def test_a_failure_while_not_paused_keeps_the_failure_line(self):
+        shown = self.render(board_of(LAGGING, last_failure=FAILURES[QueryFailure.TIMEOUT], auto_enabled=True))
+        self.assertTrue([t for t in shown if t.startswith("查詢失敗")])
+        self.assertFalse([t for t in shown if "自動查詢已暫停" in t])
+
+    def test_only_the_non_standby_card_carries_the_paused_line(self):
+        shown = self.render(board_of(LAGGING, PERSONAL, last_failure=FAILURES[QueryFailure.TIMEOUT], auto_enabled=True,
+                                     auto_paused=True), expanded=True)
+        self.assertEqual(len([t for t in shown if "自動查詢已暫停" in t]), 1)
+
     def test_the_failure_shows_on_a_card_that_is_not_lagging_too(self):
         shown = self.render(board_of(ACTIVE, last_failure=FAILURES[QueryFailure.TIMEOUT]))
         self.assertTrue([t for t in shown if "查詢失敗" in t])
@@ -212,7 +273,8 @@ class StatusTest(QueryLayoutTestCase):
 
     def test_english_leaves_no_chinese_on_screen(self):
         for card in (LAGGING, PENDING, ACTIVE):
-            for status in ({}, {"in_progress": True}, {"cooling_down": True}):
+            for status in ({}, {"in_progress": True}, {"cooling_down": True}, {"auto_enabled": True, "auto_paused": True},
+                           {"auto_enabled": True, "interval_below_floor": True}):
                 for failure in (None, *FAILURES.values()):
                     for shown in self.render(board_of(card, last_failure=failure, **status), "en"):
                         self.assertIsNone(HAN.search(shown), (card.reading_state, status, failure, shown))
@@ -241,7 +303,10 @@ class GeometryTest(QueryLayoutTestCase):
         long_failure = UsageQueryResult(QueryFailure.REPORTED_ERROR, message="a very long message " * 5)
         for card in (LAGGING, PENDING, ACTIVE, FULL):
             for status in ({}, {"in_progress": True}, {"cooling_down": True}, {"last_failure": failure},
-                           {"in_progress": True, "last_failure": long_failure}):
+                           {"in_progress": True, "last_failure": long_failure},
+                           {"last_failure": failure, "auto_enabled": True, "auto_paused": True},
+                           {"last_failure": long_failure, "auto_enabled": True, "auto_paused": True, "cooling_down": True},
+                           {"auto_enabled": True, "interval_below_floor": True}):
                 yield card, status
 
     def test_no_text_overlaps_another_in_either_language_and_mode(self):

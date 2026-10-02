@@ -5,6 +5,7 @@
   "cache_text": 寫回的內容, "message": 錯誤訊息, "exit": 結束代碼,
   "gate": 選填，這個檔案出現之前不回應 get_usage（讓測試停在查詢進行中）}
 - record.json：收到的參數、CLAUDE_CONFIG_DIR、工作目錄、pid、有沒有主控台視窗，給測試斷言
+- starts.log：每次被啟動追加一行，給測試數查詢的次數
 永遠不碰真實的額度快取：寫回的路徑一律由劇本指定。
 """
 import ctypes
@@ -30,6 +31,8 @@ def main():
         "argv": sys.argv[1:], "cwd": os.getcwd(), "pid": os.getpid(), "console_window": console,
         "has_config_dir": "CLAUDE_CONFIG_DIR" in os.environ,
         "config_dir": os.environ.get("CLAUDE_CONFIG_DIR")}), encoding="utf-8")
+    with (ROOT / "starts.log").open("a", encoding="utf-8") as starts:  # 每次被啟動記一行：測試數查了幾次
+        starts.write("start\n")
     usage = script["usage"]
     if usage == "crash":
         print(script["message"], file=sys.stderr, flush=True)

@@ -119,6 +119,9 @@ class Preferences:
     font: Optional[str] = None  # 字型家族名稱；None 用設計 token 的內建字型。只能在設定檔調整
 
 
+AUTO_QUERY_FLOOR_MINUTES = 5  # 固定值：自動查詢間隔的下限；供應商沒有公開這個端點的限流門檻，5 分鐘是推測值
+
+
 class QueryFailure(Enum):
     """查詢額度失敗的四種原因（ADR-0010）。"""
     COMMAND_NOT_FOUND = "command_not_found"  # 找不到 claude 執行檔，含設定的路徑不存在或不合法
@@ -138,10 +141,16 @@ class UsageQueryResult:
 @dataclass(frozen=True)
 class QueryStatus:
     """查詢額度的狀態，只存在記憶體，重新啟動後從頭開始。in_progress 與 cooling_down 時不能再觸發；
-    last_failure 是最後一次失敗的結果，之後有查詢成功才清除（進行中、冷卻中仍帶著）。"""
+    last_failure 是最後一次失敗的結果，之後有查詢成功才清除（進行中、冷卻中仍帶著）。
+    auto_enabled：設定檔開啟了自動查詢。auto_paused：自動查詢已開啟、但連續失敗到達上限而暫停，
+    一次成功的查詢（含手動）才恢復；暫停時 last_failure 就是最後一次失敗的原因。
+    interval_below_floor：自動查詢已開啟、設定檔填的間隔低於下限，實際以下限執行。"""
     in_progress: bool = False
     cooling_down: bool = False
     last_failure: Optional[UsageQueryResult] = None
+    auto_enabled: bool = False
+    auto_paused: bool = False
+    interval_below_floor: bool = False
 
 
 @dataclass(frozen=True)

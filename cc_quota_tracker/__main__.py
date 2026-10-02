@@ -51,7 +51,7 @@ def main(argv=None) -> int:
         return check(paths, lang)
     if command == "gui":
         return gui(paths)
-    core = Core(paths, lambda: datetime.now(timezone.utc))
+    core = Core(paths, lambda: datetime.now(timezone.utc), auto_query=False)  # 命令列不做自動查詢
     if command == "list":
         print(render(core.poll(), lang))
         return 0

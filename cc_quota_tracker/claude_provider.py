@@ -7,7 +7,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Optional, Tuple, Union
 
-from .board import (BreakdownRow, Dollars, ExtraUsage, Limit, Money, Severity, Spend,
+from .board import (AUTO_QUERY_FLOOR_MINUTES, BreakdownRow, Dollars, ExtraUsage, Limit, Money, Severity, Spend,
                     WeeklyBreakdown)
 
 PROVIDER = "claude"  # 帳號鍵的供應商前綴
@@ -35,16 +35,22 @@ class ProviderSettings:
     critical_percent: int = 85
     claude_command: Optional[Path] = None  # 查詢額度用的 claude 執行檔；None 從 PATH 找
     claude_command_invalid: bool = False  # 有填但不是絕對路徑：查詢一律找不到，不退回 PATH
+    auto_usage_query: bool = False
+    auto_usage_query_minutes: int = 15  # 已套用下限的實際間隔；設定檔裡低於下限的值不被改寫
+    interval_below_floor: bool = False  # 設定檔填的間隔低於下限，實際以下限執行
 
 
 _DEFAULT = ProviderSettings()
 _SETTINGS_ROOT = "providers"  # 設定檔裡這組設定的欄位名稱；與 settings.PROVIDERS_FIELD 相同（settings 匯入本模組，不能反過來）
 CLAUDE_COMMAND_FIELD = "claudeCommand"
-_FIELD_RANGES = (("expiryWarningDays", 1, None), ("warningPercent", 1, 100), ("criticalPercent", 1, 100))  # 設定檔欄位名稱與合法範圍
+AUTO_QUERY_FIELD, AUTO_QUERY_MINUTES_FIELD = "autoUsageQuery", "autoUsageQueryMinutes"
+_FIELD_RANGES = (("expiryWarningDays", 1, None), ("warningPercent", 1, 100), ("criticalPercent", 1, 100),
+                 (AUTO_QUERY_MINUTES_FIELD, 1, None))  # 設定檔欄位名稱與合法範圍
 # 第一次啟動時寫進設定檔的 providers.claude
 SETTINGS_DEFAULTS = {"expiryWarningDays": _DEFAULT.expiry_warning_days,
                      "warningPercent": _DEFAULT.warning_percent, "criticalPercent": _DEFAULT.critical_percent,
-                     CLAUDE_COMMAND_FIELD: None}
+                     CLAUDE_COMMAND_FIELD: None, AUTO_QUERY_FIELD: _DEFAULT.auto_usage_query,
+                     AUTO_QUERY_MINUTES_FIELD: _DEFAULT.auto_usage_query_minutes}
 
 
 @dataclass(frozen=True)
@@ -257,8 +263,14 @@ def read_settings(fields: dict) -> Tuple[ProviderSettings, Tuple[str, ...]]:
     command_invalid = command is not None and not (isinstance(command, str) and Path(command).is_absolute())
     if command_invalid:
         invalid.add(CLAUDE_COMMAND_FIELD)
+    auto = claude.get(AUTO_QUERY_FIELD, _DEFAULT.auto_usage_query)
+    if not isinstance(auto, bool):  # 0／1／字串都不算
+        auto = _DEFAULT.auto_usage_query
+        invalid.add(AUTO_QUERY_FIELD)
+    minutes = values[AUTO_QUERY_MINUTES_FIELD] or _DEFAULT.auto_usage_query_minutes
+    below_floor = auto and minutes < AUTO_QUERY_FLOOR_MINUTES
     return (ProviderSettings(days, warning, critical, None if command_invalid or command is None else Path(command),
-                             command_invalid),
+                             command_invalid, auto, max(minutes, AUTO_QUERY_FLOOR_MINUTES), below_floor),
             tuple(sorted(f"{prefix}.{name}" for name in invalid)))
 
 

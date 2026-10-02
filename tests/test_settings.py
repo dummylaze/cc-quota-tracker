@@ -14,7 +14,7 @@ class SettingsFileTest(HomeTestCase):
             "layout": "cards", "alwaysOnTop": True, "mode": "compact",
             "language": "system", "theme": "system", "opacity": 100, "countdownFormat": "twoUnits", "font": None,
             "providers": {"claude": {"expiryWarningDays": 7, "warningPercent": 60, "criticalPercent": 85,
-                                    "claudeCommand": None}},
+                                    "claudeCommand": None, "autoUsageQuery": False, "autoUsageQueryMinutes": 15}},
             "claudeConfigDir": None, "managedDir": None,
         })
 
