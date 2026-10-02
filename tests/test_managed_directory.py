@@ -9,7 +9,8 @@ from pathlib import Path
 from unittest import mock
 
 from cc_quota_tracker import claude_provider as provider
-from cc_quota_tracker.managed_directory import BindingsUnreadable, ManagedAccount, ManagedDirectory, Observed
+from cc_quota_tracker.managed_directory import (BindingsUnreadable, InvalidLabel, ManagedAccount, ManagedDirectory,
+                                                NoCredential, Observed, Stored, UnknownLabel)
 from tests.fakehome import HomeTestCase, WindowsAclAssertions, usage_cache
 
 AT = datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc)
@@ -461,102 +462,136 @@ class MaintainBindingsTest(BindingsTestCase):
         self.assertEqual(list(self.bindings_file.parent.glob("*.tmp")), [])
 
 
-class CheckBindingsReadableTest(BindingsTestCase):
-    def test_missing_unparsable_and_readable_files_pass(self):
-        self.managed.check_bindings_readable()
-        self.put(self.bindings_file, "{broken")
-        self.managed.check_bindings_readable()
-        self.put_bindings(**{KEY_RT1: "acct-1"})
-        self.managed.check_bindings_readable()
+class StoreSnapshotTest(BindingsTestCase):
+    def managed_files(self):
+        return {p.relative_to(self.path): p.read_bytes() for p in self.path.rglob("*") if p.is_file()}
 
-    def test_locked_file_is_refused_with_its_path(self):
-        self.put_bindings(**{KEY_RT1: "acct-1"})
-        with HomeTestCase.locked("bindings.json"), self.assertRaises(BindingsUnreadable) as raised:
-            self.managed.check_bindings_readable()
-        self.assertEqual(raised.exception.path, self.bindings_file)
-
-
-class RecordBindingTest(BindingsTestCase):
-    def test_adds_the_binding_and_reports_it_as_bound(self):
-        self.snapshot("work", "rt-1")
-        recorded = self.managed.record_binding(KEY_RT1, "acct-1")
-        self.assertTrue(recorded.bound)
+    def test_writes_the_snapshot_and_its_binding_and_reports_it_as_bound(self):
+        data = credential("rt-1").encode("utf-8")
+        stored = self.managed.store_snapshot("work", data, "acct-1")
+        self.assertEqual(stored, Stored(bound=True, permissions_fixed=False))
+        self.assertEqual((self.path / "work.json").read_bytes(), data)
         self.assertEqual(self.stored_bindings(), {KEY_RT1: {"accountId": "acct-1"}})
+        self.assertEqual(self.managed.list_accounts(), (ManagedAccount("work", KEY_RT1, "acct-1", None),))
 
     def test_without_an_account_id_the_existing_binding_of_that_fingerprint_stays(self):
-        self.snapshot("work", "rt-1")
         self.put_bindings(**{KEY_RT1: "acct-1", KEY_RT2: "acct-2"})
-        recorded = self.managed.record_binding(KEY_RT1, None)
-        self.assertTrue(recorded.bound)
+        stored = self.managed.store_snapshot("work", credential("rt-1").encode("utf-8"), None)
+        self.assertTrue(stored.bound)
         self.assertEqual(self.stored_bindings(), {KEY_RT1: {"accountId": "acct-1"}})  # 順帶清掉換掉的舊憑證指紋
 
     def test_without_an_account_id_and_no_binding_reports_not_bound_but_writes_the_file(self):
-        self.snapshot("work", "rt-1")
-        recorded = self.managed.record_binding(KEY_RT1, None)
-        self.assertFalse(recorded.bound)
+        stored = self.managed.store_snapshot("work", credential("rt-1").encode("utf-8"), None)
+        self.assertFalse(stored.bound)
         self.assertEqual(self.stored_bindings(), {})
 
-    def test_snapshot_without_a_readable_fingerprint_only_adds_the_new_binding(self):
-        self.snapshot("work", "rt-1")
-        self.unreadable_snapshot("home")
-        self.put_bindings(**{KEY_RT2: "acct-2"})
-        self.put_readings("acct-2")
-        self.managed.record_binding(KEY_RT1, "acct-1")
-        self.assertEqual(self.stored_bindings(), {KEY_RT1: {"accountId": "acct-1"}, KEY_RT2: {"accountId": "acct-2"}})
-        self.assertEqual(set(self.stored()), {"acct-2"})
+    def test_unparsable_bindings_file_counts_as_empty_and_gets_the_new_binding(self):
+        self.put(self.bindings_file, "{broken")
+        self.assertTrue(self.managed.store_snapshot("work", credential("rt-1").encode("utf-8"), "acct-1").bound)
+        self.assertEqual(self.stored_bindings(), {KEY_RT1: {"accountId": "acct-1"}})
 
-    def test_replaced_fingerprints_are_cleaned_with_their_readings(self):
-        self.snapshot("work", "rt-1")
+    def test_replacing_a_snapshot_cleans_the_old_fingerprint_with_its_reading(self):
+        self.snapshot("work", "rt-2")
         self.put_bindings(**{KEY_RT2: "acct-2"})
         self.put_readings("acct-2")
-        self.managed.record_binding(KEY_RT1, "acct-1")
+        self.managed.store_snapshot("work", credential("rt-1").encode("utf-8"), "acct-1")
         self.assertEqual(self.stored_bindings(), {KEY_RT1: {"accountId": "acct-1"}})
         self.assertEqual(self.stored(), {})
 
-    def test_locked_bindings_file_raises_and_writes_nothing(self):
+    def test_label_that_is_not_a_plain_file_name_is_refused_before_anything_is_written(self):
+        for label in ["", " ", "../work", "a/b", "a\\b", "a:b", ".hidden", "work.", "con", "NUL", "COM1.txt", "a*b"]:
+            with self.subTest(label=label), self.assertRaises(InvalidLabel):
+                self.managed.store_snapshot(label, credential("rt-1").encode("utf-8"), "acct-1")
+        self.assertFalse(self.path.exists())
+
+    def test_locked_bindings_file_refuses_and_leaves_every_file_untouched(self):
         self.snapshot("work", "rt-1")
+        self.put_bindings(**{KEY_RT1: "acct-1"})
+        self.put_readings("acct-1")
+        before = self.managed_files()
+        with HomeTestCase.locked("bindings.json"), self.assertRaises(BindingsUnreadable) as raised:
+            self.managed.store_snapshot("work", credential("rt-2").encode("utf-8"), "acct-2")
+        self.assertEqual(raised.exception.path, self.bindings_file)
+        self.assertEqual(self.managed_files(), before)
+
+    def test_credential_without_a_fingerprint_keeps_the_existing_snapshot(self):
+        self.managed.store_snapshot("work", credential("rt-1").encode("utf-8"), "acct-1")
+        before = self.managed_files()
+        with self.assertRaises(NoCredential):
+            self.managed.store_snapshot("work", b'{"claudeAiOauth": {"acc', "acct-1")
+        self.assertEqual(self.managed_files(), before)
+
+    def test_snapshot_without_a_readable_fingerprint_only_adds_the_new_binding(self):
+        self.unreadable_snapshot("home")
+        self.put_bindings(**{KEY_RT2: "acct-2"})
+        self.put_readings("acct-2")
+        self.managed.store_snapshot("work", credential("rt-1").encode("utf-8"), "acct-1")
+        self.assertEqual(self.stored_bindings(), {KEY_RT1: {"accountId": "acct-1"}, KEY_RT2: {"accountId": "acct-2"}})
+        self.assertEqual(set(self.stored()), {"acct-2"})
+
+    def test_locked_readings_file_still_writes_the_binding_but_prunes_no_readings(self):
+        self.put_bindings(**{KEY_RT2: "acct-2"})
+        self.put_readings("acct-2")
+        readings_before = self.readings_file.read_bytes()
+        with HomeTestCase.locked("readings.json"):
+            self.managed.store_snapshot("work", credential("rt-1").encode("utf-8"), "acct-1")
+        self.assertEqual(self.stored_bindings(), {KEY_RT1: {"accountId": "acct-1"}})
+        self.assertEqual(self.readings_file.read_bytes(), readings_before)
+
+    def test_failed_bindings_write_raises_and_keeps_the_bindings_as_they_were(self):
         self.put_bindings(**{KEY_RT2: "acct-2"})
         before = self.bindings_file.read_bytes()
-        with HomeTestCase.locked("bindings.json"), self.assertRaises(BindingsUnreadable):
-            self.managed.record_binding(KEY_RT1, "acct-1")
-        self.assertEqual(self.bindings_file.read_bytes(), before)
+        real = os.replace
 
-    def test_failed_write_raises_and_keeps_the_bindings_as_they_were(self):
-        self.snapshot("work", "rt-1")
-        self.put_bindings(**{KEY_RT2: "acct-2"})
-        before = self.bindings_file.read_bytes()
-        with mock.patch("cc_quota_tracker.atomic.os.replace", side_effect=PermissionError("locked")):
-            with self.assertRaises(OSError):
-                self.managed.record_binding(KEY_RT1, "acct-1")
+        def replace(src, dst):
+            if Path(dst).name == "bindings.json":
+                raise PermissionError("locked")
+            real(src, dst)
+        with mock.patch("cc_quota_tracker.atomic.os.replace", replace), self.assertRaises(OSError):
+            self.managed.store_snapshot("work", credential("rt-1").encode("utf-8"), "acct-1")
         self.assertEqual(self.bindings_file.read_bytes(), before)
 
 
-class PruneBindingsTest(BindingsTestCase):
-    def test_binding_of_a_removed_snapshot_is_dropped_with_its_reading(self):
+class RemoveSnapshotTest(BindingsTestCase):
+    def setUp(self):
+        super().setUp()
         self.snapshot("work", "rt-1")
+        self.snapshot("home", "rt-2")
         self.put_bindings(**{KEY_RT1: "acct-1", KEY_RT2: "acct-2"})
         self.put_readings("acct-1", "acct-2")
-        self.managed.prune_bindings()
+
+    def test_deletes_the_snapshot_with_its_binding_and_reading(self):
+        self.managed.remove_snapshot("home")
+        self.assertFalse((self.path / "home.json").exists())
         self.assertEqual(self.stored_bindings(), {KEY_RT1: {"accountId": "acct-1"}})
         self.assertEqual(set(self.stored()), {"acct-1"})
 
-    def test_locked_bindings_file_writes_nothing(self):
-        self.snapshot("work", "rt-1")
-        self.put_bindings(**{KEY_RT1: "acct-1", KEY_RT2: "acct-2"})
-        self.put_readings("acct-1", "acct-2")
+    def test_unknown_label_is_refused_and_changes_nothing(self):
+        bindings_before = self.bindings_file.read_bytes()
+        with self.assertRaises(UnknownLabel):
+            self.managed.remove_snapshot("other")
+        self.assertEqual([a.label for a in self.managed.list_accounts()], ["home", "work"])
+        self.assertEqual(self.bindings_file.read_bytes(), bindings_before)
+
+    def test_locked_bindings_file_deletes_the_snapshot_and_writes_nothing_else(self):
         bindings_before, readings_before = self.bindings_file.read_bytes(), self.readings_file.read_bytes()
         with HomeTestCase.locked("bindings.json"):
-            self.managed.prune_bindings()
+            self.managed.remove_snapshot("home")
+        self.assertFalse((self.path / "home.json").exists())
         self.assertEqual(self.bindings_file.read_bytes(), bindings_before)
         self.assertEqual(self.readings_file.read_bytes(), readings_before)
 
-    def test_locked_readings_file_still_writes_the_bindings_but_not_the_readings(self):
-        self.snapshot("work", "rt-1")
-        self.put_bindings(**{KEY_RT1: "acct-1", KEY_RT2: "acct-2"})
-        self.put_readings("acct-1", "acct-2")
+    def test_snapshot_without_a_readable_fingerprint_prunes_nothing(self):
+        with HomeTestCase.locked("work.json"):
+            self.managed.remove_snapshot("home")
+        self.assertFalse((self.path / "home.json").exists())
+        self.assertEqual(set(self.stored_bindings()), {KEY_RT1, KEY_RT2})
+        self.assertEqual(set(self.stored()), {"acct-1", "acct-2"})
+
+    def test_locked_readings_file_still_writes_the_bindings_but_prunes_no_readings(self):
         readings_before = self.readings_file.read_bytes()
         with HomeTestCase.locked("readings.json"):
-            self.managed.prune_bindings()
+            self.managed.remove_snapshot("home")
         self.assertEqual(self.stored_bindings(), {KEY_RT1: {"accountId": "acct-1"}})
         self.assertEqual(self.readings_file.read_bytes(), readings_before)
 
@@ -570,11 +605,19 @@ class StandbyReadingsPermissionTest(StandbyReadingsTestCase, WindowsAclAssertion
 
 @unittest.skipUnless(sys.platform == "win32", "Windows ACL")
 class BindingsPermissionTest(BindingsTestCase, WindowsAclAssertions):
-    def test_bindings_file_and_state_directory_are_private(self):
-        self.snapshot("work", "rt-1")
-        self.managed.record_binding(KEY_RT1, "acct-1")
-        self.assert_private(self.bindings_file)
-        self.assert_private(self.bindings_file.parent)
+    def test_stored_snapshot_its_directories_and_the_bindings_file_are_private(self):
+        stored = self.managed.store_snapshot("work", credential("rt-1").encode("utf-8"), "acct-1")
+        for path in (self.path, self.path / "work.json", self.bindings_file.parent, self.bindings_file):
+            self.assert_private(path)
+        self.assertFalse(stored.permissions_fixed)
+
+    def test_storing_fixes_a_loose_existing_directory_and_snapshot_and_says_so(self):
+        self.path.mkdir()  # 繼承暫存目錄的權限
+        self.snapshot("home", "rt-2")  # 直接放進目錄、權限靠繼承
+        stored = self.managed.store_snapshot("work", credential("rt-1").encode("utf-8"), "acct-1")
+        for path in (self.path, self.path / "home.json", self.path / "work.json"):
+            self.assert_private(path)
+        self.assertTrue(stored.permissions_fixed)
 
     def test_bindings_learned_by_maintenance_are_private(self):
         self.snapshot("work", "rt-1")

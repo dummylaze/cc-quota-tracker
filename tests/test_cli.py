@@ -57,6 +57,16 @@ class CliTest(CliTestCase):
         self.assertIn("鎖住", err)
         self.assertIn(str(self.home / ".claude-multi" / ".state" / "bindings.json"), err)
 
+    def test_remove_with_locked_bindings_file_still_reports_removed(self):
+        self.log_in()
+        self.run_cli("add", "work")
+        with self.locked("bindings.json"):
+            code, out, err = self.run_cli("remove", "work")
+        self.assertEqual(code, 0)
+        self.assertIn("work", out)
+        self.assertEqual(err, "")
+        self.assertFalse((self.home / ".claude-multi" / "work.json").exists())
+
     def test_remove_unknown_label_fails(self):
         code, _, err = self.run_cli("remove", "work")
         self.assertEqual(code, 1)

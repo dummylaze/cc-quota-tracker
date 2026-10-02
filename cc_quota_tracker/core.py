@@ -8,21 +8,18 @@ from enum import Enum
 from pathlib import Path
 from typing import Callable, FrozenSet, NamedTuple, Optional, Tuple
 
-from . import atomic
 from . import claude_provider as provider
 from . import usage_query
 from .board import (Board, Card, CountdownFormat, Limit, Preferences, QueryFailure, QueryStatus, ReadingState, Role,
                     Severity, UsageQueryResult)
 from .credstore import FileCredentialStore
-from .managed_directory import BindingsUnreadable, ManagedDirectory, Observed, mkdir_private, tighten  # noqa: F401
-# BindingsUnreadable 已搬進納管目錄，核心仍對外匯出，命令列、GUI 與既有測試的匯入路徑不變
+from .managed_directory import (BindingsUnreadable, InvalidLabel, ManagedDirectory, NoCredential,  # noqa: F401
+                                Observed, UnknownLabel, check_label)
+# 納管會丟的例外定義在納管目錄，核心仍對外匯出：命令列、GUI 與既有測試的匯入路徑不變
 from .settings import (CLAUDE_CONFIG_DIR, COUNTDOWN_FORMAT_FIELD, PathSource, ResolvedPaths, path_fields,
                        read_preferences, read_settings)
 
 _EMAIL = re.compile(r"[^@\s]+@[^@\s]+\.[A-Za-z]{2,}")
-_ILLEGAL_IN_NAME = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
-_RESERVED_NAMES = {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 10)),
-                   *(f"LPT{i}" for i in range(1, 10))}
 SCHEMA_CHANGE_ROUNDS = 3  # 結構不符連續這麼多輪才判定為結構變更；偶發一次不亮橫幅
 # 沒落後時多久重掃一次對話紀錄：落後提示最多晚這麼久出現，換來不必每輪 poll 都 stat 所有對話紀錄
 LAG_SCAN_INTERVAL = timedelta(seconds=60)
@@ -59,18 +56,6 @@ class AddResult:
     warnings: FrozenSet[AddWarning] = frozenset()
 
 
-class InvalidLabel(ValueError):
-    """帳號標籤就是憑證快照的檔名，必須是單純、合法的檔名。"""
-
-
-class NoCredential(Exception):
-    """讀不到目前登入的憑證（尚未登入、或憑證檔讀不懂），無法納管。"""
-
-
-class UnknownLabel(LookupError):
-    """沒有這個帳號標籤的憑證快照。"""
-
-
 class Core:
     def __init__(self, paths: ResolvedPaths, clock: Callable[[], datetime], auto_query: bool = True):
         """auto_query：poll 可以依設定自動查詢額度。只有常駐的視窗該開；命令列的 poll 一次就結束，不該留下查詢。"""
@@ -79,7 +64,6 @@ class Core:
         self._credentials = paths.claude_dir / provider.CREDENTIALS
         self._transcripts = paths.claude_dir / provider.TRANSCRIPTS
         self._lag_scan: Optional[_LagScan] = None
-        self._managed_dir = paths.managed_dir  # 憑證快照直接放在這一層
         self._managed = ManagedDirectory(paths.managed_dir)
         self._paths = paths
         self._source_missing = False
@@ -216,7 +200,7 @@ class Core:
         return env
 
     def add(self, label: str) -> AddResult:
-        _check_label(label)
+        check_label(label)  # 先於讀當前憑證：標籤不合法時，不論有沒有登入都回報標籤
         try:
             data = self._credentials.read_bytes()
         except OSError:
@@ -230,7 +214,7 @@ class Core:
     def import_snapshot(self, source: Path, label: str) -> AddResult:
         """把一份憑證檔複製進納管目錄成為憑證快照，權限與 add 一樣收緊。不決定綁定：
         同一憑證指紋原有的綁定仍然有效，沒有的話由 poll 依直接放檔的補學規則處理。讀不出憑證就丟 NoCredential。"""
-        _check_label(label)
+        check_label(label)
         try:
             data = Path(source).read_bytes()
         except OSError:
@@ -238,38 +222,17 @@ class Core:
         return self._store(label, data, None)
 
     def _store(self, label: str, data: bytes, account_id: Optional[str]) -> AddResult:
-        self._managed.check_bindings_readable()  # 先確認讀得到才寫憑證快照：讀不到就什麼都不動
-        fixed = mkdir_private(self._managed_dir)
-        key = self._write_snapshot(self._snapshot(label), data)
         # 沒有識別碼：同一憑證指紋原有的綁定仍然有效；沒有的話留給之後補學
-        recorded = self._managed.record_binding(key, account_id)
-        # 事後驗證：連同既有的憑證快照一起檢查，不符就修正並告警
-        fixed = any([tighten(self._snapshot(l)) for l in self._labels()]) or recorded.permissions_fixed or fixed
-        warnings = {AddWarning.PERMISSIONS_FIXED} if fixed else set()
-        if not recorded.bound:
+        stored = self._managed.store_snapshot(label, data, account_id)
+        warnings = {AddWarning.PERMISSIONS_FIXED} if stored.permissions_fixed else set()
+        if not stored.bound:
             warnings.add(AddWarning.NOT_BOUND)
         if _EMAIL.search(label):
             warnings.add(AddWarning.LABEL_LOOKS_LIKE_EMAIL)
         return AddResult(f"{provider.PROVIDER}:{label}", frozenset(warnings))
 
     def remove(self, label: str) -> None:
-        if label not in self._labels():
-            raise UnknownLabel(label)
-        atomic.remove(self._snapshot(label))
-        self._managed.prune_bindings()  # 綁定檔讀不到就不寫：留下的孤兒綁定由之後的 poll 清掉
-
-    def _write_snapshot(self, snapshot: Path, data: bytes) -> str:
-        """替換前先驗證暫存檔讀得出憑證指紋：讀到寫到一半的憑證時，既有的憑證快照維持原樣。"""
-        keys = []
-
-        def check(tmp: Path) -> None:
-            key = FileCredentialStore(tmp).fingerprint()
-            if key is None:
-                raise NoCredential()
-            tighten(tmp, new=True)
-            keys.append(key)
-        atomic.write_atomic(snapshot, data, before_replace=check)
-        return keys[0]
+        self._managed.remove_snapshot(label)  # 綁定檔讀不到就不寫：留下的孤兒綁定由之後的 poll 清掉
 
     def _accounts(self) -> Tuple[_Account, ...]:
         return tuple(_Account(f"{provider.PROVIDER}:{a.label}", a.fingerprint, a.account_id, a.expires_at)
@@ -345,12 +308,6 @@ class Core:
             return by_fp[current], False
         flagged = by_fp.get(invalid_snapshot) if current is not None and invalid_snapshot else None
         return flagged, flagged is not None
-
-    def _snapshot(self, label: str) -> Path:
-        return self._managed_dir / f"{label}.json"
-
-    def _labels(self) -> Tuple[str, ...]:
-        return self._managed.snapshot_labels()
 
     def _refresh(self) -> None:
         result = self._read()
@@ -481,13 +438,6 @@ class Core:
 
     def _grade(self, severity: Optional[Severity], percent: Optional[int]) -> Severity:
         return provider.grade(severity, percent, self._provider_settings)
-
-
-def _check_label(label: str) -> None:
-    """標籤會直接成為納管目錄裡的檔名：擋掉路徑、Windows 不接受的檔名，以及點開頭（留給工具自己的檔案）。"""
-    if (not label.strip() or label.startswith(".") or label.endswith((".", " "))
-            or _ILLEGAL_IN_NAME.search(label) or label.split(".")[0].upper() in _RESERVED_NAMES):
-        raise InvalidLabel(label)
 
 
 def _countdown_format(value) -> CountdownFormat:
