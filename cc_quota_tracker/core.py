@@ -15,11 +15,10 @@ from . import usage_query
 from .board import (Board, Card, CountdownFormat, Limit, Preferences, QueryFailure, QueryStatus, ReadingState, Role,
                     Severity, UsageQueryResult)
 from .credstore import FileCredentialStore
-from .permissions import is_private, make_private
+from .managed_directory import STATE_DIR, ManagedDirectory, Observed, mkdir_private, tighten
 from .settings import (CLAUDE_CONFIG_DIR, COUNTDOWN_FORMAT_FIELD, PathSource, ResolvedPaths, path_fields,
                        read_preferences, read_settings)
 
-STATE_DIR = ".state"  # 納管目錄底下放工具狀態的子目錄，與憑證快照分開
 _EMAIL = re.compile(r"[^@\s]+@[^@\s]+\.[A-Za-z]{2,}")
 _ILLEGAL_IN_NAME = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 _RESERVED_NAMES = {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 10)),
@@ -89,6 +88,7 @@ class Core:
         self._transcripts = paths.claude_dir / provider.TRANSCRIPTS
         self._lag_scan: Optional[_LagScan] = None
         self._managed_dir = paths.managed_dir  # 憑證快照直接放在這一層
+        self._managed = ManagedDirectory(paths.managed_dir)
         self._paths = paths
         self._source_missing = False
         self._settings_mtime: Optional[int] = None
@@ -99,8 +99,6 @@ class Core:
         self._preferences, self._invalid_settings = Preferences(), ()
         self._bindings = self._managed_dir / STATE_DIR / "bindings.json"
         self._readings_file = self._managed_dir / STATE_DIR / "readings.json"
-        self._switch_log = self._managed_dir / STATE_DIR / "switches.jsonl"
-        self._observed = self._managed_dir / STATE_DIR / "observed.json"  # 最後運作時間與上一輪的觀測
         self._readings: Optional[dict] = None  # 帳號識別碼 → 最後一次歸屬給它的讀數；第一次用到才讀檔
         self._oauth_account_id: Optional[str] = None  # 目前登入帳號的識別碼（oauthAccount），未納管帳號靠它歸屬讀數
         self._clock = clock
@@ -254,7 +252,7 @@ class Core:
         bindings = self._load_bindings()
         if bindings is None:  # 先確認讀得到才寫憑證快照：讀不到就什麼都不動
             raise BindingsUnreadable(self._bindings)
-        fixed = self._mkdir_private(self._managed_dir)
+        fixed = mkdir_private(self._managed_dir)
         key = self._write_snapshot(self._snapshot(label), data)
         if account_id:
             bindings[key] = {"accountId": account_id}
@@ -263,7 +261,7 @@ class Core:
         self._write_bindings(bindings)
         # 事後驗證：連同既有的憑證快照一起檢查，不符就修正並告警
         checked = [self._bindings.parent, self._bindings] + [self._snapshot(l) for l in self._labels()]
-        fixed = any([_tighten(p) for p in checked]) or fixed
+        fixed = any([tighten(p) for p in checked]) or fixed
         warnings = {AddWarning.PERMISSIONS_FIXED} if fixed else set()
         if key not in bindings:
             warnings.add(AddWarning.NOT_BOUND)
@@ -287,7 +285,7 @@ class Core:
             key = FileCredentialStore(tmp).fingerprint()
             if key is None:
                 raise NoCredential()
-            _tighten(tmp, new=True)
+            tighten(tmp, new=True)
             keys.append(key)
         atomic.write_atomic(snapshot, data, before_replace=check)
         return keys[0]
@@ -402,10 +400,10 @@ class Core:
         讀不到當前憑證（寫到一半、登出）時不動：不記錄，也不覆蓋上一輪的憑證指紋。"""
         current = FileCredentialStore(self._credentials).fingerprint()
         by_fp = {a.fingerprint: a for a in accounts if a.fingerprint}
-        state = self._read_observed()
+        state = self._managed.read_observed()
         if state is None:  # 讀不到上一輪的觀測（例如短暫鎖住）：這一輪不判定
             return by_fp.get(current), False
-        previous, invalid_snapshot = _text(state.get("fingerprint")), _text(state.get("invalidSnapshot"))
+        previous, invalid_snapshot = state.fingerprint, state.invalid_snapshot
         switched, account_id = False, None
         if current is not None and current != previous:
             previous_account = by_fp.get(previous) or by_fp.get(invalid_snapshot)  # 前一個使用中的納管帳號
@@ -427,10 +425,9 @@ class Core:
             invalid_snapshot = None
         try:
             if switched:
-                self._append_switch(account_id)
+                self._managed.append_switch(self._clock(), account_id)
             # 紀錄寫成、這裡寫失敗時，下一輪會再記一次同一個帳號；重複的一行不影響歸屬
-            self._write_state(self._observed, {"lastRunAt": self._clock().isoformat(),
-                                               "fingerprint": current or previous, "invalidSnapshot": invalid_snapshot})
+            self._managed.write_observed(self._clock(), Observed(current or previous, invalid_snapshot))
         except OSError:
             pass  # 不推進上一輪的觀測，下一輪重試
         if current in by_fp:
@@ -438,42 +435,8 @@ class Core:
         flagged = by_fp.get(invalid_snapshot) if current is not None and invalid_snapshot else None
         return flagged, flagged is not None
 
-    def _read_observed(self) -> Optional[dict]:
-        """讀不到回傳 None；不存在或讀不懂就當成沒有上一輪。"""
-        try:
-            state = json.loads(self._observed.read_text(encoding="utf-8"))
-        except FileNotFoundError:
-            return {}
-        except OSError:
-            return None
-        except ValueError:
-            return {}
-        return state if isinstance(state, dict) else {}
-
-    def _append_switch(self, account_id: Optional[str]) -> None:
-        """切換紀錄只追加：時間、切到的帳號識別碼（拿不到為 null）、來源。不記帳號鍵（ADR-0009）。"""
-        self._mkdir_state_dir()
-        line = json.dumps({"at": self._clock().isoformat(), "accountId": account_id, "source": "observed"})
-        atomic.append(self._switch_log, (line + "\n").encode("utf-8"),
-                      before_replace=lambda tmp: _tighten(tmp, new=True))
-
     def _write_state(self, path: Path, data: dict) -> None:
-        """工具狀態一律原子寫入，暫存檔在替換前就收緊權限。"""
-        self._mkdir_state_dir()
-        atomic.write_atomic(path, json.dumps(data, indent=2).encode("utf-8"),
-                            before_replace=lambda tmp: _tighten(tmp, new=True))
-
-    def _mkdir_state_dir(self) -> None:
-        """poll 在還沒納管任何帳號時也會寫工具狀態，納管目錄可能還不存在。"""
-        self._mkdir_private(self._managed_dir)
-        self._mkdir_private(self._managed_dir / STATE_DIR)
-
-    @staticmethod
-    def _mkdir_private(path: Path) -> bool:
-        """先收緊目錄再往裡面寫，檔案一建立就不會外露。回傳是否修正了既有目錄的權限。"""
-        new = not path.exists()
-        path.mkdir(exist_ok=True)
-        return _tighten(path, new)
+        self._managed.write_state(path, data)
 
     def _snapshot(self, label: str) -> Path:
         return self._managed_dir / f"{label}.json"
@@ -623,26 +586,12 @@ def _check_label(label: str) -> None:
         raise InvalidLabel(label)
 
 
-def _tighten(path: Path, new: bool = False) -> bool:
-    """收緊到只有目前使用者能存取。回傳是否修正了原本外露的權限；剛建立的不算。修正後仍不符就丟例外。"""
-    if is_private(path):
-        return False
-    make_private(path)
-    if not is_private(path):
-        raise PermissionError(f"could not restrict access to the current user: {path.name}")  # 給開發者的診斷，不是畫面文案
-    return not new
-
-
 def _countdown_format(value) -> CountdownFormat:
     """不認得的值用預設的「天＋時」。"""
     try:
         return CountdownFormat(value)
     except ValueError:
         return CountdownFormat.TWO_UNITS
-
-
-def _text(value) -> Optional[str]:
-    return value if isinstance(value, str) and value else None
 
 
 def _counting(resets_at: Optional[datetime], now: datetime) -> bool:
