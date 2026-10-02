@@ -52,6 +52,14 @@ class MenuTest(QueryWiringTestCase):
         self.show(ACTIVE)
         self.assertEqual(self.query_state(), "normal")
 
+    def test_polling_leaves_the_menu_alone_while_the_state_stays_the_same(self):
+        # Windows 上改動彈出中的選單項會重建原生選單：子選單被收掉、整個選單關閉，游標所在項目的反白也會閃掉
+        with mock.patch.object(self.widget._menu, "entryconfigure", wraps=self.widget._menu.entryconfigure) as configure:
+            self.show(ACTIVE)
+            self.show(ACTIVE, in_progress=True)
+            self.show(ACTIVE, cooling_down=True)
+        self.assertEqual(configure.call_count, 1)  # 只有 normal → disabled 那一次
+
     def test_the_label_follows_the_language(self):
         self.widget.set_preference("language", "en")
         self.assertEqual(self.query_state("Query usage"), "normal")

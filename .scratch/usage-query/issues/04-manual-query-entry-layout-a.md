@@ -25,3 +25,4 @@
 - 新增設計 token：字型角色 `link`（同 `small`，加底線）、間距 `entry_gap`。
 - 測試：`tests/test_layout_a_query.py`（縫 ②：入口、狀態、失敗原因、不重疊、單行、不可點，兩個語系）、`tests/test_widget_query.py`（選單項與入口接線、進行中 poll 間隔）。Canvas 要視窗真的顯示才會依游標挑出被點的 item，點擊測試把視窗搬到螢幕外再顯示。既有版面測試一行未改；`tests/test_widget.py` 只改了兩個選單項目清單的期望值。
 - 手動驗證：真實 Claude Code 上點一次入口，約 3 秒完成，卡片的讀數年齡由 46 分鐘變 0、落後提示與入口消失、選單項目進入冷卻（不可點）。
+- 2026-10-03：事後發現缺陷：選單項「查詢額度」每輪 poll 都被 `entryconfigure`，Windows 上會讓開著的右鍵選單閃掉，展開某些子選單時整個選單關閉。修正與驗收見 `10-menu-closes-on-poll.md`。
