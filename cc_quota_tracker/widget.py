@@ -28,6 +28,7 @@ from .settings import PREFERENCE_FIELDS, ResolvedPaths, write_preference
 from .tokens import TRANSPARENT_KEY
 
 POLL_MS = 5000  # 固定值，不開放設定
+QUERY_POLL_MS = 500  # 固定值：查詢進行中縮短間隔，查完的新讀數才不必再等一整輪（查詢最久 20 秒，這段期間最多多 poll 約 40 次）
 DEFAULT_POSITION = (40, 40)  # 主螢幕上的位置：第一次啟動，或上次的位置已經不在任何螢幕內
 _GRIP = 20  # 判斷位置在不在螢幕內時，看視窗左上角往內這麼多的那一點：要拖得到視窗才算在螢幕內
 _TITLE = "cc-quota-tracker"
@@ -162,6 +163,8 @@ class Widget:
             self._add_entry(menu, "checkbutton", "menu.autostart", variable=self._autostart_var,
                             command=self._toggle_autostart)
         menu.add_separator()
+        self._add_entry(menu, "command", "menu.query", command=self.query_usage)
+        self._query_index = menu.index("end")
         self._add_entry(menu, "command", "menu.add", command=self.add_current_account)
         self._add_entry(menu, "command", "menu.import", command=self.import_credential_file)
         self._add_entry(menu, "command", "menu.open_dir", command=self.open_managed_dir)
@@ -179,6 +182,12 @@ class Widget:
     def menu_state(self) -> Preferences:
         return replace(self._prefs, layout=self._layout_var.get(), always_on_top=self._topmost_var.get(), mode=self._mode_var.get(),
                        language=self._language_var.get(), theme=self._theme_var.get(), opacity=self._opacity_var.get())
+
+    def _sync_query_item(self):
+        """選單的「查詢額度」隨看板的查詢狀態：進行中與冷卻中不可點，其餘任何時候都可用（不必落後）。"""
+        status = self._board.usage_query if self._board is not None else None
+        busy = status is not None and (status.in_progress or status.cooling_down)
+        self._menu.entryconfigure(self._query_index, state="disabled" if busy else "normal")
 
     def sync_autostart(self):
         """勾選狀態以登錄的實際值為準：每次開選單前對一次，使用者自己在別處刪掉啟動項時才不會不同步。"""
@@ -208,7 +217,14 @@ class Widget:
             pending = {**self._in_memory, **self._unwritten}
             self._apply(replace(self._board.preferences, **{_ATTRS[f]: v for f, v in pending.items()}))
         finally:
-            self._after = self.root.after(POLL_MS, self.refresh)
+            querying = self._board is not None and self._board.usage_query.in_progress
+            self._after = self.root.after(QUERY_POLL_MS if querying else POLL_MS, self.refresh)
+
+    def query_usage(self):
+        """卡片上的「更新」與右鍵選單的「查詢額度」：請核心開始查詢，立刻 poll 一次讓畫面顯示進行中。
+        進行中或冷卻中核心會拒絕，這時什麼都不做（入口與選單項這時本來就不可點，這裡只擋過期看板的漏網之魚）。"""
+        if self._core.start_query():
+            self.refresh()
 
     def set_preference(self, field: str, value):
         """GUI 改一項偏好：立即生效、不跳確認。設定檔讀不懂時不寫回，只在記憶體生效。"""
@@ -245,6 +261,7 @@ class Widget:
         if lang != self._lang:
             self._lang = lang
             self._relabel_menu()
+        self._sync_query_item()
         self._layout_var.set(prefs.layout)
         self._topmost_var.set(prefs.always_on_top)
         self._mode_var.set(prefs.mode)
@@ -255,7 +272,9 @@ class Widget:
         if new_layout:
             if self.layout is not None:
                 self.layout.destroy()
-            self.layout = _LAYOUTS[prefs.layout](self.canvas)
+            make = _LAYOUTS[prefs.layout]
+            # 「更新」入口目前只有版面 A 有；B、C 補上時一起改成都傳 on_query
+            self.layout = make(self.canvas, on_query=self.query_usage) if make is LayoutA else make(self.canvas)
         if new_layout or prefs.font != previous.font:
             self.layout.set_font(prefs.font)  # 字型存不存在只有畫面層知道；找不到時版面自己在橫幅提示
         if self._board is not None:

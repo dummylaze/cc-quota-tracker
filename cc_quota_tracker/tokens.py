@@ -40,6 +40,7 @@ FONTS = {
     "chip": ("Microsoft JhengHei UI", 8, "bold"),
     "body": ("Microsoft JhengHei UI", 9, "normal"),
     "small": ("Microsoft JhengHei UI", 8, "normal"),
+    "link": ("Microsoft JhengHei UI", 8, "normal"),  # 可點的文字（卡片上的「更新」）：同 small，另加底線
     "percent": ("Segoe UI Semibold", 13, "bold"),
 }
 
@@ -68,6 +69,7 @@ SPACE = {
     "line_gap": 3,  # 同一區塊內的文字列之間
     "dot": 6,  # 提示前的嚴重度色點直徑
     "dot_gap": 6,
+    "entry_gap": 10,  # 提示與它旁邊的「更新」入口之間
     # 版面 B：單行條的各段、表格的各欄
     "col_gap": 14,  # 欄與欄、單行條的段與段之間
     "cell_gap": 6,  # 同一段內：窗口名稱、進度條、百分比之間

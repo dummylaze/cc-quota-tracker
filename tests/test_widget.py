@@ -171,7 +171,7 @@ class PreferenceTest(WidgetTestCase):
 
     def test_menu_offers_settings_and_actions(self):
         self.assertEqual(self.widget.menu_labels(),
-                         ["版面", "置頂", "模式", "語系", "主題", "透明度", "開機自動啟動", "納管目前登入的帳號…", "匯入憑證檔…", "開啟納管目錄", "結束"])
+                         ["版面", "置頂", "模式", "語系", "主題", "透明度", "開機自動啟動", "查詢額度", "納管目前登入的帳號…", "匯入憑證檔…", "開啟納管目錄", "結束"])
 
 
 class AutostartTest(WidgetTestCase):
@@ -410,7 +410,7 @@ class LanguageTest(WidgetTestCase):
         self.widget.set_preference("language", "en")
         self.assertEqual(self.widget.menu_labels(),
                          ["Layout", "Always on top", "Mode", "Language", "Theme", "Opacity", "Start at login",
-                          "Manage the signed-in account…", "Import credential file…", "Open managed directory", "Quit"])
+                          "Query usage", "Manage the signed-in account…", "Import credential file…", "Open managed directory", "Quit"])
         self.assertEqual(self.submenu_labels(0), ["Card list", "Dense table / one-line strip", "Ring gauge"])
         self.assertEqual(self.submenu_labels(2), ["Compact", "Expanded"])
         self.assertEqual(self.submenu_labels(4), ["Follow system", "Light", "Dark"])

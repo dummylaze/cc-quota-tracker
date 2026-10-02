@@ -54,6 +54,7 @@ STRINGS = {
     "reading.none": "No reading yet",
     "reading.none_soon": "No reading yet; it will appear once Claude Code updates its usage cache",
     "reading.pending": "Reading pending; it will appear once Claude Code updates its usage cache",
+    "reading.pending_short": "Reading pending",  # used when the Update entry sits beside it, so it stays on one line
     "reading.lagging": "New activity; usage not updated",
     "reading.locked": "Usage locked: {reason}",
     "note.observed": "Observed value: only accurate if this account hasn't been used since; "
@@ -139,6 +140,7 @@ STRINGS = {
     "menu.theme": "Theme",
     "menu.opacity": "Opacity",
     "menu.autostart": "Start at login",
+    "menu.query": "Query usage",
     "menu.add": "Manage the signed-in account…",
     "menu.import": "Import credential file…",
     "menu.open_dir": "Open managed directory",
@@ -180,6 +182,15 @@ STRINGS = {
     "query.reason.reported_error": "Claude Code reported an error: {message}",  # the original message, never translated
     "query.reason.reported_error_no_message": "Claude Code reported an error without a message.",
     "query.reason.not_written": "Claude Code finished, but the usage cache wasn't updated.",
+    # Usage query on a card: the entry and its status
+    "query.entry": "Update",
+    "query.entry_busy": "Updating…",
+    "query.note.failed": "Update failed: {reason}. Try /usage in Claude Code instead",
+    "query.note.command_not_found": "claude command not found",
+    "query.note.timeout": "Claude Code timed out",
+    "query.note.reported_error": "Claude Code reported \"{message}\"",  # the original message, never translated
+    "query.note.reported_error_no_message": "Claude Code reported an error",
+    "query.note.not_written": "Claude Code didn't update the usage cache",
     "cli.settings_file_location": "Settings file: {path}",
     "path.not_absolute": "{field} in the settings file must be a full absolute path; write null to leave it unset.",
     "path.not_a_directory": "The directory {field} in the settings file points to doesn't exist. This tool won't "

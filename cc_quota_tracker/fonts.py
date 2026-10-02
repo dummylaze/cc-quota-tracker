@@ -19,12 +19,15 @@ def resolve_families(custom: Optional[str], installed: AbstractSet[str], default
     return {name: family if family.casefold() in installed else default for name, (family, _, _) in FONTS.items()}, None
 
 
+UNDERLINED = {"link"}  # 加底線的角色：可點的文字靠底線與一般文字分開
+
+
 class FontSet:
     """一組版面用的具名字型，依角色（title、body…）取用。missing 是目前找不到的自填字型名稱。"""
 
     def __init__(self, canvas):
         self._canvas = canvas
-        self._fonts = {name: tkfont.Font(canvas, family=family, size=size, weight=weight)
+        self._fonts = {name: tkfont.Font(canvas, family=family, size=size, weight=weight, underline=name in UNDERLINED)
                        for name, (family, size, weight) in FONTS.items()}
         self.missing: Optional[str] = None
         self.configure(None)

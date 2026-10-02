@@ -54,6 +54,7 @@ STRINGS = {
     "reading.none": "尚無讀數",
     "reading.none_soon": "尚無讀數，Claude Code 更新額度快取後就會出現",
     "reading.pending": "讀數待更新，Claude Code 更新額度快取後就會出現",
+    "reading.pending_short": "讀數待更新",  # 旁邊有「更新」入口時用，維持單行
     "reading.lagging": "有新對話，額度尚未更新",
     "reading.locked": "額度已鎖定：{reason}",
     "note.observed": "觀測值：觀測之後這個帳號沒再被用過才準確；在別台機器上用過，這台看不到",
@@ -118,6 +119,7 @@ STRINGS = {
     "menu.theme": "主題",
     "menu.opacity": "透明度",
     "menu.autostart": "開機自動啟動",
+    "menu.query": "查詢額度",
     "menu.add": "納管目前登入的帳號…",
     "menu.import": "匯入憑證檔…",
     "menu.open_dir": "開啟納管目錄",
@@ -154,6 +156,15 @@ STRINGS = {
     "query.reason.reported_error": "Claude Code 回報錯誤：{message}",  # message 是 Claude Code 的原始訊息，不翻譯
     "query.reason.reported_error_no_message": "Claude Code 回報錯誤，沒有附上訊息。",
     "query.reason.not_written": "Claude Code 已結束，但額度快取沒有更新。",
+    # 卡片上的查詢額度：入口與狀態
+    "query.entry": "更新",
+    "query.entry_busy": "查詢中…",
+    "query.note.failed": "查詢失敗：{reason}。在 Claude Code 執行 /usage",
+    "query.note.command_not_found": "找不到 claude 指令",
+    "query.note.timeout": "Claude Code 逾時",
+    "query.note.reported_error": "Claude Code 回報「{message}」",  # message 是 Claude Code 的原始訊息，不翻譯
+    "query.note.reported_error_no_message": "Claude Code 回報錯誤",
+    "query.note.not_written": "Claude Code 沒有更新額度快取",
     "cli.settings_file_location": "設定檔位置：{path}",
     "path.not_absolute": "設定檔的 {field} 必須是完整的絕對路徑；不指定請寫 null。",
     "path.not_a_directory": "設定檔的 {field} 指向的目錄不存在。本工具不會改用預設位置，以免讀到另一組帳號。",

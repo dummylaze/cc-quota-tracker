@@ -1,25 +1,32 @@
 """視窗各版面共用的文案與折行：卡片的提示、看板的橫幅，以及依字型寬度折行。版面配置不在這裡，各版面自己排。
 文案取自語系檔，語系由版面渲染時傳入。"""
 import re
-from typing import Optional
+from typing import Optional, Tuple
 
 from . import COMMAND
-from .board import Board, Card, Limit, ReadingState, Role
+from .board import Board, Card, Limit, QueryFailure, QueryStatus, ReadingState, Role
 from .fmt import absolute, age, countdown, until
 from .i18n import text
 
 LINE_TAG = "wrapped-line"  # 多行文字的逐行 item；同一段的各行共用最後一個 tag。測試靠它把各行接回一段
+QUERY_MESSAGE_LIMIT = 60  # Claude Code 回報的原始訊息在卡片上最多顯示幾個字，超過就截斷；卡片很窄，不能讓它撐開版面
+_QUERY_REASONS = {
+    QueryFailure.COMMAND_NOT_FOUND: "query.note.command_not_found",
+    QueryFailure.TIMEOUT: "query.note.timeout",
+    QueryFailure.NOT_WRITTEN: "query.note.not_written",
+}
 
 
-def notes(card: Card, board: Board, lang: str, expiry_info: bool = True):
+def notes(card: Card, board: Board, lang: str, expiry_info: bool = True, short_pending: bool = False):
     """(文字, 色點的顏色 token, 文字的顏色 token)，依顯示順序。
-    expiry_info 為 False 時略過只是告知到期時間的那一條（版面另有欄位顯示）；要使用者動手的到期提示照樣列出。"""
+    expiry_info 為 False 時略過只是告知到期時間的那一條（版面另有欄位顯示）；要使用者動手的到期提示照樣列出。
+    short_pending 為 True 時，讀數待更新那一條改用短句：旁邊有「更新」入口的版面，提示要維持單行。"""
     result = []
     standby = card.role is Role.STANDBY
     if card.role is Role.UNMANAGED:
         result.append((text(lang, "note.how_to_manage", command=COMMAND), "accent", "fg"))
     if card.reading_state is ReadingState.PENDING:
-        result.append((text(lang, "reading.pending"), "sub", "sub"))
+        result.append((text(lang, "reading.pending_short" if short_pending else "reading.pending"), "sub", "sub"))
     elif card.reading_state is ReadingState.NO_READING:
         result.append((text(lang, "reading.none" if standby else "reading.none_soon"), "sub", "sub"))
     elif standby:
@@ -33,6 +40,58 @@ def notes(card: Card, board: Board, lang: str, expiry_info: bool = True):
         if snapshot:
             result.append(snapshot)
     return result
+
+
+def query_entry(card: Card, status: QueryStatus) -> Optional[Tuple[str, bool]]:
+    """卡片上的「更新」入口：(語系鍵, 可不可點)。只有落後或讀數待更新的使用中（或未納管）帳號才有；
+    進行中改顯示「查詢中」，冷卻中標籤不變，兩者都不可點。沒有入口是 None。"""
+    if card.role is Role.STANDBY or not (card.lagging or card.reading_state is ReadingState.PENDING):
+        return None
+    if status.in_progress:
+        return "query.entry_busy", False
+    return "query.entry", not status.cooling_down
+
+
+def query_notes(card: Card, status: QueryStatus, lang: str, has_entry: bool):
+    """查詢額度在卡片上多出來的提示，格式同 notes()：沒有入口時的「查詢中」（右鍵選單查詢時入口不在，
+    進度要有地方看），以及最後一次失敗的原因（任何狀態都顯示，下一次查詢成功才消失）。待命帳號沒有。"""
+    if card.role is Role.STANDBY:
+        return []
+    result = []
+    if status.in_progress and not has_entry:
+        result.append((text(lang, "query.entry_busy"), "sub", "sub"))
+    failure = status.last_failure
+    if failure is not None and failure.failure is not None:
+        result.append((text(lang, "query.note.failed", reason=_failure_reason(failure.failure, failure.message, lang)),
+                       "critical", "fg"))
+    return result
+
+
+def _failure_reason(failure: QueryFailure, message: Optional[str], lang: str) -> str:
+    if failure is not QueryFailure.REPORTED_ERROR:
+        return text(lang, _QUERY_REASONS[failure])
+    message = " ".join((message or "").split())  # 原始訊息不翻譯，只收掉換行與多餘空白，並限制長度
+    if not message:
+        return text(lang, "query.note.reported_error_no_message")
+    if len(message) > QUERY_MESSAGE_LIMIT:
+        message = message[:QUERY_MESSAGE_LIMIT] + "…"
+    return text(lang, "query.note.reported_error", message=message)
+
+
+def card_notes(card: Card, board: Board, lang: str):
+    """有「更新」入口的版面用：(提示清單, 入口所在那條提示的序號)。入口所在的是落後或讀數待更新那一條；
+    序號是 None 表示這張卡片沒有入口。查詢的狀態與失敗原因接在那條提示底下，沒有入口時排在最前面。
+    入口所在那一條的文字在這裡產生也在這裡認出來，兩處的語系鍵放在一起，改文案不會讓入口靜默消失。"""
+    status = board.usage_query
+    has_entry = query_entry(card, status) is not None
+    shown = notes(card, board, lang, short_pending=has_entry)
+    host = None
+    if has_entry:
+        host_texts = (text(lang, "reading.pending_short"), text(lang, "reading.lagging"))
+        host = next((i for i, note in enumerate(shown) if note[0] in host_texts), None)
+    at = 0 if host is None else host + 1
+    shown[at:at] = query_notes(card, status, lang, host is not None)
+    return shown, host
 
 
 def count_dot(shown):
