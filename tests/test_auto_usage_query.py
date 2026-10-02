@@ -264,6 +264,38 @@ class PauseTest(AutoQueryTestCase):
             self.assertFalse(self.cycle().usage_query.auto_paused)
         self.assertTrue(self.cycle().usage_query.auto_paused)
 
+    def test_failed_manual_queries_neither_count_nor_reset_the_failures(self):
+        self.cycle()
+        self.cycle()
+        for _ in range(3):  # 手動失敗不累計：兩次自動失敗加三次手動失敗，仍沒暫停
+            self.clock.advance(minutes=1)
+            self.rearm(usage="error", message="rate limited")
+            self.assertTrue(self.trigger())
+            board = self.finish()
+            self.assertFalse(board.usage_query.auto_paused)
+            self.assertEqual(board.usage_query.last_failure.failure, QueryFailure.REPORTED_ERROR)  # 原因照常顯示
+        self.assertTrue(self.cycle().usage_query.auto_paused)  # 手動失敗也沒歸零：第三次自動失敗就暫停
+
+    def test_a_manual_command_not_found_does_not_count_either(self):
+        self.cycle()
+        self.cycle()
+        self.write_settings(providers=claude(claudeCommand=str(self.home / "nowhere" / "claude.cmd"), autoUsageQuery=True))
+        self.clock.advance(minutes=1)
+        self.assertTrue(self.trigger())
+        board = self.poll()
+        self.assertEqual(board.usage_query.last_failure.failure, QueryFailure.COMMAND_NOT_FOUND)
+        self.assertFalse(board.usage_query.auto_paused)
+
+    def test_an_automatic_launch_failure_counts(self):
+        self.cycle()
+        self.cycle()
+        self.write_settings(providers=claude(claudeCommand=str(self.home / "nowhere" / "claude.cmd"), autoUsageQuery=True))
+        self.clock.advance(minutes=15)
+        self.talk()
+        board = self.poll()  # 自動查詢開不起來：找不到 claude，算第三次失敗
+        self.assertEqual(board.usage_query.last_failure.failure, QueryFailure.COMMAND_NOT_FOUND)
+        self.assertTrue(board.usage_query.auto_paused)
+
     def test_a_failed_manual_query_does_not_resume_it(self):
         for _ in range(3):
             self.cycle()

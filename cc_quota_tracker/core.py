@@ -191,9 +191,13 @@ class Core:
             self._finish_query(result, self._query_is_auto)
 
     def _finish_query(self, result: UsageQueryResult, auto: bool) -> None:
-        """冷卻只管手動查詢（避免連按）；自動查詢有自己的間隔。"""
+        """冷卻只管手動查詢（避免連按）；自動查詢有自己的間隔。連續失敗只數自動查詢的失敗：
+        手動失敗既不累計也不歸零，成功（手動或自動）才歸零。"""
         self._last_query_failure = result if result.failure else None
-        self._consecutive_failures = self._consecutive_failures + 1 if result.failure else 0
+        if not result.failure:
+            self._consecutive_failures = 0
+        elif auto:
+            self._consecutive_failures += 1
         if not auto:
             self._cooldown_until = self._clock() + QUERY_COOLDOWN
 
