@@ -19,11 +19,15 @@ MISSING = object()  # 傳給 limit(severity=…)：該鍵整個不存在
 
 
 class FakeClock:
+    """step：每被讀一次就自動往前推這麼多，給會在迴圈裡等時間的程式碼用（例如同步查詢的逾時）。"""
     def __init__(self, now=NOW):
         self.now = now
+        self.step = timedelta(0)
 
     def __call__(self):
-        return self.now
+        now = self.now
+        self.now += self.step
+        return now
 
     def advance(self, **kw):
         self.now += timedelta(**kw)

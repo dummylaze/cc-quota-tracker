@@ -33,14 +33,18 @@ class ProviderSettings:
     expiry_warning_days: int = 7  # 憑證快照剩不到這麼多天就發出到期警示
     warning_percent: int = 60
     critical_percent: int = 85
+    claude_command: Optional[Path] = None  # 查詢額度用的 claude 執行檔；None 從 PATH 找
+    claude_command_invalid: bool = False  # 有填但不是絕對路徑：查詢一律找不到，不退回 PATH
 
 
 _DEFAULT = ProviderSettings()
 _SETTINGS_ROOT = "providers"  # 設定檔裡這組設定的欄位名稱；與 settings.PROVIDERS_FIELD 相同（settings 匯入本模組，不能反過來）
+CLAUDE_COMMAND_FIELD = "claudeCommand"
 _FIELD_RANGES = (("expiryWarningDays", 1, None), ("warningPercent", 1, 100), ("criticalPercent", 1, 100))  # 設定檔欄位名稱與合法範圍
 # 第一次啟動時寫進設定檔的 providers.claude
 SETTINGS_DEFAULTS = {"expiryWarningDays": _DEFAULT.expiry_warning_days,
-                     "warningPercent": _DEFAULT.warning_percent, "criticalPercent": _DEFAULT.critical_percent}
+                     "warningPercent": _DEFAULT.warning_percent, "criticalPercent": _DEFAULT.critical_percent,
+                     CLAUDE_COMMAND_FIELD: None}
 
 
 @dataclass(frozen=True)
@@ -249,7 +253,12 @@ def read_settings(fields: dict) -> Tuple[ProviderSettings, Tuple[str, ...]]:
     if warning >= critical:
         warning, critical = _DEFAULT.warning_percent, _DEFAULT.critical_percent
         invalid |= {"warningPercent", "criticalPercent"}
-    return (ProviderSettings(days, warning, critical),
+    command = claude.get(CLAUDE_COMMAND_FIELD)
+    command_invalid = command is not None and not (isinstance(command, str) and Path(command).is_absolute())
+    if command_invalid:
+        invalid.add(CLAUDE_COMMAND_FIELD)
+    return (ProviderSettings(days, warning, critical, None if command_invalid or command is None else Path(command),
+                             command_invalid),
             tuple(sorted(f"{prefix}.{name}" for name in invalid)))
 
 

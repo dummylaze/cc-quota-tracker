@@ -2,6 +2,7 @@
 import json
 import os
 import re
+import time
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from enum import Enum
@@ -10,10 +11,12 @@ from typing import Callable, FrozenSet, NamedTuple, Optional, Set, Tuple
 
 from . import atomic
 from . import claude_provider as provider
-from .board import Board, Card, CountdownFormat, Limit, Preferences, ReadingState, Role, Severity
+from . import usage_query
+from .board import (Board, Card, CountdownFormat, Limit, Preferences, QueryFailure, ReadingState, Role, Severity,
+                    UsageQueryResult)
 from .credstore import FileCredentialStore
 from .permissions import is_private, make_private
-from .settings import (COUNTDOWN_FORMAT_FIELD, PathSource, ResolvedPaths, path_fields,
+from .settings import (CLAUDE_CONFIG_DIR, COUNTDOWN_FORMAT_FIELD, PathSource, ResolvedPaths, path_fields,
                        read_preferences, read_settings)
 
 STATE_DIR = ".state"  # 納管目錄底下放工具狀態的子目錄，與憑證快照分開
@@ -24,6 +27,7 @@ _RESERVED_NAMES = {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 10)
 SCHEMA_CHANGE_ROUNDS = 3  # 結構不符連續這麼多輪才判定為結構變更；偶發一次不亮橫幅
 # 沒落後時多久重掃一次對話紀錄：落後提示最多晚這麼久出現，換來不必每輪 poll 都 stat 所有對話紀錄
 LAG_SCAN_INTERVAL = timedelta(seconds=60)
+QUERY_CHECK_SECONDS = 0.05  # 同步查詢時，多久看一次子行程與額度快取（真實時間）
 
 
 class _LagScan(NamedTuple):
@@ -109,6 +113,33 @@ class Core:
                      settings_unreadable=self._settings_unreadable,
                      as_of=self._clock(), countdown_format=self._countdown_format,
                      preferences=self._preferences, invalid_settings=self._invalid_settings)
+
+    def query_usage(self) -> UsageQueryResult:
+        """同步查詢一次額度：請 Claude Code 寫回額度快取，等到成功、失敗或逾時。設定檔改了，這一次就照新的值。"""
+        self._reread_settings()
+        command = usage_query.find_command(self._provider_settings, os.environ)
+        if command is None:
+            return UsageQueryResult(QueryFailure.COMMAND_NOT_FOUND)
+        query = usage_query.UsageQuery(command, self._query_env(), self._source,
+                                       self._clock() + usage_query.TIMEOUT)
+        try:
+            query.start()
+        except OSError:
+            return UsageQueryResult(QueryFailure.COMMAND_NOT_FOUND)
+        while True:
+            result = query.check(self._clock())
+            if result is not None:
+                return result
+            time.sleep(QUERY_CHECK_SECONDS)
+
+    def _query_env(self) -> dict:
+        """讓查詢寫回的正是本工具在讀的那份額度快取：Claude Code 目錄是 home 預設時拿掉 CLAUDE_CONFIG_DIR，
+        否則設成解析出的目錄。"""
+        env = dict(os.environ)
+        env.pop(CLAUDE_CONFIG_DIR, None)
+        if self._paths.claude_source is not PathSource.DEFAULT:
+            env[CLAUDE_CONFIG_DIR] = str(self._paths.claude_dir)
+        return env
 
     def add(self, label: str) -> AddResult:
         _check_label(label)

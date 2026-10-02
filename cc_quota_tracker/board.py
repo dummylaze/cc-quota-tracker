@@ -139,3 +139,19 @@ class Board:
     countdown_format: CountdownFormat = CountdownFormat.TWO_UNITS
     preferences: Preferences = Preferences()
     invalid_settings: Tuple[str, ...] = ()
+
+
+class QueryFailure(Enum):
+    """查詢額度失敗的四種原因（ADR-0010）。"""
+    COMMAND_NOT_FOUND = "command_not_found"  # 找不到 claude 執行檔，含設定的路徑不存在或不合法
+    TIMEOUT = "timeout"
+    REPORTED_ERROR = "reported_error"  # Claude Code 回報錯誤；原始訊息放在 UsageQueryResult.message，不翻譯
+    NOT_WRITTEN = "not_written"  # Claude Code 結束了，但額度快取的觀測時間沒有前進
+
+
+@dataclass(frozen=True)
+class UsageQueryResult:
+    """failure 為 None 是成功，observed_at 是額度快取新的觀測時間。message 只在 Claude Code 回報錯誤時有值。"""
+    failure: Optional[QueryFailure] = None
+    observed_at: Optional[datetime] = None
+    message: Optional[str] = None
