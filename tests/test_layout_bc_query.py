@@ -13,7 +13,8 @@ from cc_quota_tracker.layout_b import LayoutB
 from cc_quota_tracker.layout_c import LayoutC
 from cc_quota_tracker.tokens import THEMES
 from tests.test_layout_a import ACTIVE, FULL, LAB, PERSONAL, visible_lines, visible_texts
-from tests.test_layout_a_query import (ENTRY_TEXTS, FAILURES, HAN, LAGGING, PENDING, _boxes, _overlap, board_of)
+from tests.test_layout_a_query import (ACTIVE_LAGGING_TEXTS, ENTRY_TEXTS, FAILURES, HAN, LAGGING, PENDING,
+                                       STANDBY_LAGGING_TEXTS, _boxes, _overlap, board_of)
 
 MODES = (False, True)  # 精簡、展開
 COUNT = re.compile(r"^(\d+ 則提示|Notes: \d+)$")
@@ -87,6 +88,42 @@ class BCQueryMixin:
         standby = replace(PERSONAL, lagging=True)
         self.render(board_of(LAGGING, standby, replace(LAB, reading_state=PENDING.reading_state)), expanded=True)
         self.assertEqual(len(self.entries()), 1)
+
+    @staticmethod
+    def mentions(phrase, shown):
+        """畫面上有幾段文字含這句：多格並列時提示前面會冠上帳號標籤，所以不比整段相等。"""
+        return sum(phrase in t for t in shown)
+
+    def test_a_lagging_standby_card_says_it_was_lagging_before_the_switch_in_both_languages(self):
+        standby = replace(PERSONAL, lagging=True)
+        for lang in ("zh-TW", "en"):
+            shown = self.render(board_of(ACTIVE, standby), lang, expanded=True)
+            self.assertEqual(self.mentions(STANDBY_LAGGING_TEXTS[lang], shown), 1, lang)
+            self.assertEqual(self.mentions(ACTIVE_LAGGING_TEXTS[lang], shown), 0, lang)
+
+    def test_each_role_gets_its_own_lagging_text(self):
+        shown = self.render(board_of(LAGGING, replace(PERSONAL, lagging=True)), expanded=True)
+        self.assertEqual((self.mentions("有新對話，額度尚未更新", shown), self.mentions("切換前已落後", shown)), (1, 1))
+
+    def test_a_standby_card_that_was_not_lagging_shows_what_it_showed_before(self):
+        for lang in ("zh-TW", "en"):
+            shown = self.render(board_of(ACTIVE, PERSONAL), lang, expanded=True)
+            self.assertEqual(self.mentions(STANDBY_LAGGING_TEXTS[lang], shown), 0, lang)
+            self.assertEqual(self.mentions(ACTIVE_LAGGING_TEXTS[lang], shown), 0, lang)
+
+    def test_a_lagging_standby_card_adds_no_entry_and_no_overlap_in_either_language_and_mode(self):
+        standby = replace(PERSONAL, lagging=True)
+        for lang in ("zh-TW", "en"):
+            for expanded in MODES:
+                for card in (LAGGING, PENDING, ACTIVE):
+                    self.render(board_of(card, standby, replace(LAB, lagging=True)), lang, expanded)
+                    self.assertEqual(len(self.entries()), 0 if card is ACTIVE else 1, (lang, expanded))
+                    boxes = _boxes(self.canvas)
+                    for n, (i, a) in enumerate(boxes):
+                        for j, b in boxes[n + 1:]:
+                            self.assertFalse(_overlap(a, b), (lang, expanded, card.reading_state,
+                                                              self.canvas.itemcget(i, "text"),
+                                                              self.canvas.itemcget(j, "text")))
 
     def test_a_pending_card_never_shows_the_long_hint_beside_the_entry(self):
         for expanded in MODES:

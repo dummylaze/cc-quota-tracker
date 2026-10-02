@@ -287,6 +287,56 @@ class StatusTest(QueryLayoutTestCase):
         self.assertEqual(tuple(i for i in self.canvas.find_all() if "wrapped-line" not in self.canvas.gettags(i)), items)
 
 
+STANDBY_LAGGING_TEXTS = {"zh-TW": "切換前已落後", "en": "Lagging before the switch"}
+ACTIVE_LAGGING_TEXTS = {"zh-TW": "有新對話，額度尚未更新", "en": "New activity; usage not updated"}
+
+
+class StandbyLaggingTest(QueryLayoutTestCase):
+    """縫 ②：切換前已落後的待命卡片。文字由卡片的角色決定；外框不與既有文字重疊。"""
+
+    def test_a_lagging_standby_card_says_it_was_lagging_before_the_switch_in_both_languages(self):
+        standby = replace(PERSONAL, lagging=True)
+        for lang in ("zh-TW", "en"):
+            shown = self.render(board_of(ACTIVE, standby), lang, expanded=True)
+            self.assertEqual(shown.count(STANDBY_LAGGING_TEXTS[lang]), 1, lang)
+            self.assertNotIn(ACTIVE_LAGGING_TEXTS[lang], shown, lang)  # 使用中帳號沒落後，待命卡片也不借它的文字
+
+    def test_each_role_gets_its_own_text(self):
+        shown = self.render(board_of(LAGGING, replace(PERSONAL, lagging=True)), expanded=True)
+        self.assertEqual((shown.count("有新對話，額度尚未更新"), shown.count("切換前已落後")), (1, 1))
+
+    def test_a_standby_card_that_was_not_lagging_shows_what_it_showed_before(self):
+        for lang in ("zh-TW", "en"):
+            shown = self.render(board_of(ACTIVE, PERSONAL), lang, expanded=True)
+            self.assertNotIn(STANDBY_LAGGING_TEXTS[lang], shown, lang)
+            self.assertNotIn(ACTIVE_LAGGING_TEXTS[lang], shown, lang)
+
+    def test_the_text_does_not_take_the_place_of_a_card_with_no_entry(self):
+        self.render(board_of(ACTIVE, replace(PERSONAL, lagging=True)), expanded=True)
+        self.assertEqual(self.entries(), [])
+
+    def test_no_text_overlaps_another_in_either_language_and_mode(self):
+        standby = replace(PERSONAL, lagging=True)
+        for lang in ("zh-TW", "en"):
+            for expanded in (False, True):
+                for card in (LAGGING, PENDING, ACTIVE):
+                    self.render(board_of(card, standby, replace(LAB, lagging=True)), lang, expanded)
+                    boxes = _boxes(self.canvas)
+                    for n, (i, a) in enumerate(boxes):
+                        for j, b in boxes[n + 1:]:
+                            self.assertFalse(_overlap(a, b), (lang, expanded, card.reading_state,
+                                                              self.canvas.itemcget(i, "text"),
+                                                              self.canvas.itemcget(j, "text")))
+
+    def test_the_text_stays_on_one_line_in_both_languages(self):
+        standby = replace(PERSONAL, lagging=True)
+        for lang in ("zh-TW", "en"):
+            self.render(board_of(ACTIVE, standby), lang, expanded=True)
+            hits = [i for i in self.canvas.find_all() if self.canvas.type(i) == "text"
+                    and self.canvas.itemcget(i, "text") == STANDBY_LAGGING_TEXTS[lang]]
+            self.assertEqual(len(hits), 1, lang)  # 折成兩行的話，整句不會出現在同一個 item
+
+
 def _boxes(canvas):
     """畫面上每個文字 item 的外框（含逐行文字的每一行）。"""
     return [(i, canvas.bbox(i)) for i in canvas.find_all()

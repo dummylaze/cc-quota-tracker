@@ -302,6 +302,89 @@ class RememberStandbyReadingTest(StandbyReadingsTestCase):
         self.assertEqual(set(self.stored()), {"acct-1"})
 
 
+class StandbyLaggingTest(StandbyReadingsTestCase):
+    """待命讀數的落後標記：與讀數存在同一個檔案，標的是「哪一個觀測時間的讀數」，讀數換了標記就不再成立。"""
+
+    def remember(self, account_id="acct-1", **cache):
+        self.managed.remember_standby_reading(reading(account_id, **cache), {"acct-1", "acct-2"})
+
+    def test_no_mark_means_not_lagging(self):
+        self.remember()
+        self.assertFalse(self.managed.standby_lagging("acct-1"))
+        self.assertFalse(self.managed.standby_lagging("acct-unknown"))
+
+    def test_marked_reading_is_lagging_and_stays_so_after_a_restart(self):
+        self.remember()
+        self.managed.mark_standby_lagging("acct-1", True)
+        self.assertTrue(self.managed.standby_lagging("acct-1"))
+        self.assertTrue(ManagedDirectory(self.path).standby_lagging("acct-1"))
+        self.assertFalse(self.managed.standby_lagging("acct-2"))
+
+    def test_the_mark_can_be_cleared(self):
+        self.remember()
+        self.managed.mark_standby_lagging("acct-1", True)
+        self.managed.mark_standby_lagging("acct-1", False)
+        self.assertFalse(ManagedDirectory(self.path).standby_lagging("acct-1"))
+        self.assertEqual(set(self.stored()), {"acct-1"})  # 沒有標記時檔案維持原本的格式
+
+    def test_a_reading_that_is_not_stored_cannot_be_marked(self):
+        self.managed.mark_standby_lagging("acct-1", True)
+        self.assertFalse(self.readings_file.exists())
+        self.assertFalse(self.managed.standby_lagging("acct-1"))
+
+    def test_a_file_without_the_field_reads_as_not_lagging(self):
+        self.put(self.readings_file, json.dumps({"acct-1": usage_cache(account_uuid="acct-1")}))
+        self.assertFalse(self.managed.standby_lagging("acct-1"))
+
+    def test_the_mark_is_not_mistaken_for_an_account(self):
+        self.remember()
+        self.managed.mark_standby_lagging("acct-1", True)
+        self.assertEqual(set(ManagedDirectory(self.path).read_standby_readings()), {"acct-1"})
+
+    def test_an_unreadable_field_reads_as_not_lagging(self):
+        for junk in ("oops", [1], {"acct-1": 7}, {"acct-1": "not a time"}):
+            with self.subTest(junk=junk):
+                self.put(self.readings_file, json.dumps({"acct-1": usage_cache(account_uuid="acct-1"),
+                                                         "_lagging": junk}))
+                self.assertFalse(ManagedDirectory(self.path).standby_lagging("acct-1"))
+
+    def test_a_newer_reading_for_the_same_account_clears_the_mark(self):
+        self.remember()
+        self.managed.mark_standby_lagging("acct-1", True)
+        self.remember(fetched_at=AT.replace(minute=30))
+        self.assertFalse(self.managed.standby_lagging("acct-1"))
+        self.assertEqual(set(self.stored()), {"acct-1"})
+
+    def test_marks_of_other_accounts_survive_a_new_reading(self):
+        self.remember("acct-1")
+        self.remember("acct-2")
+        self.managed.mark_standby_lagging("acct-1", True)
+        self.remember("acct-2", fetched_at=AT.replace(minute=30))
+        self.assertTrue(self.managed.standby_lagging("acct-1"))
+
+    def test_pruning_an_unbound_account_takes_its_mark_along(self):
+        self.remember()
+        self.managed.mark_standby_lagging("acct-1", True)
+        self.managed.remember_standby_reading(reading("acct-2"), {"acct-2"})
+        self.assertFalse(self.managed.standby_lagging("acct-1"))
+        self.assertNotIn("_lagging", self.stored())
+
+    def test_locked_file_writes_nothing(self):
+        self.remember()
+        before = self.readings_file.read_bytes()
+        with HomeTestCase.locked("readings.json"):
+            ManagedDirectory(self.path).mark_standby_lagging("acct-1", True)  # 重新啟動後第一次讀就被鎖住
+        self.assertEqual(self.readings_file.read_bytes(), before)
+
+    def test_failed_write_raises_and_the_mark_is_not_kept(self):
+        self.remember()
+        with mock.patch("cc_quota_tracker.atomic.os.replace", side_effect=PermissionError("locked")):
+            with self.assertRaises(OSError):
+                self.managed.mark_standby_lagging("acct-1", True)
+        self.assertFalse(self.managed.standby_lagging("acct-1"))
+        self.assertEqual(set(self.stored()), {"acct-1"})
+
+
 def credential(refresh, expires_at_ms=None):
     oauth = {"accessToken": "at", "refreshToken": refresh}
     if expires_at_ms is not None:

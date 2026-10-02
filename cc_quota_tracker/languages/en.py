@@ -56,6 +56,7 @@ STRINGS = {
     "reading.pending": "Reading pending; it will appear once Claude Code updates its usage cache",
     "reading.pending_short": "Reading pending",  # used when the Update entry sits beside it, so it stays on one line
     "reading.lagging": "New activity; usage not updated",
+    "reading.lagging_before_switch": "Lagging before the switch",  # standby account: this reading was already lagging when it was switched away from
     "reading.locked": "Usage locked: {reason}",
     "note.observed": "Observed value: only accurate if this account hasn't been used since; "
                      "use on another machine isn't visible here",

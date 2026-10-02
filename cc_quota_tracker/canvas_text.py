@@ -32,8 +32,8 @@ def notes(card: Card, board: Board, lang: str, expiry_info: bool = True, short_p
         result.append((text(lang, "reading.none" if standby else "reading.none_soon"), "sub", "sub"))
     elif standby:
         result.append((text(lang, "note.observed"), "sub", "sub"))
-    if card.lagging:
-        result.append((text(lang, "reading.lagging"), "warning", "fg"))
+    if card.lagging:  # 文字依卡片的角色：待命帳號的落後是切換前就有的，使用中帳號的是切換後又有新對話
+        result.append((text(lang, "reading.lagging_before_switch" if standby else "reading.lagging"), "warning", "fg"))
     if card.locked_reason:
         result.append((text(lang, "reading.locked", reason=card.locked_reason), "critical", "critical"))
     if expiry_info or card.snapshot_invalid or card.snapshot_expiring:

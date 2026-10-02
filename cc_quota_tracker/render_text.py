@@ -32,7 +32,8 @@ def render(board: Board, lang: str = ZH_TW) -> str:
         lines.insert(0, text(lang, "notice", text=text(lang, "settings.invalid", fields=fields)))
     if board.settings_unreadable:
         lines.insert(0, text(lang, "notice", text=text(lang, "settings.unreadable")))
-    if any(c.lagging or c.reading_state is ReadingState.PENDING for c in board.cards):
+    # 查詢只能查使用中帳號：待命帳號切換前已落後，不是能靠 query 處理的
+    if any(c.role is not Role.STANDBY and (c.lagging or c.reading_state is ReadingState.PENDING) for c in board.cards):
         lines.append(text(lang, "list.query_hint", command=COMMAND))
     labels = [account_label(key) for key in board.managed_accounts]
     lines.append(text(lang, "list.managed", labels=text(lang, "sep.item").join(labels)) if labels
@@ -73,6 +74,8 @@ def _body(card: Card, board: Board, lang: str) -> list:
         return [text(lang, "reading.pending")]
     if card.role is Role.STANDBY:
         lines = [text(lang, "list.observed", age=age(card.reading_age, lang))]
+        if card.lagging:
+            lines.append(text(lang, "reading.lagging_before_switch"))
     else:
         lines = [text(lang, "list.reading_age", age=age(card.reading_age, lang))]
         if card.lagging:

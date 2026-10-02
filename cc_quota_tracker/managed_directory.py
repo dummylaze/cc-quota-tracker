@@ -13,6 +13,8 @@
 - .state/bindings.json，綁定：納管、移除、綁定維護會寫。讀不到時納管拒絕、移除與維護不寫；有憑證快照讀不出
   憑證指紋時只加不清。寫不成丟 OSError，原檔不變。
 - .state/readings.json，待命讀數：記住讀數時寫，綁定被清掉時連帶修剪。讀不到就什麼都不寫，下次再試。
+  同一個檔案裡的 _lagging 欄位是「切換前已落後」的標記：帳號識別碼 → 被標記的讀數的觀測時間。標記只在讀數的觀測時間
+  相同時才成立，讀數換了就失效並隨寫入清掉；沒有這個欄位的舊檔視為沒有標記。
 - .state/observed.json，上一輪觀測：每輪寫。讀不到時呼叫端這一輪不判定；寫不成丟 OSError。
 - .state/switches.jsonl，切換紀錄：只追加。寫不成丟 OSError，既有的行不變。
 - .state/window.json，視窗位置：寫不成、收不緊權限都是「這次沒記住」，不丟例外。
@@ -31,6 +33,7 @@ from . import claude_provider as provider
 from .credstore import FileCredentialStore
 from .permissions import is_private, make_private
 
+_LAGGING_FIELD = "_lagging"  # 讀數檔裡存落後標記的欄位；帳號識別碼不會是這個名字，舊版讀數檔的讀法會把它當成讀不懂的一筆略過
 _STATE_DIR = ".state"  # 納管目錄底下放工具狀態的子目錄，與憑證快照分開
 _ILLEGAL_IN_NAME = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 _RESERVED_NAMES = {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 10)),
@@ -115,6 +118,7 @@ class ManagedDirectory:
         self._bindings_file = self._state_dir / "bindings.json"  # 憑證指紋 → 帳號識別碼
         self._readings_file = self._state_dir / "readings.json"  # 待命帳號的最後讀數
         self._readings: Optional[Dict[str, provider.UsageReading]] = None  # 第一次用到才讀檔
+        self._lagging: Dict[str, str] = {}  # 帳號識別碼 → 被標為落後的讀數的觀測時間；與 _readings 一起讀、一起寫
 
     def read_observed(self) -> Optional[Observed]:
         """讀不到回傳 None（呼叫端這一輪不判定）；不存在或讀不懂就當成沒有上一輪。"""
@@ -237,9 +241,29 @@ class ManagedDirectory:
             state = self._read_state(self._readings_file)
             if state is None:
                 return None
+            marks = state.pop(_LAGGING_FIELD, None)
             parsed = {k: provider.parse_cache(cache) for k, cache in state.items()}
             self._readings = {k: r for k, r in parsed.items() if isinstance(r, provider.UsageReading)}
+            self._lagging = {k: v for k, v in marks.items() if isinstance(v, str)} if isinstance(marks, dict) else {}
         return self._readings
+
+    def standby_lagging(self, account_id: str) -> bool:
+        """這個帳號最後一次的讀數，在切換前就已落後。讀數換了（觀測時間不同）、沒有標記、讀不到讀數檔都是 False。"""
+        stored = self.read_standby_readings()
+        reading = stored.get(account_id) if stored else None
+        return reading is not None and self._lagging.get(account_id) == _stamp(reading)
+
+    def mark_standby_lagging(self, account_id: str, lagging: bool) -> None:
+        """標記（或清除）這個帳號目前存著的讀數是否在切換前就已落後。沒有存著的讀數、讀數檔讀不到、結果沒變就什麼都不寫。
+        寫不成就丟 OSError，檔案與記憶體裡的標記都維持原樣。"""
+        stored = self.read_standby_readings()
+        reading = stored.get(account_id) if stored else None
+        if reading is None or self.standby_lagging(account_id) == lagging:
+            return
+        marks = {k: v for k, v in self._lagging.items() if k != account_id}
+        if lagging:
+            marks[account_id] = _stamp(reading)
+        self._write_readings(stored, set(stored), marks)
 
     def remember_standby_reading(self, reading: provider.UsageReading, bound: Set[str]) -> None:
         """額度快取的讀數歸屬到某個綁定的帳號時記下來，並只留 bound 裡的帳號；沒變就不寫。
@@ -255,11 +279,16 @@ class ManagedDirectory:
         if stored is not None and set(stored) - bound:
             self._write_readings(stored, bound)
 
-    def _write_readings(self, readings: Dict[str, provider.UsageReading], bound: Set[str]) -> None:
-        """存的是 cachedUsageUtilization 原文，讀回來時再解析。寫成了才換記憶體裡的版本。"""
+    def _write_readings(self, readings: Dict[str, provider.UsageReading], bound: Set[str],
+                        marks: Optional[Dict[str, str]] = None) -> None:
+        """存的是 cachedUsageUtilization 原文，讀回來時再解析。落後標記只留讀數還在、觀測時間沒變的帳號；沒有標記時
+        不寫那個欄位。寫成了才換記憶體裡的版本。"""
         kept = {k: r for k, r in readings.items() if k in bound}
-        self._write_state(self._readings_file, {k: r.source for k, r in kept.items()})
-        self._readings = kept
+        marks = self._lagging if marks is None else marks
+        live = {k: v for k, v in marks.items() if k in kept and v == _stamp(kept[k])}
+        state = {k: r.source for k, r in kept.items()}
+        self._write_state(self._readings_file, {**state, _LAGGING_FIELD: live} if live else state)
+        self._readings, self._lagging = kept, live
 
     def read_window_position(self) -> Optional[Tuple[int, int]]:
         """讀不到、不存在或讀不懂都回傳 None（視窗回到預設位置，不必區分原因）。"""
@@ -305,6 +334,11 @@ class ManagedDirectory:
         """poll 在還沒納管任何帳號時也會寫工具狀態，納管目錄可能還不存在。"""
         _mkdir_private(self._path)
         _mkdir_private(self._state_dir)
+
+
+def _stamp(reading: provider.UsageReading) -> str:
+    """落後標記記的是哪一份讀數：以觀測時間認，讀數換了標記就對不上。"""
+    return reading.observed_at.isoformat()
 
 
 def _text(value) -> Optional[str]:

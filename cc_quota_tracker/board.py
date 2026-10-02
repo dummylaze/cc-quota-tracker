@@ -93,7 +93,8 @@ class Card:
     role: Role
     reading_state: ReadingState
     reading_age: Optional[timedelta] = None
-    lagging: bool = False  # 落後讀數：觀測之後本機又有新對話。只有使用中帳號會是 True
+    # 落後讀數：觀測之後本機又有新對話。使用中帳號是當下判斷的；待命帳號是切換時就已落後（存在工具狀態，讀數換了才清除）
+    lagging: bool = False
     limits: Tuple[Limit, ...] = ()
     scoped_limits: Tuple[Limit, ...] = ()
     other_limits: Tuple[Limit, ...] = ()

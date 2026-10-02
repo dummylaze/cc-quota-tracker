@@ -278,27 +278,28 @@ class Core:
         if state is None:  # 讀不到上一輪的觀測（例如短暫鎖住）：這一輪不判定
             return by_fp.get(current), False
         previous, invalid_snapshot = state.fingerprint, state.invalid_snapshot
-        switched, account_id = False, None
+        switched, account_id, left_account = False, None, None
         if current is not None and current != previous:
             previous_account = by_fp.get(previous) or by_fp.get(invalid_snapshot)  # 前一個使用中的納管帳號
             if current in by_fp:
-                switched, account_id = True, by_fp[current].account_id
+                switched, account_id, left_account = True, by_fp[current].account_id, previous_account
             elif previous_account and previous_account.account_id \
                     and self._oauth_account_id == previous_account.account_id:
                 invalid_snapshot = previous_account.fingerprint  # 憑證被輪替：同一個帳號，不算切換（ADR-0002）
             else:
-                switched, account_id = True, self._oauth_account_id
+                switched, account_id, left_account = True, self._oauth_account_id, previous_account
         elif current is not None and invalid_snapshot:
             flagged = by_fp.get(invalid_snapshot)
             if flagged is None:  # 憑證快照已移除或重新納管
                 invalid_snapshot = None
             elif self._oauth_account_id not in (None, flagged.account_id):
                 # Claude Code 先寫憑證、後寫 oauthAccount：上一輪看起來像輪替，其實是切到未納管帳號
-                switched, account_id = True, self._oauth_account_id
+                switched, account_id, left_account = True, self._oauth_account_id, flagged
         if switched or current in by_fp:
             invalid_snapshot = None
         try:
             if switched:
+                self._mark_lagging_before_switch(left_account, account_id)
                 self._managed.append_switch(self._clock(), account_id)
             # 紀錄寫成、這裡寫失敗時，下一輪會再記一次同一個帳號；重複的一行不影響歸屬
             self._managed.write_observed(self._clock(), Observed(current or previous, invalid_snapshot))
@@ -308,6 +309,20 @@ class Core:
             return by_fp[current], False
         flagged = by_fp.get(invalid_snapshot) if current is not None and invalid_snapshot else None
         return flagged, flagged is not None
+
+    def _mark_lagging_before_switch(self, left_account: Optional[_Account], arrived_id: Optional[str]) -> None:
+        """切換的那一輪：離開的帳號存著的讀數，不管距離上次掃描多久都重新判斷一次落後（切換前最後一分鐘的對話也算），
+        結果與那份待命讀數一起存進工具狀態。切換之後的對話是新帳號的，不算。
+        切換只偵測這一次，標記漏掉就補不回來：讀數檔讀不到、或寫不成都丟 OSError，由呼叫端下一輪整段重試。"""
+        if left_account is None or left_account.account_id is None or left_account.account_id == arrived_id:
+            return
+        stored = self._managed.read_standby_readings()
+        if stored is None:
+            raise OSError("standby readings unreadable")
+        reading = stored.get(left_account.account_id)
+        if reading is not None:
+            lagging = provider.transcripts_modified_after(self._transcripts, reading.observed_at.timestamp())
+            self._managed.mark_standby_lagging(left_account.account_id, lagging)
 
     def _refresh(self) -> None:
         result = self._read()
@@ -394,16 +409,16 @@ class Core:
             return Card(key, role, ReadingState.NO_READING)
         if owner is None or reading.account_id != owner:
             return Card(key, role, ReadingState.PENDING)
-        return self._reading_card(key, role, reading)
+        return self._reading_card(key, role, reading, self._lagging(reading))
 
     def _standby_card(self, account: _Account) -> Card:
         stored = self._managed.read_standby_readings() or {}
         reading = stored.get(account.account_id) if account.account_id else None
         if reading is None:
             return Card(account.key, Role.STANDBY, ReadingState.NO_READING)
-        return self._reading_card(account.key, Role.STANDBY, reading)
+        return self._reading_card(account.key, Role.STANDBY, reading, self._managed.standby_lagging(account.account_id))
 
-    def _reading_card(self, key: Optional[str], role: Role, reading: provider.UsageReading) -> Card:
+    def _reading_card(self, key: Optional[str], role: Role, reading: provider.UsageReading, lagging: bool) -> Card:
         now = self._clock()
         breakdown = reading.weekly_breakdown
         if breakdown and breakdown.ends_at and not _counting(breakdown.ends_at, now):
@@ -411,7 +426,7 @@ class Core:
         return Card(
             key, role, ReadingState.HAS_READING,
             reading_age=now - reading.observed_at,
-            lagging=role is not Role.STANDBY and self._lagging(reading),
+            lagging=lagging,
             limits=_as_of(self._graded(reading.limits), now),
             scoped_limits=_as_of(self._graded(reading.scoped_limits), now),
             other_limits=_as_of(self._graded(reading.other_limits), now),

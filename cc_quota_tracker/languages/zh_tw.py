@@ -56,6 +56,7 @@ STRINGS = {
     "reading.pending": "讀數待更新，Claude Code 更新額度快取後就會出現",
     "reading.pending_short": "讀數待更新",  # 旁邊有「更新」入口時用，維持單行
     "reading.lagging": "有新對話，額度尚未更新",
+    "reading.lagging_before_switch": "切換前已落後",  # 待命帳號：切換之前，這份讀數就已經落後
     "reading.locked": "額度已鎖定：{reason}",
     "note.observed": "觀測值：觀測之後這個帳號沒再被用過才準確；在別台機器上用過，這台看不到",
     "note.how_to_manage": "這個帳號還沒納管：在 Claude Code 登入它之後執行 {command} add <帳號標籤>，"
