@@ -20,3 +20,4 @@
 - 冷卻從「子行程結束」起算，不是從「讀數寫回」：成功判定後要等 Claude Code 自己結束才回報，正常幾十毫秒，卡住時最久拖到逾時（20 秒）。這段期間看板已是新讀數、`in_progress` 仍為 True。
 - 畫面層未動，GUI 尚未呼叫 `start_query`，由 04 接線；GUI 關閉時還在跑的查詢，關閉輸入後 Claude Code 會自己結束，核心沒有提供主動結束查詢的入口，04 接線時再評估要不要。
 - 測試：`tests/test_usage_query_async.py`；假 `claude` 新增選填的 `gate`（檔案出現前不回應 `get_usage`），讓測試決定查詢何時完成。
+- 結案後補記（2026-10-02）：上面「GUI 關閉時還在跑的查詢……04 接線時再評估要不要」在 04 結案時沒有被接住；已另開 `.scratch/usage-query/issues/09-close-with-query-in-progress.md` 評估。
