@@ -1,5 +1,4 @@
 """核心：接收解析後的路徑與時鐘，對外只有 poll、add、remove。"""
-import json
 import os
 import re
 import time
@@ -15,7 +14,8 @@ from . import usage_query
 from .board import (Board, Card, CountdownFormat, Limit, Preferences, QueryFailure, QueryStatus, ReadingState, Role,
                     Severity, UsageQueryResult)
 from .credstore import FileCredentialStore
-from .managed_directory import STATE_DIR, ManagedDirectory, Observed, mkdir_private, tighten
+from .managed_directory import BindingsUnreadable, ManagedDirectory, Observed, mkdir_private, tighten  # noqa: F401
+# BindingsUnreadable 已搬進納管目錄，核心仍對外匯出，命令列、GUI 與既有測試的匯入路徑不變
 from .settings import (CLAUDE_CONFIG_DIR, COUNTDOWN_FORMAT_FIELD, PathSource, ResolvedPaths, path_fields,
                        read_preferences, read_settings)
 
@@ -67,14 +67,6 @@ class NoCredential(Exception):
     """讀不到目前登入的憑證（尚未登入、或憑證檔讀不懂），無法納管。"""
 
 
-class BindingsUnreadable(Exception):
-    """綁定檔存在但暫時讀不到（例如被防毒或其他程式鎖住）：納管寫回綁定會洗掉其他帳號的綁定，所以整個拒絕。"""
-
-    def __init__(self, path: Path):
-        super().__init__(str(path))
-        self.path = path
-
-
 class UnknownLabel(LookupError):
     """沒有這個帳號標籤的憑證快照。"""
 
@@ -97,7 +89,6 @@ class Core:
         self._countdown_format = CountdownFormat.TWO_UNITS
         self._provider_settings = provider.ProviderSettings()  # 設定檔的 providers.claude
         self._preferences, self._invalid_settings = Preferences(), ()
-        self._bindings = self._managed_dir / STATE_DIR / "bindings.json"
         self._oauth_account_id: Optional[str] = None  # 目前登入帳號的識別碼（oauthAccount），未納管帳號靠它歸屬讀數
         self._clock = clock
         self._mtime: Optional[int] = None
@@ -247,21 +238,15 @@ class Core:
         return self._store(label, data, None)
 
     def _store(self, label: str, data: bytes, account_id: Optional[str]) -> AddResult:
-        bindings = self._load_bindings()
-        if bindings is None:  # 先確認讀得到才寫憑證快照：讀不到就什麼都不動
-            raise BindingsUnreadable(self._bindings)
+        self._managed.check_bindings_readable()  # 先確認讀得到才寫憑證快照：讀不到就什麼都不動
         fixed = mkdir_private(self._managed_dir)
         key = self._write_snapshot(self._snapshot(label), data)
-        if account_id:
-            bindings[key] = {"accountId": account_id}
-        # 沒有識別碼：同一憑證指紋原有的綁定仍然有效；沒有的話留給之後補學。照樣寫回，順帶清掉被換掉的舊憑證指紋
-        # （有其他憑證快照讀不出憑證指紋時不清，留給之後的 poll）
-        self._write_bindings(bindings)
+        # 沒有識別碼：同一憑證指紋原有的綁定仍然有效；沒有的話留給之後補學
+        recorded = self._managed.record_binding(key, account_id)
         # 事後驗證：連同既有的憑證快照一起檢查，不符就修正並告警
-        checked = [self._bindings.parent, self._bindings] + [self._snapshot(l) for l in self._labels()]
-        fixed = any([tighten(p) for p in checked]) or fixed
+        fixed = any([tighten(self._snapshot(l)) for l in self._labels()]) or recorded.permissions_fixed or fixed
         warnings = {AddWarning.PERMISSIONS_FIXED} if fixed else set()
-        if key not in bindings:
+        if not recorded.bound:
             warnings.add(AddWarning.NOT_BOUND)
         if _EMAIL.search(label):
             warnings.add(AddWarning.LABEL_LOOKS_LIKE_EMAIL)
@@ -271,9 +256,7 @@ class Core:
         if label not in self._labels():
             raise UnknownLabel(label)
         atomic.remove(self._snapshot(label))
-        bindings = self._load_bindings()
-        if bindings is not None:  # 讀不到就不寫：留下的孤兒綁定由之後的 poll 清掉
-            self._write_bindings(bindings)
+        self._managed.prune_bindings()  # 綁定檔讀不到就不寫：留下的孤兒綁定由之後的 poll 清掉
 
     def _write_snapshot(self, snapshot: Path, data: bytes) -> str:
         """替換前先驗證暫存檔讀得出憑證指紋：讀到寫到一半的憑證時，既有的憑證快照維持原樣。"""
@@ -288,64 +271,20 @@ class Core:
         atomic.write_atomic(snapshot, data, before_replace=check)
         return keys[0]
 
-    def _read_bindings(self) -> dict:
-        return self._load_bindings() or {}
-
-    def _load_bindings(self) -> Optional[dict]:
-        """讀不到（例如防毒短暫鎖住）回傳 None，不同於沒有或讀不懂的空綁定：後者才可以放心寫回。"""
-        try:
-            bindings = json.loads(self._bindings.read_text(encoding="utf-8"))
-        except FileNotFoundError:
-            return {}
-        except OSError:
-            return None
-        except ValueError:
-            return {}
-        return bindings if isinstance(bindings, dict) else {}
-
-    def _write_bindings(self, bindings: dict) -> None:
-        """綁定以憑證指紋為鍵；只留還有憑證快照對應的憑證指紋，重新納管換掉的舊憑證指紋一併清掉。
-        有憑證快照讀不出憑證指紋（寫到一半、被鎖住）時不修剪綁定與讀數，留給之後的 poll。"""
-        live = {FileCredentialStore(self._snapshot(label)).fingerprint() for label in self._labels()}
-        if None in live:
-            self._write_state(self._bindings, bindings)
-            return
-        kept = {k: v for k, v in bindings.items() if k in live}
-        self._write_state(self._bindings, kept)
-        bound = {v.get("accountId") for v in kept.values() if isinstance(v, dict)}
-        self._managed.prune_standby_readings(bound)  # 移除的帳號，它的讀數一併清掉
-
     def _accounts(self) -> Tuple[_Account, ...]:
-        bindings = self._read_bindings()
-        accounts = []
-        for label in self._labels():
-            snapshot = FileCredentialStore(self._snapshot(label))
-            fingerprint, credential = snapshot.fingerprint(), snapshot.read()
-            bound = bindings.get(fingerprint) if fingerprint else None
-            account_id = bound.get("accountId") if isinstance(bound, dict) else None
-            accounts.append(_Account(f"{provider.PROVIDER}:{label}", fingerprint,
-                                     account_id if isinstance(account_id, str) and account_id else None,
-                                     credential.refresh_token_expires_at if credential else None))
-        return tuple(accounts)
+        return tuple(_Account(f"{provider.PROVIDER}:{a.label}", a.fingerprint, a.account_id, a.expires_at)
+                     for a in self._managed.list_accounts())
 
     def _maintain_bindings(self, accounts: Tuple[_Account, ...]) -> Tuple[_Account, ...]:
         """不經過 add 的綁定維護：直接放進目錄的憑證快照補學綁定，快照被刪掉的孤兒綁定清掉。
-        綁定檔讀不到、有憑證快照讀不出憑證指紋（寫到一半、被鎖住）、或寫不成時，這一輪什麼都不動：
-        寫綁定會依現有的憑證指紋過濾，讀不出來的那份快照的綁定會被一起洗掉。"""
-        bindings = self._load_bindings()
-        if bindings is None or not all(a.fingerprint for a in accounts):
-            return accounts
+        這一輪能不能動（綁定檔讀不到、有憑證快照讀不出憑證指紋）由納管目錄判斷；寫不成時什麼都不動。"""
         target = self._snapshot_to_bind(accounts)
-        has_orphans = bool(set(bindings) - {a.fingerprint for a in accounts})
-        if target is None and not has_orphans:
-            return accounts
-        if target:
-            bindings[target.fingerprint] = {"accountId": self._oauth_account_id}
+        learn = (target.fingerprint, self._oauth_account_id) if target and self._oauth_account_id else None
         try:
-            self._write_bindings(bindings)
+            changed = self._managed.maintain_bindings(learn)
         except OSError:
             return accounts
-        return self._accounts()
+        return self._accounts() if changed else accounts
 
     def _snapshot_to_bind(self, accounts: Tuple[_Account, ...]) -> Optional[_Account]:
         """要補學綁定的憑證快照，沒有就是 None。這份快照本身還沒有綁定，而且三個條件同時成立才補學，缺一就不猜：
@@ -356,6 +295,8 @@ class Core:
         if any(a.account_id == account_id for a in accounts):
             return None
         current = FileCredentialStore(self._credentials).fingerprint()
+        if current is None:
+            return None
         return next((a for a in accounts if a.fingerprint == current and a.account_id is None), None)
 
     def _remember(self, accounts: Tuple[_Account, ...]) -> None:
@@ -405,18 +346,11 @@ class Core:
         flagged = by_fp.get(invalid_snapshot) if current is not None and invalid_snapshot else None
         return flagged, flagged is not None
 
-    def _write_state(self, path: Path, data: dict) -> None:
-        self._managed.write_state(path, data)
-
     def _snapshot(self, label: str) -> Path:
         return self._managed_dir / f"{label}.json"
 
     def _labels(self) -> Tuple[str, ...]:
-        """帳號標籤就是憑證快照的檔名去掉 .json；點開頭的是工具自己的檔案。"""
-        if not self._managed_dir.is_dir():
-            return ()
-        return tuple(sorted(p.stem for p in self._managed_dir.glob("*.json")
-                            if p.is_file() and not p.name.startswith(".")))
+        return self._managed.snapshot_labels()
 
     def _refresh(self) -> None:
         result = self._read()
