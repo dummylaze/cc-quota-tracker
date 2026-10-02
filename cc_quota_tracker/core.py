@@ -7,7 +7,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from enum import Enum
 from pathlib import Path
-from typing import Callable, FrozenSet, NamedTuple, Optional, Set, Tuple
+from typing import Callable, FrozenSet, NamedTuple, Optional, Tuple
 
 from . import atomic
 from . import claude_provider as provider
@@ -98,8 +98,6 @@ class Core:
         self._provider_settings = provider.ProviderSettings()  # 設定檔的 providers.claude
         self._preferences, self._invalid_settings = Preferences(), ()
         self._bindings = self._managed_dir / STATE_DIR / "bindings.json"
-        self._readings_file = self._managed_dir / STATE_DIR / "readings.json"
-        self._readings: Optional[dict] = None  # 帳號識別碼 → 最後一次歸屬給它的讀數；第一次用到才讀檔
         self._oauth_account_id: Optional[str] = None  # 目前登入帳號的識別碼（oauthAccount），未納管帳號靠它歸屬讀數
         self._clock = clock
         self._mtime: Optional[int] = None
@@ -314,10 +312,8 @@ class Core:
             return
         kept = {k: v for k, v in bindings.items() if k in live}
         self._write_state(self._bindings, kept)
-        stored = self._load_readings()
         bound = {v.get("accountId") for v in kept.values() if isinstance(v, dict)}
-        if stored is not None and set(stored) - bound:  # 移除的帳號，它的讀數一併清掉
-            self._write_readings(stored, bound)
+        self._managed.prune_standby_readings(bound)  # 移除的帳號，它的讀數一併清掉
 
     def _accounts(self) -> Tuple[_Account, ...]:
         bindings = self._read_bindings()
@@ -365,34 +361,8 @@ class Core:
     def _remember(self, accounts: Tuple[_Account, ...]) -> None:
         """額度快取的讀數歸屬到某個納管帳號時存進工具狀態：它換成待命帳號、甚至重新啟動後仍看得到。
         只留還有綁定的帳號；有變化才寫檔。"""
-        reading, stored = self._reading, self._load_readings()
-        bound = {a.account_id for a in accounts if a.account_id}
-        if reading is None or stored is None or reading.account_id not in bound:
-            return
-        if stored.get(reading.account_id) == reading:
-            return
-        stored[reading.account_id] = reading
-        self._write_readings(stored, bound)
-
-    def _load_readings(self) -> Optional[dict]:
-        """讀不到（例如防毒短暫鎖住）回傳 None，下一輪再讀；內容讀不懂就當成沒有。"""
-        if self._readings is None:
-            try:
-                raw = json.loads(self._readings_file.read_text(encoding="utf-8"))
-            except FileNotFoundError:
-                raw = {}
-            except OSError:
-                return None
-            except ValueError:
-                raw = {}
-            parsed = {k: provider.parse_cache(cache) for k, cache in raw.items()} if isinstance(raw, dict) else {}
-            self._readings = {k: r for k, r in parsed.items() if isinstance(r, provider.UsageReading)}
-        return self._readings
-
-    def _write_readings(self, readings: dict, bound: Set[str]) -> None:
-        """只留 bound 裡的帳號識別碼；存的是 cachedUsageUtilization 原文，讀回來時再解析。"""
-        self._readings = {k: r for k, r in readings.items() if k in bound}
-        self._write_state(self._readings_file, {k: r.source for k, r in self._readings.items()})
+        if self._reading is not None:
+            self._managed.remember_standby_reading(self._reading, {a.account_id for a in accounts if a.account_id})
 
     def _observe(self, accounts: Tuple[_Account, ...]) -> Tuple[Optional[_Account], bool]:
         """每輪的切換偵測。回傳使用中的納管帳號（未納管為 None），以及它的憑證快照是否已失效。
@@ -536,7 +506,7 @@ class Core:
         return self._reading_card(key, role, reading)
 
     def _standby_card(self, account: _Account) -> Card:
-        stored = self._load_readings() or {}
+        stored = self._managed.read_standby_readings() or {}
         reading = stored.get(account.account_id) if account.account_id else None
         if reading is None:
             return Card(account.key, Role.STANDBY, ReadingState.NO_READING)

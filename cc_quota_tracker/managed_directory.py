@@ -8,15 +8,16 @@
 
 已知限制：GUI 與命令列是兩個程序，同時寫同一個檔案時沒有跨程序的鎖；兩者在同一輪內交錯時，後寫的會蓋掉先寫的。
 
-過渡：綁定、待命讀數與憑證快照還在核心裡，它們用 STATE_DIR、tighten、mkdir_private、
+過渡：綁定與憑證快照還在核心裡，它們用 STATE_DIR、tighten、mkdir_private、
 ManagedDirectory.write_state；隨後續的票搬進來之後，這幾個就收回 module 內部。
 """
 import json
 from datetime import datetime
 from pathlib import Path
-from typing import NamedTuple, Optional, Tuple
+from typing import Dict, NamedTuple, Optional, Set, Tuple
 
 from . import atomic
+from . import claude_provider as provider
 from .permissions import is_private, make_private
 
 STATE_DIR = ".state"  # 納管目錄底下放工具狀態的子目錄，與憑證快照分開
@@ -54,6 +55,8 @@ class ManagedDirectory:
         self._observed = self._state_dir / "observed.json"  # 最後運作時間與上一輪的觀測
         self._switch_log = self._state_dir / "switches.jsonl"
         self._window_position = self._state_dir / "window.json"
+        self._readings_file = self._state_dir / "readings.json"  # 待命帳號的最後讀數
+        self._readings: Optional[Dict[str, provider.UsageReading]] = None  # 第一次用到才讀檔
 
     def read_observed(self) -> Optional[Observed]:
         """讀不到回傳 None（呼叫端這一輪不判定）；不存在或讀不懂就當成沒有上一輪。"""
@@ -73,6 +76,37 @@ class ManagedDirectory:
         line = json.dumps({"at": at.isoformat(), "accountId": account_id, "source": "observed"})
         atomic.append(self._switch_log, (line + "\n").encode("utf-8"),
                       before_replace=lambda tmp: tighten(tmp, new=True))
+
+    def read_standby_readings(self) -> Optional[Dict[str, provider.UsageReading]]:
+        """帳號識別碼 → 最後一次歸屬給它的讀數。讀不到回傳 None（下一次再讀）；不存在或讀不懂就當成沒有，
+        單筆讀不懂的略過。讀到之後由 module 在記憶體保管，不再回頭讀檔。"""
+        if self._readings is None:
+            state = self._read_state(self._readings_file)
+            if state is None:
+                return None
+            parsed = {k: provider.parse_cache(cache) for k, cache in state.items()}
+            self._readings = {k: r for k, r in parsed.items() if isinstance(r, provider.UsageReading)}
+        return self._readings
+
+    def remember_standby_reading(self, reading: provider.UsageReading, bound: Set[str]) -> None:
+        """額度快取的讀數歸屬到某個綁定的帳號時記下來，並只留 bound 裡的帳號；沒變就不寫。
+        讀數檔讀不到時什麼都不寫，下一輪再試。寫不成就丟 OSError，檔案維持原樣。"""
+        stored = self.read_standby_readings()
+        if stored is None or reading.account_id not in bound or stored.get(reading.account_id) == reading:
+            return
+        self._write_readings({**stored, reading.account_id: reading}, bound)
+
+    def prune_standby_readings(self, bound: Set[str]) -> None:
+        """只留 bound 裡的帳號的讀數；讀數檔讀不到、沒有要清的就不寫。過渡：綁定維護搬進來後併入它。"""
+        stored = self.read_standby_readings()
+        if stored is not None and set(stored) - bound:
+            self._write_readings(stored, bound)
+
+    def _write_readings(self, readings: Dict[str, provider.UsageReading], bound: Set[str]) -> None:
+        """存的是 cachedUsageUtilization 原文，讀回來時再解析。寫成了才換記憶體裡的版本。"""
+        kept = {k: r for k, r in readings.items() if k in bound}
+        self.write_state(self._readings_file, {k: r.source for k, r in kept.items()})
+        self._readings = kept
 
     def read_window_position(self) -> Optional[Tuple[int, int]]:
         """讀不到、不存在或讀不懂都回傳 None（視窗回到預設位置，不必區分原因）。"""

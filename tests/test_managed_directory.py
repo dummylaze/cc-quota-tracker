@@ -7,8 +7,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from unittest import mock
 
+from cc_quota_tracker import claude_provider as provider
 from cc_quota_tracker.managed_directory import ManagedDirectory, Observed
-from tests.fakehome import HomeTestCase, WindowsAclAssertions
+from tests.fakehome import HomeTestCase, WindowsAclAssertions, usage_cache
 
 AT = datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc)
 
@@ -187,6 +188,144 @@ class WriteWindowPositionTest(ManagedDirectoryTestCase):
             self.managed.write_window_position(3, 4)
         self.assertTrue(self.managed.write_window_position(3, 4))
         self.assertEqual(self.stored(), {"x": 3, "y": 4})
+
+
+def reading(account_id, **cache):
+    """像 Claude Code 寫進額度快取那樣的讀數；source 是解析來源，存進讀數檔的就是它。"""
+    result = provider.parse_cache(usage_cache(account_uuid=account_id, **cache))
+    assert isinstance(result, provider.UsageReading)
+    return result
+
+
+class StandbyReadingsTestCase(ManagedDirectoryTestCase):
+    def setUp(self):
+        super().setUp()
+        self.readings_file = self.path / ".state" / "readings.json"
+
+    def stored(self):
+        return json.loads(self.readings_file.read_text(encoding="utf-8"))
+
+
+class ReadStandbyReadingsTest(StandbyReadingsTestCase):
+    def test_missing_file_reads_as_empty(self):
+        self.assertEqual(self.managed.read_standby_readings(), {})
+
+    def test_unparsable_content_reads_as_empty(self):
+        self.put(self.readings_file, "{broken")
+        self.assertEqual(self.managed.read_standby_readings(), {})
+
+    def test_content_that_is_not_an_object_reads_as_empty(self):
+        self.put(self.readings_file, "[1, 2]")
+        self.assertEqual(self.managed.read_standby_readings(), {})
+
+    def test_entries_that_cannot_be_parsed_are_left_out(self):
+        self.put(self.readings_file, json.dumps({"acct-1": usage_cache(account_uuid="acct-1"), "acct-2": {"x": 1},
+                                                 "acct-3": "nonsense"}))
+        self.assertEqual(set(self.managed.read_standby_readings()), {"acct-1"})
+
+    def test_file_written_before_the_move_into_the_module_is_readable(self):
+        cache = usage_cache(account_uuid="acct-1", session=70)
+        self.put(self.readings_file, json.dumps({"acct-1": cache}, indent=2))
+        stored = self.managed.read_standby_readings()
+        self.assertEqual(stored["acct-1"], provider.parse_cache(cache))
+        self.assertEqual(stored["acct-1"].limits[0].percent, 70)
+
+    def test_locked_file_reads_as_unknown(self):
+        self.put(self.readings_file, json.dumps({"acct-1": usage_cache(account_uuid="acct-1")}))
+        with HomeTestCase.locked("readings.json"):
+            self.assertIsNone(self.managed.read_standby_readings())
+
+    def test_a_lock_that_is_gone_reads_the_file_next_time(self):
+        self.put(self.readings_file, json.dumps({"acct-1": usage_cache(account_uuid="acct-1")}))
+        with HomeTestCase.locked("readings.json"):
+            self.managed.read_standby_readings()
+        self.assertEqual(set(self.managed.read_standby_readings()), {"acct-1"})
+
+    def test_file_is_read_once_and_the_module_keeps_the_readings(self):
+        self.put(self.readings_file, json.dumps({"acct-1": usage_cache(account_uuid="acct-1")}))
+        self.managed.read_standby_readings()
+        with HomeTestCase.locked("readings.json"):
+            self.assertEqual(set(self.managed.read_standby_readings()), {"acct-1"})
+
+
+class RememberStandbyReadingTest(StandbyReadingsTestCase):
+    def test_remembered_reading_is_written_in_the_existing_format_and_reads_back(self):
+        r = reading("acct-1", session=33)
+        self.managed.remember_standby_reading(r, {"acct-1"})
+        self.assertEqual(self.stored(), {"acct-1": usage_cache(account_uuid="acct-1", session=33)})
+        self.assertEqual(self.managed.read_standby_readings(), {"acct-1": r})
+        self.assertEqual(ManagedDirectory(self.path).read_standby_readings(), {"acct-1": r})  # 重新啟動後
+
+    def test_reading_of_an_account_without_a_binding_is_not_remembered(self):
+        self.managed.remember_standby_reading(reading("acct-x"), {"acct-1"})
+        self.assertFalse(self.readings_file.exists())
+
+    def test_same_reading_again_does_not_write(self):
+        r = reading("acct-1")
+        self.managed.remember_standby_reading(r, {"acct-1"})
+        with mock.patch("cc_quota_tracker.atomic.os.replace", side_effect=PermissionError("locked")):
+            self.managed.remember_standby_reading(r, {"acct-1"})  # 要寫就會丟例外
+
+    def test_remembering_keeps_only_bound_accounts(self):
+        self.put(self.readings_file, json.dumps({"acct-1": usage_cache(account_uuid="acct-1"),
+                                                 "acct-gone": usage_cache(account_uuid="acct-gone")}))
+        self.managed.remember_standby_reading(reading("acct-2"), {"acct-1", "acct-2"})
+        self.assertEqual(set(self.stored()), {"acct-1", "acct-2"})
+
+    def test_locked_file_writes_nothing_and_leaves_the_bytes_untouched(self):
+        self.put(self.readings_file, json.dumps({"acct-1": usage_cache(account_uuid="acct-1")}))
+        before = self.readings_file.read_bytes()
+        with HomeTestCase.locked("readings.json"):
+            self.managed.remember_standby_reading(reading("acct-2"), {"acct-1", "acct-2"})
+        self.assertEqual(self.readings_file.read_bytes(), before)
+        self.assertEqual(list(self.readings_file.parent.glob("*.tmp")), [])
+
+    def test_failed_write_raises_and_keeps_the_file_as_it_was(self):
+        self.managed.remember_standby_reading(reading("acct-1", session=1), {"acct-1", "acct-2"})
+        before = self.readings_file.read_bytes()
+        with mock.patch("cc_quota_tracker.atomic.os.replace", side_effect=PermissionError("locked")):
+            with self.assertRaises(OSError):
+                self.managed.remember_standby_reading(reading("acct-2"), {"acct-1", "acct-2"})
+        self.assertEqual(self.readings_file.read_bytes(), before)
+        self.assertEqual(list(self.readings_file.parent.glob("*.tmp")), [])
+
+    def test_failed_write_is_tried_again_next_time(self):
+        r = reading("acct-1")
+        with mock.patch("cc_quota_tracker.atomic.os.replace", side_effect=PermissionError("locked")):
+            with self.assertRaises(OSError):
+                self.managed.remember_standby_reading(r, {"acct-1"})
+        self.managed.remember_standby_reading(r, {"acct-1"})
+        self.assertEqual(set(self.stored()), {"acct-1"})
+
+
+class PruneStandbyReadingsTest(StandbyReadingsTestCase):
+    def test_readings_of_accounts_no_longer_bound_are_dropped(self):
+        self.put(self.readings_file, json.dumps({"acct-1": usage_cache(account_uuid="acct-1"),
+                                                 "acct-2": usage_cache(account_uuid="acct-2")}))
+        self.managed.prune_standby_readings({"acct-2"})
+        self.assertEqual(set(self.stored()), {"acct-2"})
+        self.assertEqual(set(self.managed.read_standby_readings()), {"acct-2"})
+
+    def test_nothing_to_drop_does_not_write(self):
+        self.put(self.readings_file, json.dumps({"acct-1": usage_cache(account_uuid="acct-1")}))
+        before = self.readings_file.read_bytes()
+        with mock.patch("cc_quota_tracker.atomic.os.replace", side_effect=PermissionError("locked")):
+            self.managed.prune_standby_readings({"acct-1", "acct-2"})
+        self.assertEqual(self.readings_file.read_bytes(), before)
+
+    def test_locked_file_is_not_pruned(self):
+        self.put(self.readings_file, json.dumps({"acct-1": usage_cache(account_uuid="acct-1")}))
+        before = self.readings_file.read_bytes()
+        with HomeTestCase.locked("readings.json"):
+            self.managed.prune_standby_readings(set())
+        self.assertEqual(self.readings_file.read_bytes(), before)
+
+
+@unittest.skipUnless(sys.platform == "win32", "Windows ACL")
+class StandbyReadingsPermissionTest(StandbyReadingsTestCase, WindowsAclAssertions):
+    def test_readings_file_is_private(self):
+        self.managed.remember_standby_reading(reading("acct-1"), {"acct-1"})
+        self.assert_private(self.readings_file)
 
 
 @unittest.skipUnless(sys.platform == "win32", "Windows ACL")
