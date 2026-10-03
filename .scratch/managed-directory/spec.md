@@ -1,6 +1,6 @@
 # 納管目錄 module
 
-Status: ready-for-agent
+Status: resolved
 
 ## 問題陳述（Problem Statement）
 
