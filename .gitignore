@@ -3,8 +3,8 @@
 /*.txt
 !/README.md
 !/README.*.md
-!/CONTEXT.md
-!/CONTEXT-MAP.md
+!/GLOSSARY.md
+!/GLOSSARY-MAP.md
 
 # ---- Local-only (never published) ----
 /notes/
@@ -12,6 +12,9 @@
 /.claude/
 /.agents/
 /skills-lock.json
+
+# ---- Code index (local) ----
+/.codegraph/
 
 # ---- Credentials ----
 .credentials.json
