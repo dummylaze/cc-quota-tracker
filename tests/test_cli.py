@@ -116,6 +116,38 @@ class CliTest(CliTestCase):
                 self.assertEqual(code, 2)
                 self.assertIn(f"{COMMAND} add <帳號標籤>", err)
 
+    def test_help_flags_print_usage_to_stdout_and_succeed(self):
+        for flag in ("--help", "-h"):
+            with self.subTest(flag=flag):
+                code, out, err = self.run_cli(flag)
+                self.assertEqual(code, 0)
+                self.assertIn(f"{COMMAND} add <帳號標籤>", out)
+                self.assertEqual(err, "")
+
+    def test_help_prints_the_same_text_as_a_mistyped_command(self):
+        for tag in ("zh-TW", "en-US"):
+            with self.subTest(language=tag):
+                _, help_out, _ = self.run_cli("--help", system_language=tag)
+                _, _, usage_err = self.run_cli("nope", system_language=tag)
+                self.assertEqual(help_out, usage_err)
+
+    def test_help_does_not_resolve_paths(self):
+        self.write_settings(claudeConfigDir="relative", managedDir=str(self.home / "unplugged"))
+        for flag in ("--help", "-h"):
+            with self.subTest(flag=flag):
+                code, out, err = self.run_cli(flag)
+                self.assertEqual(code, 0)
+                self.assertIn(f"{COMMAND} add <帳號標籤>", out)
+                self.assertEqual(err, "")
+
+    def test_help_flag_with_other_arguments_is_still_bad_usage(self):
+        for args in [("--help", "x"), ("list", "-h"), ("check", "--help"), ("gui", "-h"), ("-h", "-h")]:
+            with self.subTest(args=args):
+                code, out, err = self.run_cli(*args)
+                self.assertEqual(code, 2)
+                self.assertEqual(out, "")
+                self.assertIn(f"{COMMAND} add", err)
+
 
 class CliLanguageTest(CliTestCase):
     """命令列的文案語系與視窗一致：設定檔的 language，跟隨系統時取作業系統的語系，不支援時英文。"""

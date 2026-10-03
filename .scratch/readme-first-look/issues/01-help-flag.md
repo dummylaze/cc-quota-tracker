@@ -4,13 +4,13 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] `python -m cc_quota_tracker --help` 與 `-h`：用法印到 stdout，結束代碼 0，stderr 沒有輸出
-- [ ] 用法文字與現在打錯指令時印的完全相同（同一個語系字串，跟著設定的介面語言）
-- [ ] 不帶參數、不認得的指令、參數數量不對：行為不變（stderr、結束代碼 2）
-- [ ] `--help` 不解析路徑：設定檔的路徑欄位壞掉時，`--help` 仍印出用法、結束代碼 0
-- [ ] 有測試涵蓋上面四條
+- [x] `python -m cc_quota_tracker --help` 與 `-h`：用法印到 stdout，結束代碼 0，stderr 沒有輸出
+- [x] 用法文字與現在打錯指令時印的完全相同（同一個語系字串，跟著設定的介面語言）
+- [x] 不帶參數、不認得的指令、參數數量不對：行為不變（stderr、結束代碼 2）
+- [x] `--help` 不解析路徑：設定檔的路徑欄位壞掉時，`--help` 仍印出用法、結束代碼 0
+- [x] 有測試涵蓋上面四條
 
 ## Comments
 
@@ -37,3 +37,8 @@
 - 子指令的 `--help`（例如 `add --help`）：維持現狀，當作參數數量不對
 - 改用 `argparse` 或改寫用法文字
 - README 怎麼寫 `--help`：由 `02` 處理
+
+### 實作紀錄（2026-10-03）
+
+- 第 2 條「跟著設定的介面語言」：實作與打錯指令時相同，用 `configured_language(None)`（還沒解析路徑，讀不到設定檔的 `language`，只跟隨系統語系），照 Agent Brief 的解讀。設定檔 `language` 與系統語系不同時，`--help` 與打錯指令一樣取系統語系。
+- 子指令的 `--help`：`add`、`remove` 帶一個參數在數量上合法，`add --help` 現狀是把 `--help` 當標籤，沒有改動；測試以 `list -h`、`check --help`、`gui -h`、`--help x`、`-h -h` 驗證「帶額外參數仍是 stderr、結束代碼 2」。

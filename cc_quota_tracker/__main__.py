@@ -39,6 +39,9 @@ def configured_language(settings_file: Optional[Path]) -> str:
 def main(argv=None) -> int:
     args = sys.argv[1:] if argv is None else argv
     command, params = (args[0], args[1:]) if args else (None, [])
+    if (command, len(params)) in {("--help", 0), ("-h", 0)}:  # 使用者主動要用法：stdout、成功
+        print(text(configured_language(None), "cli.usage", command=COMMAND))
+        return 0
     if (command, len(params)) not in {("add", 1), ("remove", 1), ("list", 0), ("query", 0), ("check", 0), ("gui", 0)}:
         print(text(configured_language(None), "cli.usage", command=COMMAND), file=sys.stderr)  # 還沒解析路徑，讀不到設定檔
         return 2
