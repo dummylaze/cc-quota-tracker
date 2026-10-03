@@ -135,8 +135,9 @@ class HomeTestCase(unittest.TestCase):
         path.parent.mkdir(exist_ok=True)
         oauth = {"accessToken": access, "refreshToken": refresh,
                  "expiresAt": int(expires_at.timestamp() * 1000),
-                 "refreshTokenExpiresAt": int(refresh_expires_at.timestamp() * 1000),
                  "scopes": ["user:inference"], "subscriptionType": "max", "rateLimitTier": "tier"}
+        if refresh_expires_at is not None:  # 傳 None：憑證裡沒有 refreshToken 的到期時間
+            oauth["refreshTokenExpiresAt"] = int(refresh_expires_at.timestamp() * 1000)
         path.write_text(json.dumps({"claudeAiOauth": oauth}), encoding="utf-8")
         return path
 

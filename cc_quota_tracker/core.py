@@ -279,6 +279,7 @@ class Core:
 
     def _observe(self, accounts: Tuple[_Account, ...]) -> Tuple[Optional[_Account], bool]:
         """每輪的切換偵測。回傳使用中的納管帳號（未納管為 None），以及它的憑證快照是否已失效。
+        當前指紋對不上任何憑證快照時，看 oauthAccount 的識別碼綁給哪份憑證快照：有就是那個帳號、快照已失效。
         上一輪的憑證指紋與失效標記存在工具狀態，重新啟動後接著比對；第一次運作也算一次切換。
         讀不到當前憑證（寫到一半、登出）時不動：不記錄，也不覆蓋上一輪的憑證指紋。"""
         current = FileCredentialStore(self._credentials).fingerprint()
@@ -306,6 +307,10 @@ class Core:
                 switched, account_id, left_account = True, self._oauth_account_id, flagged
         if switched or current in by_fp:
             invalid_snapshot = None
+        if current is not None and current not in by_fp:
+            stale = self._stale_snapshot(accounts)
+            if stale is not None:  # 判定只看識別碼綁給誰，不看前一個使用中帳號；是不是切換已在上面判完
+                invalid_snapshot = stale.fingerprint
         try:
             if switched:
                 self._mark_lagging_before_switch(left_account, account_id)
@@ -318,6 +323,17 @@ class Core:
             return by_fp[current], False
         flagged = by_fp.get(invalid_snapshot) if current is not None and invalid_snapshot else None
         return flagged, flagged is not None
+
+    def _stale_snapshot(self, accounts: Tuple[_Account, ...]) -> Optional[_Account]:
+        """oauthAccount 的識別碼綁定的憑證快照，沒有就是 None（識別碼讀不到、或沒綁給任何憑證快照）。
+        綁了多份時只取到期最晚的那份；到期相同或都沒有到期時間，取帳號鍵排序在前的。"""
+        account_id = self._oauth_account_id
+        if account_id is None:
+            return None
+        bound = [a for a in accounts if a.account_id == account_id and a.fingerprint]
+        # min 取排序最前：到期越晚越前（沒有到期時間墊底），再來是帳號鍵
+        return min(bound, key=lambda a: (-a.expires_at.timestamp() if a.expires_at else float("inf"), a.key),
+                   default=None)
 
     def _mark_lagging_before_switch(self, left_account: Optional[_Account], arrived_id: Optional[str]) -> None:
         """切換的那一輪：離開的帳號存著的讀數，不管距離上次掃描多久都重新判斷一次落後（切換前最後一分鐘的對話也算），

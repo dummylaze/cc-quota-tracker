@@ -2,11 +2,12 @@ import json
 import os
 import sys
 import unittest
+from datetime import timedelta
 
 from cc_quota_tracker import COMMAND
 from cc_quota_tracker.board import Role
 from cc_quota_tracker.render_text import render
-from tests.fakehome import HomeTestCase, WindowsAclAssertions
+from tests.fakehome import NOW, HomeTestCase, WindowsAclAssertions
 
 
 class SwitchTestCase(HomeTestCase):
@@ -201,6 +202,139 @@ class RotationTest(SwitchTestCase):
         text = render(self.core.poll())
         self.assertIn("憑證快照已失效", text)
         self.assertIn(f"{COMMAND} add work", text)
+
+
+class ReloginTest(SwitchTestCase):
+    """先登入別的帳號、再以新的 refreshToken 重新登入已納管的帳號：指紋對不上任何憑證快照，識別碼卻綁著 B。"""
+    def setUp(self):
+        super().setUp()
+        self.manage("a", "rt-a", "acct-a")
+        self.manage("b", "rt-b", "acct-b")
+        self.log_in(refresh="rt-a", account_uuid="acct-a")
+        self.core.poll()
+        self.snapshot = (self.home / ".claude-multi" / "b.json").read_bytes()
+
+    def relogin_b(self):
+        self.log_in(refresh="rt-b2", account_uuid="acct-b")
+
+    def test_active_card_is_the_bound_account_flagged_invalid(self):
+        self.relogin_b()
+        board = self.core.poll()
+        self.assertEqual([(c.account_key, c.role, c.snapshot_invalid) for c in board.cards],
+                         [("claude:b", Role.ACTIVE, True), ("claude:a", Role.STANDBY, False)])
+
+    def test_list_shows_invalid_and_how_to_manage_again(self):
+        self.relogin_b()
+        text = render(self.core.poll())
+        self.assertIn("憑證快照已失效", text)
+        self.assertIn(f"{COMMAND} add b", text)
+
+    def test_logs_one_switch_for_the_bound_id_and_not_again(self):
+        lines = self.poll_after(self.relogin_b)
+        self.assertEqual([line["accountId"] for line in lines], ["acct-b"])
+        self.assertEqual(self.poll_after(self.core.poll, self.core.poll), [])
+
+    def test_flag_stays_on_later_rounds_and_after_restart(self):
+        self.relogin_b()
+        self.core.poll()
+        self.start()
+        self.assertEqual(self.new_lines(self.core.poll), [])
+        self.assertTrue(self.cards()["claude:b"].snapshot_invalid)
+
+    def test_rotation_of_the_active_account_is_still_not_a_switch(self):
+        self.relogin_b()
+        self.core.poll()
+        self.assertEqual(self.poll_after(lambda: self.write_credentials(refresh="rt-b3")), [])
+        self.assertTrue(self.cards()["claude:b"].snapshot_invalid)
+
+    def test_credential_written_before_oauth_account_is_treated_as_rotation(self):
+        """空窗：憑證先寫、oauthAccount 還是 acct-a，這一輪當作 A 被輪替；跟上的下一輪改判為切換、旗標移到 B。"""
+        self.write_credentials(refresh="rt-b2")
+        self.assertEqual(self.poll_after(), [])
+        self.assertTrue(self.cards()["claude:a"].snapshot_invalid)
+        lines = self.poll_after(lambda: self.write_claude_json(
+            {"oauthAccount": {"accountUuid": "acct-b", "emailAddress": "someone@example.com"}}))
+        self.assertEqual([line["accountId"] for line in lines], ["acct-b"])
+        cards = self.cards()
+        self.assertEqual((cards["claude:b"].role, cards["claude:b"].snapshot_invalid), (Role.ACTIVE, True))
+        self.assertFalse(cards["claude:a"].snapshot_invalid)
+
+    def test_unreadable_oauth_account_adds_no_flag(self):
+        self.write_credentials(refresh="rt-x")
+        self.paths.claude_json.unlink()
+        cards = self.cards()
+        self.assertEqual(cards[None].role, Role.UNMANAGED)
+        self.assertFalse(any(c.snapshot_invalid for c in cards.values()))
+
+    def test_unbound_oauth_account_is_still_unmanaged(self):
+        self.log_in(refresh="rt-x", account_uuid="acct-x")
+        cards = self.cards()
+        self.assertEqual(cards[None].role, Role.UNMANAGED)
+        self.assertFalse(any(c.snapshot_invalid for c in cards.values()))
+
+    def test_managing_again_clears_the_flag_without_a_switch(self):
+        self.relogin_b()
+        self.core.poll()
+        self.assertEqual(self.poll_after(lambda: self.core.add("b")), [])
+        card = self.cards()["claude:b"]
+        self.assertEqual((card.role, card.snapshot_invalid), (Role.ACTIVE, False))
+
+    def test_snapshot_file_is_not_written(self):
+        self.relogin_b()
+        self.core.poll()
+        self.core.poll()
+        self.assertEqual((self.home / ".claude-multi" / "b.json").read_bytes(), self.snapshot)
+
+    def test_state_left_by_the_old_version_is_judged_without_a_switch(self):
+        """舊版把這個情境存成「沒有旗標、當前指紋是新的」：升級後下一輪就改判，不補寫紀錄。"""
+        self.relogin_b()
+        observed = self.state_dir() / "observed.json"
+        self.core.poll()
+        data = json.loads(observed.read_text(encoding="utf-8"))
+        data.pop("invalidSnapshot", None)
+        observed.write_text(json.dumps(data), encoding="utf-8")
+        self.start()
+        self.assertEqual(self.new_lines(self.core.poll), [])
+        self.assertTrue(self.cards()["claude:b"].snapshot_invalid)
+
+
+class ReloginManySnapshotsTest(SwitchTestCase):
+    """同一個識別碼綁了多份憑證快照：只標到期最晚的那份。"""
+    def manage_expiring(self, label, refresh, account_uuid, days):
+        self.write_credentials(refresh=refresh, refresh_expires_at=NOW + timedelta(days=days))
+        self.write_claude_json({"oauthAccount": {"accountUuid": account_uuid, "emailAddress": "someone@example.com"}})
+        self.core.add(label)
+
+    def relogin(self):
+        self.log_in(refresh="rt-new", account_uuid="acct-b")
+        return self.core.poll()
+
+    def flagged(self, board):
+        return [c.account_key for c in board.cards if c.snapshot_invalid]
+
+    def test_only_the_latest_expiry_is_flagged_and_the_other_stays_standby(self):
+        self.manage_expiring("b-old", "rt-b1", "acct-b", 10)
+        self.manage_expiring("b-new", "rt-b2", "acct-b", 25)
+        self.manage_expiring("a", "rt-a", "acct-a", 20)
+        self.log_in(refresh="rt-a", account_uuid="acct-a")
+        self.core.poll()
+        board = self.relogin()
+        self.assertEqual(self.flagged(board), ["claude:b-new"])
+        self.assertEqual(board.cards[0].account_key, "claude:b-new")
+        self.assertEqual({c.account_key: c.role for c in board.cards[1:]},
+                         {"claude:a": Role.STANDBY, "claude:b-old": Role.STANDBY})
+        self.assertIn(f"{COMMAND} add b-new", render(board))
+
+    def test_tie_goes_to_the_label_that_sorts_first(self):
+        self.manage_expiring("b-2", "rt-b2", "acct-b", 25)
+        self.manage_expiring("b-1", "rt-b1", "acct-b", 25)
+        self.assertEqual(self.flagged(self.relogin()), ["claude:b-1"])
+
+    def test_one_with_an_expiry_beats_one_without(self):
+        self.manage_expiring("b-1", "rt-b1", "acct-b", 25)
+        self.write_credentials(refresh="rt-b2", refresh_expires_at=None)
+        self.core.add("b-0")
+        self.assertEqual(self.flagged(self.relogin()), ["claude:b-1"])
 
 
 class LastRunTest(SwitchTestCase):
