@@ -314,20 +314,21 @@ class LayoutC:
         self._p.fonts.clear()  # tkfont.Font 被回收時會刪掉對應的具名字型
         self._cells.fit(0)
 
-    def render(self, board: Board, theme: str, expanded: bool = False, lang: str = ZH_TW):
-        """lang 的預設值只給不在意語系的呼叫端（測試）；視窗每輪都明確傳入。"""
+    def render(self, board: Board, theme: str, expanded: bool = False, lang: str = ZH_TW,
+               stalled_text: Optional[str] = None):
+        """lang 的預設值只給不在意語系的呼叫端（測試）；視窗每輪都明確傳入。stalled_text：停止更新的橫幅文字（見 canvas_text.stalled_banner）。"""
         p, c = self._p, THEMES[theme]
         p.lang = lang
         pad, inset, cell_w, gap = p.px("panel_pad"), p.px("row_inset"), p.px("ring_cell_width"), p.px("card_gap")
         content = _COLUMNS * cell_w + (_COLUMNS - 1) * gap if expanded else p.px("ring_compact_width")
         width = content + 2 * inset
-        top = self._banner_box(board, c, pad, pad, width)
+        top = self._banner_box(board, c, pad, pad, width, stalled_text)
         cards = board.cards if expanded else board.cards[:1]  # 核心保證第一張是使用中帳號（或未納管帳號）
         cells = self._cells.fit(len(cards))
         left = pad + inset
         note_left, note_right = left + p.px("ring_cell_pad"), left + content - p.px("ring_cell_pad")  # 對齊格子的內容
         first_x = left if expanded else left + (content - cell_w) / 2  # 精簡模式的一格置中
-        y = top + inset
+        y = row_bottom = top + inset  # 沒有卡片（從沒完成過一輪就停止更新）時只剩空框
         for start in range(0, len(cards), _COLUMNS):
             row = list(zip(cells[start:start + _COLUMNS], cards[start:start + _COLUMNS]))
             xs = [first_x + i * (cell_w + gap) for i in range(len(row))]
@@ -349,8 +350,8 @@ class LayoutC:
         p.rrect(self._panel, 0, 0, total_w, total_h, RADIUS["panel"], c["panel"])
         self.cv.configure(width=total_w, height=total_h)
 
-    def _banner_box(self, board: Board, c, x, y, width):
-        lines = banner_lines(board, self._p.lang, self._p.fonts.missing)
+    def _banner_box(self, board: Board, c, x, y, width, stalled_text):
+        lines = banner_lines(board, self._p.lang, self._p.fonts.missing, stalled_text)
         if not lines:
             self._p.hide(self._banner_bg)
             self._banner.hide()

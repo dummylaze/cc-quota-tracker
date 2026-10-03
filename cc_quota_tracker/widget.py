@@ -9,12 +9,14 @@ import subprocess
 import sys
 import tkinter as tk
 from dataclasses import replace
+from datetime import datetime, timezone
 from pathlib import Path
 from tkinter import filedialog, messagebox, simpledialog
 from typing import Callable, Optional, Tuple
 
 from . import i18n
 from .board import Board, Preferences
+from .canvas_text import stalled_banner
 from .core import BindingsUnreadable, InvalidLabel, NoCredential
 from .entry import CLICKABLE_TAG
 from .layout_a import LayoutA
@@ -30,6 +32,7 @@ from .tokens import TRANSPARENT_KEY
 
 POLL_MS = 5000  # 固定值，不開放設定
 QUERY_POLL_MS = 500  # 固定值：查詢進行中縮短間隔，查完的新讀數才不必再等一整輪（查詢最久 20 秒，這段期間最多多 poll 約 40 次）
+STALL_ROUNDS = 12  # 固定值：連續這麼多輪沒有完成（約 1 分鐘）才亮停止更新橫幅
 DEFAULT_POSITION = (40, 40)  # 主螢幕上的位置：第一次啟動，或上次的位置已經不在任何螢幕內
 _GRIP = 20  # 判斷位置在不在螢幕內時，看視窗左上角往內這麼多的那一點：要拖得到視窗才算在螢幕內
 _TITLE = "cc-quota-tracker"
@@ -87,17 +90,22 @@ class Widget:
     def __init__(self, root: tk.Tk, core, paths: ResolvedPaths,
                  on_screen: Optional[Callable[[int, int], bool]] = None,
                  system_theme: Callable[[], str] = windows_app_theme, autostart=None,
-                 system_language: Callable[[], Optional[str]] = i18n.system_tag):
+                 system_language: Callable[[], Optional[str]] = i18n.system_tag,
+                 clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc)):
         """core 提供 poll、add、import_snapshot；paths 是啟動時解析的路徑，設定檔與納管目錄都取自它。
         system_theme 回傳系統目前的深淺色，主題選「跟隨系統」時每次渲染都問一次。
         autostart 提供 is_enabled、enable、disable；None 表示這個平台沒有開機自動啟動，選單就不放這一項。
-        system_language 回傳作業系統的語系標籤（例如 zh-TW），語系選「跟隨系統」時每次渲染都問一次。"""
+        system_language 回傳作業系統的語系標籤（例如 zh-TW），語系選「跟隨系統」時每次渲染都問一次。
+        clock 回傳目前時間，停止更新橫幅以它算最後一次完成一輪是多久前。"""
         self.root = root
         self._core = core
         self._autostart = autostart
         self._paths = paths
         self._system_theme = system_theme
         self._system_language = system_language
+        self._clock = clock
+        self._missed = 0  # 連續沒有完成的輪數；到 STALL_ROUNDS 就亮停止更新橫幅
+        self._done_at: Optional[datetime] = None  # 最後一次完成一輪的時間；None 表示啟動後從沒完成過
         self._lang = i18n.resolve("system", system_language())  # 目前套用中的語系；第一次套用偏好時會校正
         self._menu_labels = []  # (選單, 項目序號, 語系鍵)：換語系時逐項改字，選單本身不重建
         self._managed = ManagedDirectory(paths.managed_dir)
@@ -257,9 +265,12 @@ class Widget:
         self.sync_autostart()  # 寫不進去時勾選不能停在使用者剛點的那一邊
 
     def refresh(self):
-        """poll 一次並渲染，再排下一輪；排程永遠只有一個。這一輪出錯也照樣排下一輪，視窗才不會就此凍結。"""
+        """poll 一次並渲染，再排下一輪；排程永遠只有一個。這一輪出錯也照樣排下一輪，視窗才不會就此凍結。
+        重試寫回設定檔、poll、渲染任一步丟出例外都算這一輪沒有完成：例外不往外丟（由 Tk 排程呼叫時，pythonw 下沒人看得到；
+        由選單或按鈕直接呼叫時，會丟回它們的處理函式），畫面維持最後一次成功的看板，連續 STALL_ROUNDS 輪才亮停止更新橫幅。"""
         if self._after is not None:
             self.root.after_cancel(self._after)
+        missed, self._missed = self._missed, 0  # 先當成會完成：完成的這一輪渲染時橫幅就已熄滅
         try:
             # 先重試寫不進去的改動再 poll：這一輪讀到的設定檔就已經包含它們
             self._unwritten = {f: v for f, v in self._unwritten.items() if not self._write(f, v)}
@@ -268,6 +279,14 @@ class Widget:
                 self._in_memory.clear()
             pending = {**self._in_memory, **self._unwritten}
             self._apply(replace(self._board.preferences, **{_ATTRS[f]: v for f, v in pending.items()}))
+            self._done_at = self._clock()
+        except Exception:
+            self._missed = missed + 1
+            if self._missed >= STALL_ROUNDS:
+                try:
+                    self._apply(self._prefs or Preferences())  # 從沒套用過偏好時用預設值，才有版面可以亮橫幅
+                except Exception:
+                    pass  # 渲染本身就是出錯的那一步：盡力而為，下一輪再試
         finally:
             querying = self._board is not None and self._board.usage_query.in_progress
             self._after = self.root.after(QUERY_POLL_MS if querying else POLL_MS, self.refresh)
@@ -329,10 +348,14 @@ class Widget:
             self.layout = make(self.canvas, on_query=self.query_usage)
         if new_layout or prefs.font != previous.font:
             self.layout.set_font(prefs.font)  # 字型存不存在只有畫面層知道；找不到時版面自己在橫幅提示
-        if self._board is not None:
+        stalled = self._missed >= STALL_ROUNDS
+        if self._board is not None or stalled:
             # 跟隨系統：每輪 poll 都會走到這裡，系統切換深淺色後下一輪就跟上
             theme = self._system_theme() if prefs.theme == "system" else prefs.theme
-            self.layout.render(self._board, theme, prefs.mode == "expanded", self._lang)
+            now = self._clock()
+            board = self._board or Board(cards=(), as_of=now)  # 從沒完成過一輪：沒有看板，只畫橫幅
+            self.layout.render(board, theme, prefs.mode == "expanded", self._lang,
+                               stalled_banner(self._lang, self._done_at, now) if stalled else None)
 
     def _double_click(self, event):
         # 摺疊區標題自己處理點擊：雙擊它等於開合兩次，不該同時切換模式

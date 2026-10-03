@@ -78,6 +78,8 @@ STRINGS = {
                             "（例如設了 CLAUDE_CONFIG_DIR），請在設定檔的 claudeConfigDir 指定。",
     "banner.schema_changed": "額度快取結構已變更，本工具讀不懂新的結構；下面是最後一次成功的讀數（{when}，{age}）",
     "banner.schema_changed_none": "額度快取結構已變更，本工具讀不懂新的結構；目前沒有成功的讀數",
+    "banner.stalled": "看板已停止更新：讀取時發生錯誤；最後一次成功的讀數：（{when}，{age}）",
+    "banner.stalled_none": "看板已停止更新：讀取時發生錯誤；目前沒有成功的讀數",
 
     # list 的文字輸出
     "notice": "注意：{text}",

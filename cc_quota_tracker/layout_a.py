@@ -371,13 +371,14 @@ class LayoutA:
         self._p.fonts.clear()  # tkfont.Font 被回收時會刪掉對應的具名字型
         self._last = None
 
-    def render(self, board: Board, theme: str, expanded: bool = False, lang: str = ZH_TW):
-        """lang 的預設值只給不在意語系的呼叫端（測試）；視窗每輪都明確傳入。"""
-        self._last = (board, theme, expanded, lang)
+    def render(self, board: Board, theme: str, expanded: bool = False, lang: str = ZH_TW,
+               stalled_text: Optional[str] = None):
+        """lang 的預設值只給不在意語系的呼叫端（測試）；視窗每輪都明確傳入。stalled_text：停止更新的橫幅文字（見 canvas_text.stalled_banner）。"""
+        self._last = (board, theme, expanded, lang, stalled_text)
         p, c = self._p, THEMES[theme]
         p.lang = lang
         pad, width = p.px("panel_pad"), p.px("card_width")
-        y = self._banner_box(board, c, pad, pad, width)
+        y = self._banner_box(board, c, pad, pad, width, stalled_text)
         cards = board.cards if expanded else board.cards[:1]  # 核心保證第一張是使用中帳號（或未納管帳號）
         for i, (view, card) in enumerate(zip(self._cards.fit(len(cards)), cards)):
             y = view.render(card, board, c, pad, y + (p.px("card_gap") if i else 0), expanded, self._others_open)
@@ -391,8 +392,8 @@ class LayoutA:
         if self._last is not None:
             self.render(*self._last)
 
-    def _banner_box(self, board: Board, c, x, y, width):
-        lines = banner_lines(board, self._p.lang, self._p.fonts.missing)
+    def _banner_box(self, board: Board, c, x, y, width, stalled_text):
+        lines = banner_lines(board, self._p.lang, self._p.fonts.missing, stalled_text)
         if not lines:
             self._p.hide(self._banner_bg)
             self._banner.hide()

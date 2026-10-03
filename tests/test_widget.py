@@ -66,7 +66,7 @@ class WidgetTestCase(HomeTestCase):
         self.autostart = FakeAutostart()
         self.widget = Widget(self.root, self.counting, self.paths, on_screen=lambda x, y: self.on_screen(x, y),
                              system_theme=lambda: self.system_theme, autostart=self.autostart,
-                             system_language=lambda: self.system_language)
+                             system_language=lambda: self.system_language, clock=self.clock)
 
     def destroy_root(self):
         try:

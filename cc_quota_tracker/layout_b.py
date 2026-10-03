@@ -468,11 +468,13 @@ class LayoutB:
         self._p.fonts.clear()  # tkfont.Font 被回收時會刪掉對應的具名字型
         self._strip = self._table = None
 
-    def render(self, board: Board, theme: str, expanded: bool = False, lang: str = ZH_TW):
-        """lang 的預設值只給不在意語系的呼叫端（測試）；視窗每輪都明確傳入。"""
+    def render(self, board: Board, theme: str, expanded: bool = False, lang: str = ZH_TW,
+               stalled_text: Optional[str] = None):
+        """lang 的預設值只給不在意語系的呼叫端（測試）；視窗每輪都明確傳入。stalled_text：停止更新的橫幅文字（見 canvas_text.stalled_banner）。"""
         p, c = self._p, THEMES[theme]
         p.lang = lang
         pad, pad_x = p.px("panel_pad"), p.px("card_pad_x")
+        expanded = expanded or not board.cards  # 沒有卡片（從沒完成過一輪就停止更新）時橫條沒有東西可畫，改畫表格
         if expanded:
             if self._strip is not None:
                 self._strip.destroy()
@@ -489,7 +491,7 @@ class LayoutB:
                 self._strip = _Strip(p, (TAG,), self._on_query)
             card = board.cards[0]  # 核心保證第一張是使用中帳號（或未納管帳號）
             width = self._strip.width(card, board) + 2 * pad_x
-        top = self._banner_box(board, c, pad, pad, width)
+        top = self._banner_box(board, c, pad, pad, width, stalled_text)
         if expanded:
             bottom = self._table.render(board, c, widths, pad, pad + width, top + p.px("card_pad_top"))
         else:
@@ -503,8 +505,8 @@ class LayoutB:
         p.rrect(self._panel, 0, 0, total_w, total_h, RADIUS["panel"], c["panel"])
         self.cv.configure(width=total_w, height=total_h)
 
-    def _banner_box(self, board: Board, c, x, y, width):
-        lines = banner_lines(board, self._p.lang, self._p.fonts.missing)
+    def _banner_box(self, board: Board, c, x, y, width, stalled_text):
+        lines = banner_lines(board, self._p.lang, self._p.fonts.missing, stalled_text)
         if not lines:
             self._p.hide(self._banner_bg)
             self._banner.hide()

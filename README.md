@@ -191,7 +191,7 @@ If none of the three levels is set and `~/.claude.json` cannot be found, the win
 
 All usage numbers come from the `cachedUsageUtilization` field in Claude Code's `.claude.json`. **This is an internal, undocumented field. Claude Code makes no compatibility promise about it, and a Claude Code update can change or remove it.**
 
-The tool tolerates the expected kinds of trouble: a file caught mid-write (it keeps the last value quietly), a missing field (shown as "no reading yet", not an error), and unknown limit types (shown under their original names as "other limits"). If the structure genuinely changes, a banner appears — only after the problem persists for 3 consecutive polls — together with the last successful reading and its time, instead of a wall of 0%.
+The tool tolerates the expected kinds of trouble: a file caught mid-write (it keeps the last value quietly), a missing field (shown as "no reading yet", not an error), and unknown limit types (shown under their original names as "other limits"). If the structure genuinely changes, a banner appears — only after the problem persists for 3 consecutive polls — together with the last successful reading and its time, instead of a wall of 0%. A different banner, "Board stopped updating", means the tool itself could not finish a poll for about a minute (12 polls in a row): the board stays on the last successful reading, shown with its time, and the banner clears as soon as a poll succeeds again.
 
 To check compatibility at any time:
 

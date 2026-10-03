@@ -1,6 +1,7 @@
 """視窗各版面共用的文案與折行：卡片的提示、看板的橫幅，以及依字型寬度折行。版面配置不在這裡，各版面自己排。
 文案取自語系檔，語系由版面渲染時傳入。"""
 import re
+from datetime import datetime
 from typing import Optional, Tuple
 
 from . import COMMAND
@@ -130,8 +131,16 @@ def _snapshot_note(card: Card, board: Board, lang: str):
     return (note, "critical", "critical") if expired else (note, "warning", "fg")
 
 
-def banner_lines(board: Board, lang: str, missing_font: Optional[str] = None):
-    """missing_font：設定檔指定、但這台電腦上找不到的字型名稱；只有畫面層知道字型存不存在，所以由版面傳進來。"""
+def stalled_banner(lang: str, done_at: Optional[datetime], now: datetime) -> str:
+    """停止更新的橫幅文字。done_at 是最後一次完成一輪的時間，None 表示啟動後從沒完成過；格式沿用結構變更橫幅。"""
+    if done_at is None:
+        return text(lang, "banner.stalled_none")
+    return text(lang, "banner.stalled", when=absolute(done_at, now), age=age(now - done_at, lang))
+
+
+def banner_lines(board: Board, lang: str, missing_font: Optional[str] = None, stalled: Optional[str] = None):
+    """missing_font：設定檔指定、但這台電腦上找不到的字型名稱；只有畫面層知道字型存不存在，所以由版面傳進來。
+    stalled：停止更新的橫幅文字。這一輪沒有新的看板，所以由視窗層組好（stalled_banner）傳進來。"""
     lines = []
     if board.settings_unreadable:
         lines.append(text(lang, "settings.unreadable"))
@@ -151,6 +160,8 @@ def banner_lines(board: Board, lang: str, missing_font: Optional[str] = None):
         last = board.last_reading_at
         lines.append(text(lang, "banner.schema_changed", when=absolute(last, board.as_of),
                           age=age(board.as_of - last, lang)) if last else text(lang, "banner.schema_changed_none"))
+    if stalled is not None:
+        lines.append(stalled)
     return lines
 
 

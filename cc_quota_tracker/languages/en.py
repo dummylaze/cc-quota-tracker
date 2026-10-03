@@ -88,6 +88,8 @@ STRINGS = {
                              "below is the last successful reading ({when}, {age})",
     "banner.schema_changed_none": "The usage cache structure has changed and this tool can't read the new structure; "
                                   "there is no successful reading yet",
+    "banner.stalled": "Board stopped updating: an error occurred while reading; last successful reading: ({when}, {age})",
+    "banner.stalled_none": "Board stopped updating: an error occurred while reading; there is no successful reading yet",
 
     # Text output of list
     "notice": "Note: {text}",
