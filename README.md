@@ -4,6 +4,20 @@ English | [正體中文](README.zh-TW.md)
 
 A small always-on-top desktop window (Windows) that shows how much quota each of your Claude accounts has left, all at once. Claude Code only shows the account you are logged into; this tool keeps the last reading of every other account you have set up, so you can see which one has room this week.
 
+Deployed from source: needs Python 3.9 or later, no installer.
+
+Unofficial; not affiliated with or endorsed by Anthropic. Use at your own risk — see [Disclaimer](#disclaimer).
+
+<p align="center">
+  <img src="docs/images/cards-en.png" width="324" alt="Card list layout in compact mode: the active account work, session window at 42% and weekly window at 88%, with reset countdowns and credential expiry">
+  <img src="docs/images/ring-en.png" width="288" alt="Ring gauge layout in compact mode: outer ring is the weekly window at 88%, inner ring is the session window at 42%">
+</p>
+<p align="center">
+  <img src="docs/images/table-en.png" width="528" alt="One-line strip layout in compact mode: session 42% and weekly 88% progress bars with reset countdowns">
+</p>
+
+*The three layouts in compact mode, drawn with example data: card list, ring gauge, one-line strip.*
+
 - **Compact mode**: the active account's session window and weekly window — progress bar and reading age; the reset countdown and credential expiry countdown depend on the layout (the card list shows both, the one-line strip shows the reset countdown, the ring gauge shows neither until expanded).
 - **Expanded mode**: one card per managed account, the active one highlighted; standby accounts show their last observed reading and how old it is.
 - **Query usage** (on request): when the active account's reading has fallen behind, one click asks Claude Code to look up the latest usage. See [Query usage](#query-usage).
@@ -17,11 +31,26 @@ A small always-on-top desktop window (Windows) that shows how much quota each of
 - Python 3.9 or later with `tkinter` (the standard python.org installer includes it). Standard library only — nothing to `pip install`.
 - Claude Code, logged in at least once
 
-This version is deployed from source. It is not packaged as an exe.
+## Intended setup and known limitations
+
+The tool was designed and tested for one setup: **Windows, Claude Code on a subscription plan, conversations mostly in the Claude Code panel of VS Code, several accounts used in turn on the same computer.** Other setups — using only the terminal, several computers, one account shared by several people — have not been tested. They may work partly, or not at all.
+
+Known limitations:
+
+- Querying, and the live judgement of whether a reading is lagging, work for the **active account only**. A standby account shows its last observed reading (flagged *Lagging before the switch* if it already was when you switched away).
+- Quota used on another device, or on the claude.ai website, leaves no conversation record on this computer. A lagging reading cannot be detected there, and auto-query will not be triggered by it. Use right-click → *Query usage* when you know that happened.
+- The *Update* button on the card appears only while the reading is lagging or pending. At other times use the right-click menu.
+- The tool depends on things Claude Code does not document: the `cachedUsageUtilization` field (see [For hosts](#for-hosts-what-the-tool-depends-on)) and the experimental interface that Query usage uses. A Claude Code update can break either. If the interface changes, Query usage fails with a reason, everything else keeps working from the cache, and `/usage` in Claude Code remains the fallback.
 
 ## Setup in three steps
 
-1. **Put the code somewhere.** Clone or copy this repository to any folder. All commands below are run from that folder.
+1. **Put the code somewhere.** Clone this repository (or just copy the folder) to anywhere you like, then open a terminal in it. All commands below are run from that folder.
+
+   ```
+   git clone https://github.com/dummylaze/cc-quota-tracker.git
+   cd cc-quota-tracker
+   ```
+
 2. **Manage your accounts.** For each account: log in with Claude Code, then run
 
    ```
@@ -65,6 +94,7 @@ python -m cc_quota_tracker list             # print the same information as the 
 python -m cc_quota_tracker query            # ask Claude Code for the latest usage (see "Query usage")
 python -m cc_quota_tracker check            # see "For hosts" below
 python -m cc_quota_tracker gui              # open the window
+python -m cc_quota_tracker --help           # print all commands
 ```
 
 ### 2. Right-click menu
@@ -209,17 +239,24 @@ It verifies that every field path the tool relies on still exists with the expec
 
 The tool also appends a log of every account switch it observes (time and account identifier only, kept in the managed directory with restricted permissions and never shown on screen) and the time it last ran, so that future reporting can attribute usage to the right account.
 
-## Intended setup and known limitations
-
-The tool was designed and tested for one setup: **Windows, Claude Code on a subscription plan, conversations mostly in the Claude Code panel of VS Code, several accounts used in turn on the same computer.** Other setups — using only the terminal, several computers, one account shared by several people — have not been tested. They may work partly, or not at all.
-
-Known limitations:
-
-- Querying, and the live judgement of whether a reading is lagging, work for the **active account only**. A standby account shows its last observed reading (flagged *Lagging before the switch* if it already was when you switched away).
-- Quota used on another device, or on the claude.ai website, leaves no conversation record on this computer. A lagging reading cannot be detected there, and auto-query will not be triggered by it. Use right-click → *Query usage* when you know that happened.
-- The *Update* button on the card appears only while the reading is lagging or pending. At other times use the right-click menu.
-- The tool depends on things Claude Code does not document: the `cachedUsageUtilization` field (see below) and the experimental interface that Query usage uses. A Claude Code update can break either. If the interface changes, Query usage fails with a reason, everything else keeps working from the cache, and `/usage` in Claude Code remains the fallback.
-
 ## Out of scope for this version
 
 Switching accounts from inside the tool, encrypting credential snapshots, token reports, other providers, macOS / Linux, packaging as an exe, network requests made by the tool itself (Query usage goes through Claude Code), querying standby accounts, and any automation triggered by quota level.
+
+## Disclaimer
+
+cc-quota-tracker is an independent, unofficial tool. It is not affiliated with, endorsed by or supported by Anthropic. "Claude" and "Claude Code" are trademarks of Anthropic, PBC, used here only to describe what the tool works with.
+
+**Use it at your own risk.** You are responsible for making sure that how you use your accounts complies with Anthropic's terms of service and usage policies. The authors accept no responsibility for rate limiting, account restrictions or suspensions, lost or invalidated credentials, or any other consequence of using this tool.
+
+In particular:
+
+- The tool reads files that Claude Code keeps on your computer, including credentials, and keeps copies of them (credential snapshots) unencrypted in the managed directory. The tool itself makes no network requests and has no server: your credentials and readings stay on your computer and are never sent to the authors or anyone else. (Query usage is the one exception that reaches the network, and it does so through Claude Code; see below.) Protecting the managed directory is up to you; see [Permissions](#permissions).
+- Query usage asks Claude Code to send a request to the same endpoint as `/usage`. Asking too often can get you rate-limited; see [Query usage](#query-usage).
+- The tool depends on parts of Claude Code that are not documented and can change at any time; see [For hosts](#for-hosts-what-the-tool-depends-on). A reading shown by the tool may be out of date or wrong. Check `/usage` in Claude Code before relying on it.
+
+The software is provided "as is", without warranty of any kind; see [LICENSE](LICENSE).
+
+## License
+
+MIT; see [LICENSE](LICENSE).
