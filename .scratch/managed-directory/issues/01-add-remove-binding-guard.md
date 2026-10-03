@@ -28,7 +28,7 @@
 | 綁定檔被鎖住時移除帳號 2 | 帳號 1、帳號 2 | 全空 |
 | 帳號 1 的憑證快照被鎖住時納管第三個帳號 | 帳號 1、帳號 2 | 帳號 2、帳號 3 |
 
-被洗掉綁定的待命帳號，要等它再次成為使用中帳號、額度快取對上之後才會被補學回來；在那之前切到它的切換紀錄會記成未知帳號（ADR-0009 的未歸屬）。poll 路徑的同型問題已在 bb3a8da 修正；票 `.scratch/m1-readonly-monitor/issues/09-binding-maintenance.md` 的 Comments 寫明當時只處理 poll，「`add`／`remove` 之外」。
+被洗掉綁定的待命帳號，要等它再次成為使用中帳號、額度快取對上之後才會被補學回來；在那之前切到它的切換紀錄會記成未知帳號（ADR-0009 的未歸屬）。poll 路徑的同型問題已在 298e4b4 修正；票 `.scratch/m1-readonly-monitor/issues/09-binding-maintenance.md` 的 Comments 寫明當時只處理 poll，「`add`／`remove` 之外」。
 
 ### 實作（2026-10-02）
 
