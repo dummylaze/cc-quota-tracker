@@ -79,6 +79,8 @@ STRINGS = {
                     "the system default font is used instead.",
     "banner.restart_required": "A path field in the settings file changed; paths are only read at startup, "
                                "so restart this tool for it to take effect.",
+    "banner.permissions_untightened": "The managed directory's permissions can't be restricted. Move it to an NTFS "
+                                      "drive (the usual C: or D: drive) to clear this.",
     "board.wrong_location": "Claude Code's usage cache wasn't found at the default location, so it may be reading the "
                             "wrong place. If the Claude Code directory isn't under home (for example "
                             "CLAUDE_CONFIG_DIR is set), specify it in claudeConfigDir in the settings file.",
@@ -114,6 +116,8 @@ STRINGS = {
     "add_warning.permissions_fixed": "Warning: the permissions of the managed directory or a file in it were not as "
                                      "expected (accessible to others, or inherited from the parent directory); "
                                      "they have been fixed so only the current user can access them.",
+    "add_warning.permissions_untightened": "Warning: the managed directory's permissions can't be restricted. Move it "
+                                           "to an NTFS drive (the usual C: or D: drive) to clear this.",
     "add_warning.not_bound.cli": "Warning: couldn't read the ID of the account Claude Code is signed in to, so this "
                                  "credential snapshot isn't bound to an account yet; until that account becomes the "
                                  "active account it only shows \"Reading pending\". You can run add again later.",
@@ -214,6 +218,10 @@ STRINGS = {
     "check.claude_dir": "Claude Code directory: {path} ({source})",
     "check.usage_cache": "Usage cache: {path}",
     "check.managed_dir": "Managed directory: {path} ({source})",
+    "check.managed_permissions": "Managed directory permissions: {state}",
+    "check.permissions.tightened": "restricted",
+    "check.permissions.untightened": "not restricted",
+    "check.permissions.not_created": "not created yet",
     "check.settings_file": "Settings file: {path}",
     "check.source.settings_file": "{field} in the settings file",
     "check.source.env": "environment variable {name}",

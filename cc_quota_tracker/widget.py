@@ -393,7 +393,7 @@ class Widget:
         self._position = position
 
     def _save_position(self):
-        """位置變了才寫。這次沒記住（還沒 poll 成功過、寫不成、收不緊權限）就不更新，下次移動或結束時再記。"""
+        """位置變了才寫。這次沒記住（還沒 poll 成功過、寫不成）就不更新，下次移動或結束時再記。"""
         self.root.update_idletasks()
         position = (self.root.winfo_x(), self.root.winfo_y())
         if position != self._position and self._managed.write_window_position(*position):

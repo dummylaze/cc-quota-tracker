@@ -8,7 +8,8 @@ from .i18n import ZH_TW, text
 _WINDOW_NAMES = {"session": "window.session", "weekly_all": "window.weekly_all", "weekly_scoped": "window.weekly_scoped"}
 _ROLES = {Role.ACTIVE: "role.active", Role.STANDBY: "role.standby"}
 _ADD_WARNINGS = {AddWarning.LABEL_LOOKS_LIKE_EMAIL: "add_warning.label_looks_like_email",
-                 AddWarning.PERMISSIONS_FIXED: "add_warning.permissions_fixed"}
+                 AddWarning.PERMISSIONS_FIXED: "add_warning.permissions_fixed",
+                 AddWarning.PERMISSIONS_UNTIGHTENED: "add_warning.permissions_untightened"}
 # 讀不到帳號識別碼的說明依入口不同：命令列、右鍵選單的納管、匯入憑證檔
 _NOT_BOUND = {"cli": "add_warning.not_bound.cli", "menu": "add_warning.not_bound.menu",
               "import": "add_warning.not_bound.import"}

@@ -73,6 +73,7 @@ STRINGS = {
     "settings.unreadable": "設定檔無法讀取（不是合法的 JSON），裡面的設定都當成沒填；本工具不會覆寫它，請修正後再試。",
     "font.missing": "設定檔的 font 指定的字型「{font}」在這台電腦上找不到，改用系統預設字型。",
     "banner.restart_required": "設定檔的路徑欄位改了；路徑只在啟動時讀取，重新啟動本工具後才生效。",
+    "banner.permissions_untightened": "納管目錄的權限無法收緊。把它搬到 NTFS 磁碟（一般的 C:、D: 槽）即可解除。",
     "board.wrong_location": "預設位置找不到 Claude Code 的額度快取，可能讀錯位置。Claude Code 目錄若不在 home"
                             "（例如設了 CLAUDE_CONFIG_DIR），請在設定檔的 claudeConfigDir 指定。",
     "banner.schema_changed": "額度快取結構已變更，本工具讀不懂新的結構；下面是最後一次成功的讀數（{when}，{age}）",
@@ -98,6 +99,7 @@ STRINGS = {
                                           "不想顯示的話，可以用別的標籤重新納管，或直接改憑證快照的檔名。",
     "add_warning.permissions_fixed": "警告：納管目錄或其中檔案的權限不符預期（其他人可存取，或沿用上層目錄的設定），"
                                      "已修正為只有目前使用者能存取。",
+    "add_warning.permissions_untightened": "警告：納管目錄的權限無法收緊。把它搬到 NTFS 磁碟（一般的 C:、D: 槽）即可解除。",
     "add_warning.not_bound.cli": "警告：讀不到 Claude Code 目前登入帳號的識別碼，這份憑證快照暫時沒有綁定帳號；"
                                  "該帳號成為使用中帳號之前只會顯示「讀數待更新」。可以稍後再執行一次 add。",
     "add_warning.not_bound.menu": "讀不到 Claude Code 目前登入帳號的識別碼，這份憑證快照暫時沒有綁定帳號；"
@@ -184,6 +186,10 @@ STRINGS = {
     "check.claude_dir": "Claude Code 目錄：{path}（{source}）",
     "check.usage_cache": "額度快取：{path}",
     "check.managed_dir": "納管目錄：{path}（{source}）",
+    "check.managed_permissions": "納管目錄權限：{state}",
+    "check.permissions.tightened": "已收緊",
+    "check.permissions.untightened": "未收緊",
+    "check.permissions.not_created": "尚未建立",
     "check.settings_file": "設定檔：{path}",
     "check.source.settings_file": "設定檔的 {field}",
     "check.source.env": "環境變數 {name}",

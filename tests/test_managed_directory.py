@@ -178,13 +178,12 @@ class WriteWindowPositionTest(ManagedDirectoryTestCase):
         self.assertEqual(self.position_file.read_bytes(), before)
         self.assertEqual(list(self.state_dir.glob("*.tmp")), [])
 
-    def test_permissions_that_cannot_be_tightened_remember_nothing(self):
+    def test_permissions_that_cannot_be_tightened_still_remember_the_position(self):
         self.state_dir.mkdir(parents=True)
         with mock.patch("cc_quota_tracker.managed_directory.make_private"), \
                 mock.patch("cc_quota_tracker.managed_directory.is_private", return_value=False):
-            self.assertFalse(self.managed.write_window_position(3, 4))
-        self.assertFalse(self.position_file.exists())
-        self.assertEqual(list(self.state_dir.glob("*.tmp")), [])
+            self.assertTrue(self.managed.write_window_position(3, 4))
+        self.assertEqual(self.stored(), {"x": 3, "y": 4})
 
     def test_retry_after_a_failure_remembers_the_new_position(self):
         self.state_dir.mkdir(parents=True)

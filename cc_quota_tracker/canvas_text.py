@@ -143,6 +143,8 @@ def banner_lines(board: Board, lang: str, missing_font: Optional[str] = None):
         lines.append(text(lang, "banner.restart_required"))
     if board.usage_query.interval_below_floor:
         lines.append(text(lang, "banner.auto_query_floor", minutes=AUTO_QUERY_FLOOR_MINUTES))
+    if board.permissions_untightened:
+        lines.append(text(lang, "banner.permissions_untightened"))
     if board.wrong_location_suspected:
         lines.append(text(lang, "board.wrong_location"))
     if board.schema_changed:

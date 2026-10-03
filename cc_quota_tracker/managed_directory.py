@@ -5,7 +5,7 @@
 - 會修剪資料的寫入（綁定、連帶的待命讀數）：綁定檔讀不到、或有任何一份憑證快照讀不出憑證指紋，就不修剪。
 - 一律原子寫入；暫存檔在替換前就收緊權限；目錄先收緊再往裡面寫。
 - 切換紀錄只追加。
-- 權限只有一套政策：收緊後事後驗證，仍不符就丟 PermissionError。
+- 權限只有一套政策：收緊後事後驗證，仍不符（或收緊本身回報錯誤）就照常寫入，並記下「未收緊」讓呼叫端告警（ADR-0008）。
 
 各檔案的寫入規則與失敗處理（全部在納管目錄底下）：
 - <帳號標籤>.json，憑證快照：本工具只在納管時寫入、移除時刪除（使用者也可能直接放檔進來）。替換前驗證讀得出憑證指紋，讀不出來就丟 NoCredential、
@@ -17,7 +17,7 @@
   相同時才成立，讀數換了就失效並隨寫入清掉；沒有這個欄位的舊檔視為沒有標記。
 - .state/observed.json，上一輪觀測：每輪寫。讀不到時呼叫端這一輪不判定；寫不成丟 OSError。
 - .state/switches.jsonl，切換紀錄：只追加。寫不成丟 OSError，既有的行不變。
-- .state/window.json，視窗位置：寫不成、收不緊權限都是「這次沒記住」，不丟例外。
+- .state/window.json，視窗位置：寫不成是「這次沒記住」，不丟例外；收不緊權限照常寫入。
 
 已知限制：GUI 與命令列是兩個程序，同時寫同一個檔案（例如綁定檔）時沒有跨程序的鎖；兩者在同一輪內交錯時，
 後寫的會蓋掉先寫的。被蓋掉的綁定若屬於使用中帳號，之後的 poll 會補學回來。
@@ -25,6 +25,7 @@
 import json
 import re
 from datetime import datetime
+from enum import Enum
 from pathlib import Path
 from typing import Dict, NamedTuple, Optional, Set, Tuple
 
@@ -70,9 +71,10 @@ class ManagedAccount(NamedTuple):
 
 
 class Stored(NamedTuple):
-    """納管的結果：這份憑證快照現在有沒有綁定、納管目錄裡有沒有原本外露而被修正的權限。"""
+    """納管的結果：這份憑證快照現在有沒有綁定、納管目錄裡有沒有原本外露而被修正的權限、有沒有收不緊的權限。"""
     bound: bool
     permissions_fixed: bool
+    untightened: bool = False  # 這次納管有路徑收緊後查回仍未收緊（例如 FAT32／exFAT），照常寫入
 
 
 class Observed(NamedTuple):
@@ -81,29 +83,19 @@ class Observed(NamedTuple):
     invalid_snapshot: Optional[str] = None
 
 
+class PermissionState(Enum):
+    """納管目錄的權限狀態：只查不改，未收緊不區分原因。"""
+    TIGHTENED = "tightened"
+    UNTIGHTENED = "untightened"
+    NOT_CREATED = "not_created"
+
+
 def check_label(label: str) -> None:
     """帳號標籤會直接成為憑證快照的檔名：擋掉路徑、Windows 不接受的檔名，以及點開頭（留給工具自己的檔案）。
     不合法就丟 InvalidLabel。納管時一定會檢查；呼叫端可以先呼叫，在做其他事之前就拒絕。"""
     if (not label.strip() or label.startswith(".") or label.endswith((".", " "))
             or _ILLEGAL_IN_NAME.search(label) or label.split(".")[0].upper() in _RESERVED_NAMES):
         raise InvalidLabel(label)
-
-
-def _tighten(path: Path, new: bool = False) -> bool:
-    """收緊到只有目前使用者能存取。回傳是否修正了原本外露的權限；剛建立的不算。修正後仍不符就丟例外。"""
-    if is_private(path):
-        return False
-    make_private(path)
-    if not is_private(path):
-        raise PermissionError(f"could not restrict access to the current user: {path.name}")  # 給開發者的診斷，不是畫面文案
-    return not new
-
-
-def _mkdir_private(path: Path) -> bool:
-    """先收緊目錄再往裡面寫，檔案一建立就不會外露。回傳是否修正了既有目錄的權限。"""
-    new = not path.exists()
-    path.mkdir(exist_ok=True)
-    return _tighten(path, new)
 
 
 class ManagedDirectory:
@@ -119,6 +111,49 @@ class ManagedDirectory:
         self._readings_file = self._state_dir / "readings.json"  # 待命帳號的最後讀數
         self._readings: Optional[Dict[str, provider.UsageReading]] = None  # 第一次用到才讀檔
         self._lagging: Dict[str, str] = {}  # 帳號識別碼 → 被標為落後的讀數的觀測時間；與 _readings 一起讀、一起寫
+        self._untightened = False  # 自上次 begin_round 起，有沒有收緊後查回仍未收緊的路徑
+
+    def begin_round(self) -> None:
+        """一輪 poll 開始：清掉上一輪的「未收緊」，這一輪再碰到才會再亮。"""
+        self._untightened = False
+
+    @property
+    def untightened(self) -> bool:
+        """自上次 begin_round（或上一次納管開始）起，有沒有任何一次收緊後查回仍未收緊。判定以行為為準，不查檔案系統的種類。"""
+        return self._untightened
+
+    def permission_state(self) -> PermissionState:
+        """納管目錄與其中所有檔案目前的權限狀態。只查不改；查詢本身出錯算未收緊。"""
+        if not self._path.is_dir():
+            return PermissionState.NOT_CREATED
+        paths = [self._path, *(p for p in self._path.iterdir() if p.is_file() or p == self._state_dir)]
+        if self._state_dir.is_dir():
+            paths += [p for p in self._state_dir.iterdir() if p.is_file()]
+        try:
+            private = all(is_private(p) for p in paths)
+        except OSError:
+            private = False
+        return PermissionState.TIGHTENED if private else PermissionState.UNTIGHTENED
+
+    def _tighten(self, path: Path, new: bool = False) -> bool:
+        """收緊到只有目前使用者能存取。回傳是否修正了原本外露的權限；剛建立的不算。
+        收緊回報錯誤、或事後驗證仍不符：不丟例外，記下「未收緊」，呼叫端照常寫入。"""
+        if _private(path):
+            return False
+        try:
+            make_private(path)
+        except OSError:
+            pass  # 與「收緊成功但沒效果」同一條路：以事後查回的結果為準
+        if not _private(path):
+            self._untightened = True
+            return False
+        return not new
+
+    def _mkdir_private(self, path: Path) -> bool:
+        """先收緊目錄再往裡面寫，檔案一建立就不會外露。回傳是否修正了既有目錄的權限。"""
+        new = not path.exists()
+        path.mkdir(exist_ok=True)
+        return self._tighten(path, new)
 
     def read_observed(self) -> Optional[Observed]:
         """讀不到回傳 None（呼叫端這一輪不判定）；不存在或讀不懂就當成沒有上一輪。"""
@@ -137,7 +172,7 @@ class ManagedDirectory:
         self._mkdir_state_dir()
         line = json.dumps({"at": at.isoformat(), "accountId": account_id, "source": "observed"})
         atomic.append(self._switch_log, (line + "\n").encode("utf-8"),
-                      before_replace=lambda tmp: _tighten(tmp, new=True))
+                      before_replace=lambda tmp: self._tighten(tmp, new=True))
 
     def list_accounts(self) -> Tuple[ManagedAccount, ...]:
         """所有納管帳號，依帳號標籤排序。綁定檔讀不到時當成都沒有綁定；憑證指紋讀不出來的是「未知」。"""
@@ -178,15 +213,16 @@ class ManagedDirectory:
         bindings = self._read_state(self._bindings_file)
         if bindings is None:  # 先確認讀得到才寫憑證快照：讀不到就什麼都不動
             raise BindingsUnreadable(self._bindings_file)
-        fixed = _mkdir_private(self._path)
+        self._untightened = False  # 納管的告警只看這一次碰到的
+        fixed = self._mkdir_private(self._path)
         fingerprint = self._write_snapshot(label, data)
         if account_id:
             bindings[fingerprint] = {"accountId": account_id}
         self._write_bindings(bindings, self._live_fingerprints())
-        fixed = any([_tighten(self._state_dir), _tighten(self._bindings_file)]) or fixed
+        fixed = any([self._tighten(self._state_dir), self._tighten(self._bindings_file)]) or fixed
         # 事後驗證：連同既有的憑證快照一起檢查
-        fixed = any([_tighten(self._snapshot(other)) for other in self._snapshot_labels()]) or fixed
-        return Stored(fingerprint in bindings, fixed)
+        fixed = any([self._tighten(self._snapshot(other)) for other in self._snapshot_labels()]) or fixed
+        return Stored(fingerprint in bindings, fixed, self._untightened)
 
     def remove_snapshot(self, label: str) -> None:
         """移除帳號標籤 label 的憑證快照，清掉它的孤兒綁定與待命讀數。沒有這份憑證快照丟 UnknownLabel。
@@ -206,7 +242,7 @@ class ManagedDirectory:
             fingerprint = FileCredentialStore(tmp).fingerprint()
             if fingerprint is None:
                 raise NoCredential()
-            _tighten(tmp, new=True)
+            self._tighten(tmp, new=True)
             fingerprints.append(fingerprint)
         atomic.write_atomic(self._snapshot(label), data, before_replace=check)
         return fingerprints[0]
@@ -297,8 +333,8 @@ class ManagedDirectory:
         return (x, y) if type(x) is int and type(y) is int else None
 
     def write_window_position(self, x: int, y: int) -> bool:
-        """回傳這次有沒有記住。工具狀態目錄還不存在（還沒成功 poll 過）、寫不成、收不緊權限都是「這次沒記住」，
-        不丟例外也不建目錄；呼叫端下次移動或結束時再試。"""
+        """回傳這次有沒有記住。工具狀態目錄還不存在（還沒成功 poll 過）、寫不成都是「這次沒記住」，
+        不丟例外也不建目錄；呼叫端下次移動或結束時再試。收不緊權限照常寫入。"""
         if not self._state_dir.is_dir():
             return False
         try:
@@ -312,10 +348,9 @@ class ManagedDirectory:
         self._mkdir_state_dir()
         self._write_json(path, data)
 
-    @staticmethod
-    def _write_json(path: Path, data: dict) -> None:
+    def _write_json(self, path: Path, data: dict) -> None:
         atomic.write_atomic(path, json.dumps(data, indent=2).encode("utf-8"),
-                            before_replace=lambda tmp: _tighten(tmp, new=True))
+                            before_replace=lambda tmp: self._tighten(tmp, new=True))
 
     @staticmethod
     def _read_state(path: Path) -> Optional[dict]:
@@ -332,8 +367,16 @@ class ManagedDirectory:
 
     def _mkdir_state_dir(self) -> None:
         """poll 在還沒納管任何帳號時也會寫工具狀態，納管目錄可能還不存在。"""
-        _mkdir_private(self._path)
-        _mkdir_private(self._state_dir)
+        self._mkdir_private(self._path)
+        self._mkdir_private(self._state_dir)
+
+
+def _private(path: Path) -> bool:
+    """查不回權限（查詢本身出錯）算未收緊，與 permission_state 一致。"""
+    try:
+        return is_private(path)
+    except OSError:
+        return False
 
 
 def _stamp(reading: provider.UsageReading) -> str:

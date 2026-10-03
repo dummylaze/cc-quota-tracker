@@ -11,6 +11,7 @@ from .claude_provider import FieldStatus, NoReading, SchemaCheck
 from .core import BindingsUnreadable, Core, InvalidLabel, NoCredential, UnknownLabel
 from .fmt import date_time
 from .i18n import text
+from .managed_directory import ManagedDirectory, PermissionState
 from .render_text import add_warning, render
 from .settings import (CLAUDE_CONFIG_DIR, CLAUDE_DIR_FIELD, MANAGED_DIR_FIELD, InvalidPathSetting, PathProblem,
                        PathSource, ResolvedPaths, read_preferences, read_settings, resolve_paths)
@@ -19,6 +20,11 @@ _PATH_PROBLEMS = {
     PathProblem.NOT_ABSOLUTE: "path.not_absolute",
     PathProblem.NOT_A_DIRECTORY: "path.not_a_directory",
     PathProblem.INSIDE_CLAUDE_DIR: "path.inside_claude_dir",
+}
+_PERMISSION_STATES = {
+    PermissionState.TIGHTENED: "check.permissions.tightened",
+    PermissionState.UNTIGHTENED: "check.permissions.untightened",
+    PermissionState.NOT_CREATED: "check.permissions.not_created",
 }
 
 
@@ -149,6 +155,8 @@ def check(paths: ResolvedPaths, lang: str) -> int:
     print(text(lang, "check.claude_dir", path=paths.claude_dir, source=_source(paths.claude_source, CLAUDE_DIR_FIELD, lang)))
     print(text(lang, "check.usage_cache", path=paths.claude_json))
     print(text(lang, "check.managed_dir", path=paths.managed_dir, source=_source(paths.managed_source, MANAGED_DIR_FIELD, lang)))
+    state = ManagedDirectory(paths.managed_dir).permission_state()
+    print(text(lang, "check.managed_permissions", state=text(lang, _PERMISSION_STATES[state])))
     print(text(lang, "check.settings_file", path=paths.settings_file))
     if paths.settings_unreadable:
         print(text(lang, "notice", text=text(lang, "settings.unreadable")))

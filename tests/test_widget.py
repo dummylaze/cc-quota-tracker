@@ -475,6 +475,18 @@ class LanguageTest(WidgetTestCase):
         self.assertIn("looks like an email address", message)
 
 
+    def test_managing_an_account_where_permissions_cannot_be_tightened_lists_the_warning_in_the_same_box(self):
+        self.log_in()
+        with mock.patch("cc_quota_tracker.widget.messagebox") as box, \
+                mock.patch("cc_quota_tracker.widget.simpledialog") as ask, \
+                mock.patch("cc_quota_tracker.managed_directory.make_private"), \
+                mock.patch("cc_quota_tracker.managed_directory.is_private", return_value=False):
+            ask.askstring.return_value = "work"
+            self.widget.add_current_account()
+        box.showerror.assert_not_called()
+        self.assertIn("納管目錄的權限無法收緊", box.showinfo.call_args.args[1])
+
+
 class ManageAccountsTest(WidgetTestCase):
     def setUp(self):
         super().setUp()
@@ -584,14 +596,12 @@ class PositionTest(WidgetTestCase):
         self.widget._save_position()
         self.assertFalse(self.state_file().parent.exists())
 
-    def test_permissions_that_cannot_be_tightened_remember_nothing_and_the_window_keeps_working(self):
+    def test_permissions_that_cannot_be_tightened_still_remember_the_position(self):
         self.root.geometry("+321+123")
         self.root.update_idletasks()
         with mock.patch("cc_quota_tracker.managed_directory.make_private"), \
                 mock.patch("cc_quota_tracker.managed_directory.is_private", return_value=False):
             self.widget._save_position()
-        self.assertFalse(self.state_file().exists())
-        self.widget._save_position()  # 下一次移動或結束時再試，這次權限收得緊了
         self.assertEqual(json.loads(self.state_file().read_text(encoding="utf-8")), {"x": 321, "y": 123})
 
 

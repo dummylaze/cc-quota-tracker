@@ -14,7 +14,7 @@ from .board import (Board, Card, CountdownFormat, Limit, Preferences, QueryFailu
                     Severity, UsageQueryResult)
 from .credstore import FileCredentialStore
 from .managed_directory import (BindingsUnreadable, InvalidLabel, ManagedDirectory, NoCredential,  # noqa: F401
-                                Observed, UnknownLabel, check_label)
+                                Observed, PermissionState, UnknownLabel, check_label)
 # 納管會丟的例外定義在納管目錄，核心仍對外匯出：命令列、GUI 與既有測試的匯入路徑不變
 from .settings import (CLAUDE_CONFIG_DIR, COUNTDOWN_FORMAT_FIELD, PathSource, ResolvedPaths, path_fields,
                        read_preferences, read_settings)
@@ -38,6 +38,7 @@ class _LagScan(NamedTuple):
 class AddWarning(Enum):
     PERMISSIONS_FIXED = "permissions_fixed"  # 納管目錄或檔案的權限原本不符（他人可存取或靠繼承），已修正
     LABEL_LOOKS_LIKE_EMAIL = "label_looks_like_email"  # 帳號標籤會顯示在畫面上
+    PERMISSIONS_UNTIGHTENED = "permissions_untightened"  # 納管目錄的權限收不緊（例如 FAT32／exFAT），照常寫入
     NOT_BOUND = "not_bound"  # 讀不到目前登入帳號的識別碼，憑證快照暫時沒有綁定
 
 
@@ -87,6 +88,7 @@ class Core:
         self._consecutive_failures = 0  # 查詢連續失敗的次數，一次成功歸零
 
     def poll(self) -> Board:
+        self._managed.begin_round()
         self._poll_query()  # 先於 _refresh：查詢剛寫回的額度快取，這一輪就讀得到
         self._refresh()
         self._reread_settings()
@@ -105,7 +107,7 @@ class Core:
                      settings_unreadable=self._settings_unreadable,
                      as_of=self._clock(), countdown_format=self._countdown_format,
                      preferences=self._preferences, invalid_settings=self._invalid_settings,
-                     usage_query=self._query_status())
+                     usage_query=self._query_status(), permissions_untightened=self._managed.untightened)
 
     def start_query(self) -> bool:
         """不阻塞的手動查詢入口，給 GUI 用：立刻返回，之後由 poll 檢查子行程。進行中或冷卻中回傳 False、什麼都不做。
@@ -225,6 +227,8 @@ class Core:
         # 沒有識別碼：同一憑證指紋原有的綁定仍然有效；沒有的話留給之後補學
         stored = self._managed.store_snapshot(label, data, account_id)
         warnings = {AddWarning.PERMISSIONS_FIXED} if stored.permissions_fixed else set()
+        if stored.untightened:
+            warnings.add(AddWarning.PERMISSIONS_UNTIGHTENED)
         if not stored.bound:
             warnings.add(AddWarning.NOT_BOUND)
         if _EMAIL.search(label):
