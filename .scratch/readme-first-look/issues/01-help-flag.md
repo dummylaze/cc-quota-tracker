@@ -42,3 +42,5 @@
 
 - 第 2 條「跟著設定的介面語言」：實作與打錯指令時相同，用 `configured_language(None)`（還沒解析路徑，讀不到設定檔的 `language`，只跟隨系統語系），照 Agent Brief 的解讀。設定檔 `language` 與系統語系不同時，`--help` 與打錯指令一樣取系統語系。
 - 子指令的 `--help`：`add`、`remove` 帶一個參數在數量上合法，`add --help` 現狀是把 `--help` 當標籤，沒有改動；測試以 `list -h`、`check --help`、`gui -h`、`--help x`、`-h -h` 驗證「帶額外參數仍是 stderr、結束代碼 2」。
+
+- 已與使用者確認：`--help`／`-h` 的語言維持現狀（只跟隨系統語系），上列兩則說明都成立。
