@@ -171,7 +171,7 @@ class PreferenceTest(WidgetTestCase):
 
     def test_menu_offers_settings_and_actions(self):
         self.assertEqual(self.widget.menu_labels(),
-                         ["版面", "置頂", "模式", "語系", "主題", "透明度", "開機自動啟動", "查詢額度", "自動查詢額度", "納管目前登入的帳號…", "匯入憑證檔…", "開啟納管目錄", "結束"])
+                         ["版面", "置頂", "模式", "語系", "主題", "透明度", "開機自動啟動", "查詢額度", "自動查詢額度", "納管目前登入的帳號…", "匯入憑證檔…", "開啟資料夾", "結束"])
 
 
 class AutostartTest(WidgetTestCase):
@@ -349,6 +349,9 @@ class LanguageTest(WidgetTestCase):
         menu = self.widget._menu
         return menu.nametowidget(menu.entrycget(index, "menu"))
 
+    def folders_menu(self, label):
+        return self.submenu(self.widget._menu.index(label))
+
     def submenu_labels(self, index):
         menu = self.submenu(index)
         return [menu.entrycget(i, "label") for i in range(menu.index("end") + 1)]
@@ -410,7 +413,7 @@ class LanguageTest(WidgetTestCase):
         self.widget.set_preference("language", "en")
         self.assertEqual(self.widget.menu_labels(),
                          ["Layout", "Always on top", "Mode", "Language", "Theme", "Opacity", "Start at login",
-                          "Query usage", "Auto-query usage", "Manage the signed-in account…", "Import credential file…", "Open managed directory", "Quit"])
+                          "Query usage", "Auto-query usage", "Manage the signed-in account…", "Import credential file…", "Open folder", "Quit"])
         self.assertEqual(self.submenu_labels(0), ["Card list", "Dense table / one-line strip", "Ring gauge"])
         self.assertEqual(self.submenu_labels(2), ["Compact", "Expanded"])
         self.assertEqual(self.submenu_labels(4), ["Follow system", "Light", "Dark"])
@@ -462,6 +465,35 @@ class LanguageTest(WidgetTestCase):
         with mock.patch("cc_quota_tracker.widget.messagebox") as box:
             self.widget.open_managed_dir()
         self.assertIn("納管目錄還不存在", box.showinfo.call_args.args[1])
+
+    def test_open_folder_submenu_offers_both_directories_in_both_languages(self):
+        folders = self.folders_menu("開啟資料夾")
+        self.assertEqual([folders.entrycget(i, "label") for i in (0, 1)], ["納管目錄", "設定目錄"])
+        self.widget.set_preference("language", "en")
+        folders = self.folders_menu("Open folder")
+        self.assertEqual([folders.entrycget(i, "label") for i in (0, 1)], ["Managed directory", "Settings directory"])
+
+    def test_each_folder_entry_opens_its_own_directory(self):
+        folders = self.folders_menu("開啟資料夾")
+        self.paths.settings_file.parent.mkdir(parents=True, exist_ok=True)
+        self.paths.managed_dir.mkdir(parents=True, exist_ok=True)
+        with mock.patch("cc_quota_tracker.widget.os.startfile", create=True) as start, \
+                mock.patch("cc_quota_tracker.widget.sys.platform", "win32"):
+            folders.invoke(0)
+            folders.invoke(1)
+        self.assertEqual([c.args[0] for c in start.call_args_list],
+                         [self.paths.managed_dir, self.paths.settings_file.parent])
+
+    def test_a_missing_settings_directory_says_so_instead_of_opening(self):
+        shutil.rmtree(self.paths.settings_file.parent, ignore_errors=True)
+        with mock.patch("cc_quota_tracker.widget.messagebox") as box:
+            self.widget.open_settings_dir()
+        self.assertIn("設定目錄還不存在", box.showinfo.call_args.args[1])
+        self.widget.set_preference("language", "en")
+        shutil.rmtree(self.paths.settings_file.parent, ignore_errors=True)  # 改偏好會把設定檔寫回來
+        with mock.patch("cc_quota_tracker.widget.messagebox") as box:
+            self.widget.open_settings_dir()
+        self.assertIn("settings directory doesn't exist yet", box.showinfo.call_args.args[1])
 
     def test_managing_an_account_reports_in_the_chosen_language(self):
         self.log_in()
@@ -620,7 +652,7 @@ class DismissUntightenedTest(WidgetTestCase):
         with self.untightenable():
             self.widget.refresh()
         labels = self.widget.menu_labels()
-        self.assertEqual(labels[labels.index("開啟納管目錄") + 1], "不再提醒權限未收緊")
+        self.assertEqual(labels[labels.index("開啟資料夾") + 1], "不再提醒權限未收緊")
         self.assertTrue(self.banner_shown())
 
     def test_dismissing_hides_the_banner_and_the_entry(self):
@@ -635,10 +667,10 @@ class DismissUntightenedTest(WidgetTestCase):
             self.widget.refresh()
             self.widget.set_preference("language", "en")
             self.assertEqual(self.widget.menu_labels()[-3:],
-                             ["Open managed directory", "Stop warning about unrestricted permissions", "Quit"])
+                             ["Open folder", "Stop warning about unrestricted permissions", "Quit"])
             self.widget.dismiss_untightened_warning()
         self.widget.set_preference("language", "zh-TW")
-        self.assertEqual(self.widget.menu_labels()[-2:], ["開啟納管目錄", "結束"])
+        self.assertEqual(self.widget.menu_labels()[-2:], ["開啟資料夾", "結束"])
 
 
 if __name__ == "__main__":

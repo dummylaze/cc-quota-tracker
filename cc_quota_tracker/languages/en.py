@@ -154,7 +154,9 @@ STRINGS = {
     "menu.auto_query": "Auto-query usage",
     "menu.add": "Manage the signed-in account…",
     "menu.import": "Import credential file…",
-    "menu.open_dir": "Open managed directory",
+    "menu.open_folder": "Open folder",
+    "menu.open_managed_dir": "Managed directory",
+    "menu.open_settings_dir": "Settings directory",
     "menu.dismiss_untightened": "Stop warning about unrestricted permissions",
     "menu.quit": "Quit",
     "layout.cards": "Card list",
@@ -173,6 +175,8 @@ STRINGS = {
                               "Replace its credential snapshot with this file?",
     "dialog.managed_dir_missing": "The managed directory doesn't exist yet: {directory}\n"
                                   "It is created when you manage the first account.",
+    "dialog.settings_dir_missing": "The settings directory doesn't exist yet: {directory}\n"
+                                   "It is created the first time the tool starts.",
     "dialog.autostart_failed": "Couldn't change start at login: {error}",
     "dialog.auto_query_unreadable": "The settings file can't be read, or its content isn't valid settings.\n"
                                     "The auto-query switch is unchanged.",

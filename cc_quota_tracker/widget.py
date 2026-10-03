@@ -19,6 +19,7 @@ from .board import Board, Preferences
 from .canvas_text import stalled_banner
 from .core import BindingsUnreadable, InvalidLabel, NoCredential
 from .entry import CLICKABLE_TAG
+from .error_log import ErrorLog
 from .layout_a import LayoutA
 from .layout_b import LayoutB
 from .layout_c import LayoutC
@@ -109,6 +110,7 @@ class Widget:
         self._lang = i18n.resolve("system", system_language())  # 目前套用中的語系；第一次套用偏好時會校正
         self._menu_labels = []  # (選單, 項目序號, 語系鍵)：換語系時逐項改字，選單本身不重建
         self._managed = ManagedDirectory(paths.managed_dir)
+        self._error_log = ErrorLog(paths.settings_file.parent, clock)
         self._board: Optional[Board] = None
         self._prefs: Optional[Preferences] = None  # 目前套用中的偏好；None 表示還沒套用過
         self._in_memory = {}  # 設定檔讀不懂時 GUI 的改動（欄位 → 值）：只在記憶體生效，修好設定檔後以設定檔為準
@@ -181,7 +183,10 @@ class Widget:
                         command=self._toggle_auto_query)
         self._add_entry(menu, "command", "menu.add", command=self.add_current_account)
         self._add_entry(menu, "command", "menu.import", command=self.import_credential_file)
-        self._add_entry(menu, "command", "menu.open_dir", command=self.open_managed_dir)
+        folders = tk.Menu(menu, tearoff=0)
+        self._add_entry(folders, "command", "menu.open_managed_dir", command=self.open_managed_dir)
+        self._add_entry(folders, "command", "menu.open_settings_dir", command=self.open_settings_dir)
+        self._add_entry(menu, "cascade", "menu.open_folder", menu=folders)
         self._dismiss_index = menu.index("end") + 1  # 「不再提醒權限未收緊」只在告警亮著時插在這裡
         self._dismiss_shown = False
         menu.add_separator()
@@ -267,7 +272,7 @@ class Widget:
     def refresh(self):
         """poll 一次並渲染，再排下一輪；排程永遠只有一個。這一輪出錯也照樣排下一輪，視窗才不會就此凍結。
         重試寫回設定檔、poll、渲染任一步丟出例外都算這一輪沒有完成：例外不往外丟（由 Tk 排程呼叫時，pythonw 下沒人看得到；
-        由選單或按鈕直接呼叫時，會丟回它們的處理函式），畫面維持最後一次成功的看板，連續 STALL_ROUNDS 輪才亮停止更新橫幅。"""
+        由選單或按鈕直接呼叫時，會丟回它們的處理函式），畫面維持最後一次成功的看板，連續 STALL_ROUNDS 輪才亮停止更新橫幅；錯誤詳情寫進錯誤紀錄（error_log）。"""
         if self._after is not None:
             self.root.after_cancel(self._after)
         missed, self._missed = self._missed, 0  # 先當成會完成：完成的這一輪渲染時橫幅就已熄滅
@@ -280,8 +285,10 @@ class Widget:
             pending = {**self._in_memory, **self._unwritten}
             self._apply(replace(self._board.preferences, **{_ATTRS[f]: v for f, v in pending.items()}))
             self._done_at = self._clock()
-        except Exception:
+            self._error_log.completed()
+        except Exception as e:
             self._missed = missed + 1
+            self._error_log.failed(e)
             if self._missed >= STALL_ROUNDS:
                 try:
                     self._apply(self._prefs or Preferences())  # 從沒套用過偏好時用預設值，才有版面可以亮橫幅
@@ -416,10 +423,14 @@ class Widget:
         messagebox.showinfo(_TITLE, "\n\n".join([done, *warnings]), parent=self.root)
 
     def open_managed_dir(self):
-        directory = self._paths.managed_dir
+        self._open_dir(self._paths.managed_dir, "dialog.managed_dir_missing")
+
+    def open_settings_dir(self):
+        self._open_dir(self._paths.settings_file.parent, "dialog.settings_dir_missing")
+
+    def _open_dir(self, directory: Path, missing_key: str):
         if not directory.is_dir():
-            messagebox.showinfo(_TITLE, text(self._lang, "dialog.managed_dir_missing", directory=directory),
-                                parent=self.root)
+            messagebox.showinfo(_TITLE, text(self._lang, missing_key, directory=directory), parent=self.root)
             return
         if sys.platform == "win32":
             os.startfile(directory)

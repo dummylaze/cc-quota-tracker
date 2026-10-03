@@ -76,7 +76,7 @@ Right-click the window:
 
 ### 3. Drop a file in
 
-Copy a credential file into the managed directory yourself (right-click → *Open managed directory* gets you there), named `<label>.json`. Renaming a file renames the account label; the identity binding is kept.
+Copy a credential file into the managed directory yourself (right-click → *Open folder* → *Managed directory* gets you there), named `<label>.json`. Renaming a file renames the account label; the identity binding is kept.
 
 **Limitation of dropping a file in (and of *Import*):** the file carries no account identifier, so the tool cannot tell which account's readings belong to it. Until that account has been your active account once and Claude Code has written a reading for it, its card shows **Reading pending** and nothing else. With `add` this does not happen, because it binds the account at the moment you run it.
 
@@ -134,9 +134,15 @@ Drag anywhere to move; double-click to switch between compact and expanded. Righ
 - **Theme**: follow system (default), light, dark
 - **Opacity**: 100% (default), 85%, 70%
 - **Start at login** (default off): writes one value to your user's `Run` registry key and removes it when turned off. It does not need administrator rights and touches nothing else. The checkbox always reflects the actual registry value. The registered command points at the Python and the folder it was turned on from; if you move the folder or change Python, the checkbox shows off until you turn it on again.
-- **Add / Import / Open managed directory / Quit**
+- **Add / Import / Open folder / Quit**: *Open folder* has two entries, *Managed directory* and *Settings directory*
 
 The window remembers its position; if that position is no longer on any screen (for example an unplugged monitor) it moves back to the primary screen.
+
+## Error log
+
+Started with `pythonw`, the tool has no console, so an error leaves no trace on screen. Whenever a round does not complete, the error (time and full traceback) is appended to `%APPDATA%\cc-quota-tracker\errors.log`, next to `settings.json` and deliberately not in the managed directory, since the managed directory may be what is failing. To open it, right-click → *Open folder* → *Settings directory*.
+
+An entry is written when a round fails after a completed one, or when the error changes while rounds keep failing; the same error repeating is written once. Past 1 MB the file is renamed to `errors.log.1` (replacing the previous one) and a new `errors.log` starts, so at most about 2 MB are kept. If the log itself cannot be written, the tool carries on without it and without any dialog.
 
 ## Settings file
 
