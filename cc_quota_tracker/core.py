@@ -98,6 +98,7 @@ class Core:
         reading = self._reading
         cards = self._cards(accounts, active, invalid)
         self._maybe_auto_query(cards[0])  # 在建看板之前：這一輪啟動的查詢，這一輪的看板就顯示進行中
+        self._managed.end_round()
         return Board(cards=cards,
                      schema_changed=self._mismatch_rounds >= SCHEMA_CHANGE_ROUNDS,
                      last_reading_at=reading.observed_at if reading else None,
@@ -107,7 +108,11 @@ class Core:
                      settings_unreadable=self._settings_unreadable,
                      as_of=self._clock(), countdown_format=self._countdown_format,
                      preferences=self._preferences, invalid_settings=self._invalid_settings,
-                     usage_query=self._query_status(), permissions_untightened=self._managed.untightened)
+                     usage_query=self._query_status(), permissions_untightened=self._managed.untightened_warning_lit())
+
+    def dismiss_untightened_warning(self) -> None:
+        """使用者從右鍵選單關掉看板的「未收緊」告警（ADR-0008）；下一輪 poll 起看板不再帶這個狀態。"""
+        self._managed.dismiss_untightened_warning()
 
     def start_query(self) -> bool:
         """不阻塞的手動查詢入口，給 GUI 用：立刻返回，之後由 poll 檢查子行程。進行中或冷卻中回傳 False、什麼都不做。

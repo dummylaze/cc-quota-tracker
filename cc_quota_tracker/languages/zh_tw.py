@@ -129,6 +129,7 @@ STRINGS = {
     "menu.add": "納管目前登入的帳號…",
     "menu.import": "匯入憑證檔…",
     "menu.open_dir": "開啟納管目錄",
+    "menu.dismiss_untightened": "不再提醒權限未收緊",
     "menu.quit": "結束",
     "layout.cards": "卡片列表",
     "layout.table": "密集表格／單行條",

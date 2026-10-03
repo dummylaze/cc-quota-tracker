@@ -18,6 +18,8 @@
 - .state/observed.json，上一輪觀測：每輪寫。讀不到時呼叫端這一輪不判定；寫不成丟 OSError。
 - .state/switches.jsonl，切換紀錄：只追加。寫不成丟 OSError，既有的行不變。
 - .state/window.json，視窗位置：寫不成是「這次沒記住」，不丟例外；收不緊權限照常寫入。
+- .state/warnings.json，關掉看板「未收緊」告警的紀錄：使用者關掉時寫，某一輪權限全部收緊成功時清掉。
+  讀不到當成沒關、下次再讀；寫不成不丟例外，記憶體裡照樣生效，下一輪重試寫入。
 
 已知限制：GUI 與命令列是兩個程序，同時寫同一個檔案（例如綁定檔）時沒有跨程序的鎖；兩者在同一輪內交錯時，
 後寫的會蓋掉先寫的。被蓋掉的綁定若屬於使用中帳號，之後的 poll 會補學回來。
@@ -112,15 +114,49 @@ class ManagedDirectory:
         self._readings: Optional[Dict[str, provider.UsageReading]] = None  # 第一次用到才讀檔
         self._lagging: Dict[str, str] = {}  # 帳號識別碼 → 被標為落後的讀數的觀測時間；與 _readings 一起讀、一起寫
         self._untightened = False  # 自上次 begin_round 起，有沒有收緊後查回仍未收緊的路徑
+        self._tightening_checked = False  # 自上次 begin_round 起，有沒有檢查過任何路徑的權限
+        self._warnings_file = self._state_dir / "warnings.json"  # 關掉看板「未收緊」告警的紀錄
+        self._dismissed: Optional[bool] = None  # 第一次用到才讀檔；讀不到時維持 None，下次再讀
+        self._dismissal_unsaved = False  # 記憶體裡的紀錄還沒寫進檔案，下一輪重試
 
     def begin_round(self) -> None:
         """一輪 poll 開始：清掉上一輪的「未收緊」，這一輪再碰到才會再亮。"""
-        self._untightened = False
+        self._untightened = self._tightening_checked = False
 
-    @property
-    def untightened(self) -> bool:
-        """自上次 begin_round（或上一次納管開始）起，有沒有任何一次收緊後查回仍未收緊。判定以行為為準，不查檔案系統的種類。"""
-        return self._untightened
+    def end_round(self) -> None:
+        """一輪 poll 的寫入都做完之後：這一輪有檢查權限且全部收緊成功，就清掉關掉的紀錄（之後再收不緊會重新告警）；
+        否則重試上次沒寫進去的紀錄。"""
+        if self._tightening_checked and not self._untightened and self._untightened_dismissed():
+            self._dismissed, self._dismissal_unsaved = False, True
+        if self._dismissal_unsaved:
+            self._save_dismissal()
+
+    def untightened_warning_lit(self) -> bool:
+        """看板的「未收緊」告警亮著：自上次 begin_round 起有收緊後查回仍未收緊的路徑（判定以行為為準，不查檔案系統的種類），
+        且使用者沒有關掉。"""
+        return self._untightened and not self._untightened_dismissed()
+
+    def _untightened_dismissed(self) -> bool:
+        """使用者關掉了看板的「未收緊」告警。紀錄存在這個納管目錄裡，換目錄就沒有；讀不到當成沒關。"""
+        if self._dismissed is None:
+            state = self._read_state(self._warnings_file)
+            if state is None:
+                return False
+            self._dismissed = state.get("untightenedDismissed") is True
+        return self._dismissed
+
+    def dismiss_untightened_warning(self) -> None:
+        """關掉看板的「未收緊」告警：記憶體裡立刻生效；寫不進去不丟例外，下一輪重試。不影響納管告警。"""
+        self._dismissed = True
+        self._dismissal_unsaved = True
+        self._save_dismissal()
+
+    def _save_dismissal(self) -> None:
+        try:
+            self._write_state(self._warnings_file, {"untightenedDismissed": self._dismissed})
+        except OSError:
+            return
+        self._dismissal_unsaved = False
 
     def permission_state(self) -> PermissionState:
         """納管目錄與其中所有檔案目前的權限狀態。只查不改；查詢本身出錯算未收緊。"""
@@ -138,6 +174,7 @@ class ManagedDirectory:
     def _tighten(self, path: Path, new: bool = False) -> bool:
         """收緊到只有目前使用者能存取。回傳是否修正了原本外露的權限；剛建立的不算。
         收緊回報錯誤、或事後驗證仍不符：不丟例外，記下「未收緊」，呼叫端照常寫入。"""
+        self._tightening_checked = True
         if _private(path):
             return False
         try:

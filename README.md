@@ -84,6 +84,8 @@ Copy a credential file into the managed directory yourself (right-click → *Ope
 
 The managed directory holds long-lived credentials for every account. `add` and *Import* restrict it to your Windows user only (inheritance removed) and check the result afterwards; if the permissions were not as expected, the tool fixes them and tells you. Credential snapshots are **not encrypted** — the protection is the file permissions, so treat the directory like `~/.claude` itself.
 
+Some locations cannot restrict permissions at all — FAT32 and exFAT drives, common on USB sticks. If the managed directory is on one, the tool keeps working as usual and keeps warning you: a banner on the board, and a warning from `add` and *Import*. To silence the board banner, right-click → *Stop warning about unrestricted permissions*; it comes back if you switch to another managed directory, or if the permissions are once restricted successfully and later can't be again. The `add` and *Import* warnings are not affected. If you see the warning while the directory is already on NTFS, check that you are the owner of the directory.
+
 ## Two states that are not faults
 
 | What you see | What it means |

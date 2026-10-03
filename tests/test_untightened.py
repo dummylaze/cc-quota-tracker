@@ -158,3 +158,69 @@ class UntightenedCliTest(CliTestCase):
     def test_check_in_english(self):
         self.write_settings(language="en")
         self.assertIn("Managed directory permissions: not created yet", self.check_line())
+
+
+@contextlib.contextmanager
+def dismissal_unwritable():
+    """關掉的紀錄寫不進去（例如被防毒鎖住）；其他工具狀態照常寫。"""
+    from cc_quota_tracker import atomic
+    original = atomic.write_atomic
+
+    def write(path, *args, **kwargs):
+        if path.name == "warnings.json":
+            raise PermissionError("locked")
+        return original(path, *args, **kwargs)
+    with mock.patch("cc_quota_tracker.atomic.write_atomic", side_effect=write):
+        yield
+
+
+class UntightenedDismissTest(UntightenedTestCase):
+    def dismissed_on_disk(self):
+        path = self.state / "warnings.json"
+        return path.exists() and json.loads(path.read_text(encoding="utf-8")).get("untightenedDismissed") is True
+
+    def test_dismissing_hides_the_warning_and_survives_a_restart(self):
+        with untightenable():
+            self.assertTrue(self.core.poll().permissions_untightened)
+            self.core.dismiss_untightened_warning()
+            self.assertFalse(self.core.poll().permissions_untightened)
+            self.start()  # 重新啟動：記憶體裡的狀態都沒了，只剩納管目錄裡的紀錄
+            self.assertFalse(self.core.poll().permissions_untightened)
+        self.assertTrue(self.dismissed_on_disk())
+
+    def test_another_managed_directory_has_no_dismissal(self):
+        with untightenable():
+            self.core.poll()
+            self.core.dismiss_untightened_warning()
+            self.write_settings(managedDir=str(self.make_dir("elsewhere")))
+            self.start()
+            self.assertTrue(self.core.poll().permissions_untightened)
+
+    def test_a_fully_tightened_round_clears_the_dismissal(self):
+        with untightenable():
+            self.core.poll()
+            self.core.dismiss_untightened_warning()
+        self.assertFalse(self.core.poll().permissions_untightened)
+        self.assertFalse(self.dismissed_on_disk())
+        with untightenable():
+            self.assertTrue(self.core.poll().permissions_untightened)
+
+    def test_add_and_import_still_warn_after_dismissing(self):
+        with untightenable():
+            self.core.poll()
+            self.core.dismiss_untightened_warning()
+            self.log_in()
+            self.assertIn(AddWarning.PERMISSIONS_UNTIGHTENED, self.core.add("work").warnings)
+            imported = self.core.import_snapshot(self.paths.claude_dir / ".credentials.json", "other")
+            self.assertIn(AddWarning.PERMISSIONS_UNTIGHTENED, imported.warnings)
+            self.assertFalse(self.core.poll().permissions_untightened)
+
+    def test_an_unwritable_dismissal_still_hides_the_warning_and_is_retried_next_round(self):
+        with untightenable():
+            self.core.poll()
+            with dismissal_unwritable():
+                self.core.dismiss_untightened_warning()
+                self.assertFalse(self.core.poll().permissions_untightened)
+            self.assertFalse(self.dismissed_on_disk())
+            self.assertFalse(self.core.poll().permissions_untightened)
+        self.assertTrue(self.dismissed_on_disk())

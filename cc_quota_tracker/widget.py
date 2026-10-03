@@ -174,6 +174,8 @@ class Widget:
         self._add_entry(menu, "command", "menu.add", command=self.add_current_account)
         self._add_entry(menu, "command", "menu.import", command=self.import_credential_file)
         self._add_entry(menu, "command", "menu.open_dir", command=self.open_managed_dir)
+        self._dismiss_index = menu.index("end") + 1  # 「不再提醒權限未收緊」只在告警亮著時插在這裡
+        self._dismiss_shown = False
         menu.add_separator()
         self._add_entry(menu, "command", "menu.quit", command=self.close)
 
@@ -188,6 +190,29 @@ class Widget:
     def menu_state(self) -> Preferences:
         return replace(self._prefs, layout=self._layout_var.get(), always_on_top=self._topmost_var.get(), mode=self._mode_var.get(),
                        language=self._language_var.get(), theme=self._theme_var.get(), opacity=self._opacity_var.get())
+
+    def _sync_dismiss_menu(self):
+        """看板帶「未收緊」時才多出「不再提醒權限未收緊」。插入、移除會讓後面項目的序號位移，換語系改字靠序號，
+        所以一併調整。狀態沒變就不碰選單（理由同 _sync_query_menu）。"""
+        lit = self._board is not None and self._board.permissions_untightened
+        if lit == self._dismiss_shown:
+            return
+        self._dismiss_shown = lit
+        menu, at = self._menu, self._dismiss_index
+        if lit:
+            self._menu_labels = [(m, i + 1 if m is menu and i >= at else i, k) for m, i, k in self._menu_labels]
+            menu.insert_command(at, label=text(self._lang, "menu.dismiss_untightened"),
+                                command=self.dismiss_untightened_warning)
+            self._menu_labels.append((menu, at, "menu.dismiss_untightened"))
+        else:
+            menu.delete(at)
+            self._menu_labels = [(m, i - 1 if m is menu and i > at else i, k) for m, i, k in self._menu_labels
+                                 if not (m is menu and i == at)]
+
+    def dismiss_untightened_warning(self):
+        """右鍵選單的「不再提醒權限未收緊」：關掉看板的橫幅並立刻 poll 一次重畫；換納管目錄或權限恢復後會重新出現。"""
+        self._core.dismiss_untightened_warning()
+        self.refresh()
 
     def _sync_query_menu(self):
         """選單的「查詢額度」隨看板的查詢狀態：進行中與冷卻中不可點，其餘任何時候都可用（不必落後）。
@@ -289,6 +314,7 @@ class Widget:
             self._lang = lang
             self._relabel_menu()
         self._sync_query_menu()
+        self._sync_dismiss_menu()
         self._layout_var.set(prefs.layout)
         self._topmost_var.set(prefs.always_on_top)
         self._mode_var.set(prefs.mode)

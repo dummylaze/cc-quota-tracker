@@ -605,5 +605,41 @@ class PositionTest(WidgetTestCase):
         self.assertEqual(json.loads(self.state_file().read_text(encoding="utf-8")), {"x": 321, "y": 123})
 
 
+class DismissUntightenedTest(WidgetTestCase):
+    """看板的「權限無法收緊」橫幅可以從右鍵選單關掉（ADR-0008）。"""
+
+    def untightenable(self):
+        from tests.test_untightened import untightenable
+        return untightenable()
+
+    def banner_shown(self):
+        return any("納管目錄的權限無法收緊" in t for t in visible_texts(self.widget.canvas))
+
+    def test_the_menu_entry_appears_only_while_the_warning_is_lit(self):
+        self.assertNotIn("不再提醒權限未收緊", self.widget.menu_labels())
+        with self.untightenable():
+            self.widget.refresh()
+        labels = self.widget.menu_labels()
+        self.assertEqual(labels[labels.index("開啟納管目錄") + 1], "不再提醒權限未收緊")
+        self.assertTrue(self.banner_shown())
+
+    def test_dismissing_hides_the_banner_and_the_entry(self):
+        with self.untightenable():
+            self.widget.refresh()
+            self.widget.dismiss_untightened_warning()
+        self.assertFalse(self.banner_shown())
+        self.assertNotIn("不再提醒權限未收緊", self.widget.menu_labels())
+
+    def test_the_entry_and_the_entries_after_it_follow_the_language(self):
+        with self.untightenable():
+            self.widget.refresh()
+            self.widget.set_preference("language", "en")
+            self.assertEqual(self.widget.menu_labels()[-3:],
+                             ["Open managed directory", "Stop warning about unrestricted permissions", "Quit"])
+            self.widget.dismiss_untightened_warning()
+        self.widget.set_preference("language", "zh-TW")
+        self.assertEqual(self.widget.menu_labels()[-2:], ["開啟納管目錄", "結束"])
+
+
 if __name__ == "__main__":
     unittest.main()

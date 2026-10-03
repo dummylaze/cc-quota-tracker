@@ -153,6 +153,7 @@ STRINGS = {
     "menu.add": "Manage the signed-in account…",
     "menu.import": "Import credential file…",
     "menu.open_dir": "Open managed directory",
+    "menu.dismiss_untightened": "Stop warning about unrestricted permissions",
     "menu.quit": "Quit",
     "layout.cards": "Card list",
     "layout.table": "Dense table / one-line strip",
