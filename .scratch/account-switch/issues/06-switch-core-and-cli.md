@@ -22,3 +22,7 @@
 ### 尺寸（2026-10-05，切票時記）
 
 切票時就評估本票偏大。實作時如果一個 context 裝不下，把剩下的範圍拆成新票，不在本票延伸。
+
+### 來自 05（2026-10-06）
+
+寫回失敗時，`ManagedDirectory.sync_snapshot` 不再丟 `OSError`，改成記進寫回失敗（`writeback_failures()`）並回傳 `None`；`None` 也可能代表「不必寫」（`05-writeback-retry.md`）。本票的「切走前先同步，同步失敗就拒絕」要用寫回失敗判斷「失敗」，不能用例外判斷。重試中或已停止重試的帳號，原因是 `WRITEBACK_RETRYING`／`WRITEBACK_STOPPED`，所以它們都是僅監看帳號，切換目標檢查會擋下它們。

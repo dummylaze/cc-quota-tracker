@@ -1,6 +1,6 @@
 """把看板渲染成終端機文字；所有文案都在這一層套用，語系由呼叫端指定（i18n）。"""
 from . import COMMAND
-from .board import Board, Card, Limit, ReadingState, Role
+from .board import Board, Card, Limit, ReadingState, Role, WatchOnlyReason
 from .core import AddWarning
 from .fmt import account_label, age, date_time, money, snapshot_expiry, until, watch_only_reason
 from .i18n import ZH_TW, text
@@ -52,10 +52,11 @@ def _render_card(card: Card, board: Board, lang: str) -> str:
             body.insert(0, text(lang, "snapshot.relogin", when=when, command=COMMAND, label=label))
         else:
             body.append(when)
-    if card.watch_only_reason:  # 緊接在標頭下面：原因一行、補救一行；納管帳號不印
-        reason = watch_only_reason(card.watch_only_reason, lang)
-        body[:0] = [text(lang, "list.watch_only", reason=reason),
-                    text(lang, "list.watch_only_remedy", command=COMMAND, label=label)]
+    if card.watch_only_reason:  # 緊接在標頭下面：原因一行、補救一行；納管帳號不印。寫回重試中會自己好，不印補救
+        reason = watch_only_reason(card.watch_only_reason, lang, card.writeback_failures)
+        body[:0] = [text(lang, "list.watch_only", reason=reason)]
+        if card.watch_only_reason is not WatchOnlyReason.WRITEBACK_RETRYING:
+            body.insert(1, text(lang, "list.watch_only_remedy", command=COMMAND, label=label))
     return "\n".join([_header(card, lang)] + ["  " + line for line in body])
 
 

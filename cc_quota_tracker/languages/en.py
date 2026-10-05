@@ -65,6 +65,8 @@ STRINGS = {
                           "\"Manage the signed-in account…\"",
     "note.named": "{label}: {text}",
     "note.watch_only": "Watch-only account ({reason}): sign in to this account in Claude Code, then manage it again",  # reason is watch_only.reason.*
+    "note.writeback_retrying": "Couldn't write back the credential snapshot, retrying automatically {failures}/{attempts}",
+    "note.writeback_stopped": "couldn't write back the credential snapshot, stopped retrying",  # reason of note.watch_only on cards
     "snapshot.expired": "Credential snapshot expired ({when})",
     "snapshot.expires_in": "Credential snapshot expires in {left} ({when})",
     "snapshot.relogin": "{when}: sign in to this account again in Claude Code, then run {command} add {label}",
@@ -107,6 +109,8 @@ STRINGS = {
     "watch_only.reason.expired": "expired",
     "watch_only.reason.invalid": "no longer valid",
     "watch_only.reason.no_account_info": "no account info",
+    "watch_only.reason.writeback_retrying": "write-back failed (retrying {failures}/{attempts})",
+    "watch_only.reason.writeback_stopped": "write-back failed (stopped retrying)",
     "list.schema_changed": "The usage cache structure has changed and this tool can't read the new structure; "
                            "the last successful reading follows ({time})",
     "list.schema_changed_none": "The usage cache structure has changed and this tool can't read the new structure; "

@@ -22,6 +22,9 @@
   相同時才成立，讀數換了就失效並隨寫入清掉；沒有這個欄位的舊檔視為沒有標記。
 - .state/observed.json，上一輪觀測：每輪寫。讀不到時呼叫端這一輪不判定；寫不成丟 OSError。
   invalidSnapshots（持久的失效旗標）與 expiresAt（上一輪當前憑證的到期時間）是後加的欄位，沒有的舊檔視為沒有旗標、不知道到期時間。
+- .state/writeback.json，寫回失敗：憑證同步寫回失敗時記下（沒寫成的憑證快照的憑證指紋 → 當時當前憑證的憑證指紋、失敗次數、
+  是否已停止重試），寫回成功、重新納管或移除（那份憑證指紋不在了）時清掉。讀不到時照樣寫回，但失敗不記次數；
+  寫不成不丟例外，下一輪再記。沒有這個檔的舊版視為沒有寫回失敗。
 - .state/switches.jsonl，切換紀錄：只追加。寫不成丟 OSError，既有的行不變。
 - .state/window.json，視窗位置：寫不成是「這次沒記住」，不丟例外；收不緊權限照常寫入。
 - .state/warnings.json，關掉看板「未收緊」告警的紀錄：使用者關掉時寫，某一輪權限全部收緊成功時清掉。
@@ -39,6 +42,7 @@ from typing import Dict, NamedTuple, Optional, Set, Tuple
 
 from . import atomic
 from . import claude_provider as provider
+from .board import WRITEBACK_ATTEMPTS
 from .credstore import BytesCredentialStore, FileCredentialStore
 from .permissions import is_private, make_private
 
@@ -109,6 +113,13 @@ class Synced(NamedTuple):
         return self.new_fingerprint if fingerprint == self.old_fingerprint else fingerprint
 
 
+class WritebackFailure(NamedTuple):
+    """寫回憑證快照失敗：當時當前憑證的憑證指紋、連續失敗的次數、是否已停止重試。"""
+    credential: str
+    failures: int
+    stopped: bool = False
+
+
 class PermissionState(Enum):
     """納管目錄的權限狀態：只查不改，未收緊不區分原因。"""
     TIGHTENED = "tightened"
@@ -139,6 +150,7 @@ class ManagedDirectory:
         self._switch_log = self._state_dir / "switches.jsonl"
         self._window_position = self._state_dir / "window.json"
         self._bindings_file = self._state_dir / "bindings.json"  # 憑證指紋 → 帳號識別碼
+        self._writeback_file = self._state_dir / "writeback.json"  # 沒寫成的憑證快照的憑證指紋 → 寫回失敗
         self._account_info_dir = self._state_dir / _ACCOUNT_INFO_DIR  # 帳號標籤 → 納管時的帳號資訊
         self._readings_file = self._state_dir / "readings.json"  # 待命帳號的最後讀數
         self._readings: Optional[Dict[str, provider.UsageReading]] = None  # 第一次用到才讀檔
@@ -307,26 +319,80 @@ class ManagedDirectory:
     def sync_snapshot(self, data: bytes) -> Optional[Synced]:
         """憑證同步（ADR-0011）：data 是當前憑證的內容。它的 refreshToken 到期時間與某份憑證快照出自同一次登入、
         只有這一份符合、而且憑證指紋不同，就把 data 寫回那份憑證快照，綁定跟著換到新的憑證指紋；帳號資訊以帳號標籤
-        為鍵，不必動。沒有要寫的（讀不出憑證、沒有或有兩份以上符合、已經相同）回傳 None。
-        綁定檔讀不到時不寫：寫回後綁定換不過去，帳號會被當成沒有帳號資訊。寫不成（含綁定檔讀不到）丟 OSError。"""
+        為鍵，不必動。沒有寫成（讀不出憑證、沒有或有兩份以上符合、已經相同、寫回失敗、已停止重試）回傳 None。
+        寫回失敗不丟例外，記進寫回失敗：同一份當前憑證寫 WRITEBACK_ATTEMPTS 次都失敗就停止重試，當前憑證的指紋改變時
+        重新計數。沒寫成的憑證快照已不是當前憑證那次登入的（例如換了帳號），沒有東西可以重試，直接停止重試。"""
         current = BytesCredentialStore(data)
         fingerprint, credential = current.fingerprint(), current.read()
         expires = credential.refresh_token_expires_at if credential else None
         if fingerprint is None or expires is None:
             return None
-        matches = [a for a in self.list_accounts() if same_login(a.expires_at, expires)]
-        if len(matches) != 1:
-            return None
-        target, old = matches[0], matches[0].fingerprint
-        if old is None or old == fingerprint:
-            return None
+        accounts = self.list_accounts()
+        matches = [a for a in accounts if same_login(a.expires_at, expires)]
+        target = matches[0] if len(matches) == 1 else None
+        old = target.fingerprint if target else None  # 要寫回的那份憑證快照目前的憑證指紋
+        state = self._read_state(self._writeback_file)
+        if state is None:  # 讀不到寫回失敗：照樣寫回，失敗不記次數
+            return self._write_back(target, old, data, fingerprint) if target and old and old != fingerprint else None
+        records = self._live_writeback_failures(state, accounts)
+        if all(a.fingerprint for a in accounts):  # 有憑證快照讀不出指紋：分不出要寫回的是不是它，不動
+            for other, failure in records.items():  # 其他沒寫成的憑證快照：當前憑證已不是那次登入，沒有東西可以重試
+                if other != old and not failure.stopped:
+                    records[other] = failure._replace(stopped=True)
+        synced = None
+        if target and old and old != fingerprint:
+            previous = records.get(old)
+            if previous is not None and previous.credential != fingerprint:
+                previous = None  # 當前憑證又刷新了：重新計數
+            if previous is None or not previous.stopped:
+                synced = self._write_back(target, old, data, fingerprint)
+                if synced:
+                    records.pop(old, None)
+                else:
+                    failed = (previous.failures if previous else 0) + 1
+                    records[old] = WritebackFailure(fingerprint, failed, failed >= WRITEBACK_ATTEMPTS)
+        if records != self._live_writeback_failures(state, None):
+            self._write_writeback_failures(records)
+        return synced
+
+    def writeback_failures(self) -> Dict[str, WritebackFailure]:
+        """沒寫成的憑證快照的憑證指紋 → 寫回失敗。讀不到當成沒有，下一輪再讀。"""
+        return self._live_writeback_failures(self._read_state(self._writeback_file) or {}, None)
+
+    def _live_writeback_failures(self, state: dict, accounts) -> Dict[str, WritebackFailure]:
+        """解析寫回失敗；accounts 不為 None 時只留憑證快照還在、憑證指紋沒變的（寫回成功、重新納管、移除都會換掉），
+        但有憑證快照讀不出憑證指紋時不修剪。單筆讀不懂的略過。"""
+        live = None if accounts is None else {a.fingerprint for a in accounts}
+        records = {}
+        for old, value in state.items():
+            if not isinstance(value, dict) or live is not None and None not in live and old not in live:
+                continue
+            credential, failures = _text(value.get("credential")), value.get("failures")
+            if credential and type(failures) is int and failures > 0:
+                records[old] = WritebackFailure(credential, failures, value.get("stopped") is True)
+        return records
+
+    def _write_writeback_failures(self, records: Dict[str, WritebackFailure]) -> None:
+        """寫不成不丟例外：這一輪的次數沒記住，下一輪再記。"""
+        try:
+            self._write_state(self._writeback_file, {old: {"credential": f.credential, "failures": f.failures,
+                                                           "stopped": f.stopped} for old, f in records.items()})
+        except OSError:
+            pass
+
+    def _write_back(self, target: WatchedAccount, old: str, data: bytes, fingerprint: str) -> Optional[Synced]:
+        """把當前憑證寫回 target（目前的憑證指紋是 old）。綁定檔讀不到時不寫：寫回後綁定換不過去，帳號會被當成
+        沒有帳號資訊。寫不成（含綁定檔讀不到）回傳 None。"""
         bindings = self._read_state(self._bindings_file)
         if bindings is None:
-            raise OSError(f"bindings unreadable: {self._bindings_file}")
-        if old in bindings:
-            bindings[fingerprint] = bindings[old]
-            self._write_state(self._bindings_file, bindings)
-        self._write_snapshot(target.label, data)
+            return None
+        try:
+            if old in bindings:
+                bindings[fingerprint] = bindings[old]
+                self._write_state(self._bindings_file, bindings)
+            self._write_snapshot(target.label, data)
+        except OSError:
+            return None
         return Synced(old, fingerprint)
 
     def remove_snapshot(self, label: str) -> None:

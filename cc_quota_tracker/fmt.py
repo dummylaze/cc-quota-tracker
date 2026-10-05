@@ -2,18 +2,20 @@
 from datetime import datetime, timedelta
 from typing import Optional
 
-from .board import CountdownFormat, Money, WatchOnlyReason
+from .board import WRITEBACK_ATTEMPTS, CountdownFormat, Money, WatchOnlyReason
 from .i18n import text
 
 
 _WATCH_ONLY_REASONS = {WatchOnlyReason.EXPIRED: "watch_only.reason.expired",
                        WatchOnlyReason.INVALID: "watch_only.reason.invalid",
+                       WatchOnlyReason.WRITEBACK_RETRYING: "watch_only.reason.writeback_retrying",
+                       WatchOnlyReason.WRITEBACK_STOPPED: "watch_only.reason.writeback_stopped",
                        WatchOnlyReason.NO_ACCOUNT_INFO: "watch_only.reason.no_account_info"}
 
 
-def watch_only_reason(reason: WatchOnlyReason, lang: str) -> str:
-    """僅監看帳號不能切換的原因：卡片與 list 共用同一組字樣。"""
-    return text(lang, _WATCH_ONLY_REASONS[reason])
+def watch_only_reason(reason: WatchOnlyReason, lang: str, failures: Optional[int] = None) -> str:
+    """僅監看帳號不能切換的原因：卡片與 list 共用同一組字樣。failures 是寫回重試中已失敗的次數。"""
+    return text(lang, _WATCH_ONLY_REASONS[reason], failures=failures, attempts=WRITEBACK_ATTEMPTS)
 
 
 def snapshot_expiry(expires: datetime, now: datetime, fmt: CountdownFormat, lang: str) -> str:

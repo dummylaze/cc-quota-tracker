@@ -6,7 +6,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from enum import Enum
 from pathlib import Path
-from typing import Callable, FrozenSet, NamedTuple, Optional, Tuple
+from typing import Callable, Dict, FrozenSet, NamedTuple, Optional, Tuple
 
 from . import claude_provider as provider
 from . import usage_query
@@ -14,7 +14,8 @@ from .board import (Board, Card, CountdownFormat, Limit, Preferences, QueryFailu
                     Severity, UsageQueryResult, WatchOnlyReason)
 from .credstore import FileCredentialStore
 from .managed_directory import (BindingsUnreadable, InvalidLabel, ManagedDirectory, NoCredential,  # noqa: F401
-                                Observed, PermissionState, Synced, UnknownLabel, check_label, same_login)
+                                Observed, PermissionState, Synced, UnknownLabel, WritebackFailure, check_label,
+                                same_login)
 # 納管會丟的例外定義在納管目錄，核心仍對外匯出：命令列、GUI 與既有測試的匯入路徑不變
 from .settings import (CLAUDE_CONFIG_DIR, COUNTDOWN_FORMAT_FIELD, PathSource, ResolvedPaths, path_fields,
                        read_preferences, read_settings)
@@ -257,7 +258,8 @@ class Core:
                      for a in self._managed.list_accounts())
 
     def _sync(self) -> Optional[Synced]:
-        """憑證同步：把當前憑證寫回出自同一次登入的那份憑證快照。讀不到當前憑證、或寫不成，這一輪就不寫，下一輪再試。"""
+        """憑證同步：把當前憑證寫回出自同一次登入的那份憑證快照。讀不到當前憑證，這一輪就不寫，下一輪再試；
+        寫不成時由納管目錄記下寫回失敗與重試次數。"""
         if not self._sync_credentials:
             return None
         try:
@@ -455,30 +457,39 @@ class Core:
             first = self._active_card(active.key, Role.ACTIVE, active.account_id)
         else:
             first = self._active_card(None, Role.UNWATCHED, self._oauth_account_id)
-        return (self._with_snapshot_state(first, active, invalid),
-                *(self._with_snapshot_state(self._standby_card(a), a, invalid) for a in accounts if a is not active))
+        failures = self._managed.writeback_failures()
+        return (self._with_snapshot_state(first, active, invalid, failures),
+                *(self._with_snapshot_state(self._standby_card(a), a, invalid, failures)
+                  for a in accounts if a is not active))
 
-    def _with_snapshot_state(self, card: Card, account: Optional[_Account], invalid: FrozenSet[str]) -> Card:
+    def _with_snapshot_state(self, card: Card, account: Optional[_Account], invalid: FrozenSet[str],
+                             failures: Dict[str, WritebackFailure]) -> Card:
         """剩不到設定的天數（預設 7 天）才警示：畫面的倒數一律捨去，門檻 7 天時顯示「7天0小時」不警示、
         「6天23小時」起才警示。每輪以當下時間與設定檔目前的值重算。
         順帶標出能不能切換：監看帳號分納管帳號與僅監看帳號，原因的優先順序見 WatchOnlyReason。"""
         if account is None:
             return card
         card = replace(card, snapshot_invalid=account.fingerprint in invalid)
-        reason = self._watch_only_reason(account, card.snapshot_invalid)
-        card = replace(card, switchable=reason is None, watch_only_reason=reason)
+        failure = failures.get(account.fingerprint) if account.fingerprint else None
+        reason = self._watch_only_reason(account, card.snapshot_invalid, failure)
+        card = replace(card, switchable=reason is None, watch_only_reason=reason,
+                       writeback_failures=failure.failures if failure and reason is WatchOnlyReason.WRITEBACK_RETRYING
+                       else None)
         if account.expires_at is None:
             return card
         warning = timedelta(days=self._provider_settings.expiry_warning_days)
         return replace(card, snapshot_expires_at=account.expires_at,
                        snapshot_expiring=account.expires_at - self._clock() < warning)
 
-    def _watch_only_reason(self, account: _Account, invalid: bool) -> Optional[WatchOnlyReason]:
+    def _watch_only_reason(self, account: _Account, invalid: bool,
+                           failure: Optional[WritebackFailure]) -> Optional[WatchOnlyReason]:
         """納管帳號回傳 None。快到期但還沒過期仍是納管帳號；憑證快照沒寫到期時間暫當無效資料，不算過期。"""
         if account.expires_at is not None and account.expires_at <= self._clock():
             return WatchOnlyReason.EXPIRED
         if invalid:
             return WatchOnlyReason.INVALID
+        if failure is not None:
+            return WatchOnlyReason.WRITEBACK_STOPPED if failure.stopped else WatchOnlyReason.WRITEBACK_RETRYING
         return None if account.has_account_info else WatchOnlyReason.NO_ACCOUNT_INFO
 
     def _active_card(self, key: Optional[str], role: Role, owner: Optional[str]) -> Card:

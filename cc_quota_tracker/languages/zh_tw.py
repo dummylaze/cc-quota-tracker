@@ -63,6 +63,8 @@ STRINGS = {
                           "或在視窗按右鍵選「納管目前登入的帳號…」",
     "note.named": "{label}：{text}",
     "note.watch_only": "僅監看帳號（{reason}）：在 Claude Code 登入這個帳號後重新納管",  # reason 是 watch_only.reason.*
+    "note.writeback_retrying": "寫回快照失敗，自動重試 {failures}/{attempts}",
+    "note.writeback_stopped": "寫回快照失敗，已停止重試",  # 卡片上 note.watch_only 的 reason
     "snapshot.expired": "憑證快照已過期（{when}）",
     "snapshot.expires_in": "憑證快照 {left}後到期（{when}）",
     "snapshot.relogin": "{when}：在 Claude Code 重新登入這個帳號，再執行 {command} add {label}",
@@ -96,6 +98,8 @@ STRINGS = {
     "watch_only.reason.expired": "已過期",
     "watch_only.reason.invalid": "已失效",
     "watch_only.reason.no_account_info": "沒有帳號資訊",
+    "watch_only.reason.writeback_retrying": "寫回失敗（重試中 {failures}/{attempts}）",
+    "watch_only.reason.writeback_stopped": "寫回失敗（已停止重試）",
     "list.schema_changed": "額度快取結構已變更，本工具讀不懂新的結構；以下是最後一次成功的讀數（{time}）",
     "list.schema_changed_none": "額度快取結構已變更，本工具讀不懂新的結構；目前沒有成功的讀數",
     "list.query_hint": "讀數落後或待更新：可以執行 {command} query 查詢最新額度，或在 Claude Code 執行 /usage。",

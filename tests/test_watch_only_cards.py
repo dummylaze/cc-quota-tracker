@@ -19,7 +19,7 @@ from tests.test_layout_a import ACTIVE, PERSONAL, visible_texts, window
 
 LAYOUTS = (LayoutA, LayoutB, LayoutC)
 REASONS_ZH = {WatchOnlyReason.EXPIRED: "已過期", WatchOnlyReason.INVALID: "已失效",
-              WatchOnlyReason.NO_ACCOUNT_INFO: "沒有帳號資訊"}
+              WatchOnlyReason.NO_ACCOUNT_INFO: "沒有帳號資訊"}  # 寫回失敗的兩種另見 test_writeback_retry
 REASONS_EN = {WatchOnlyReason.EXPIRED: "expired", WatchOnlyReason.INVALID: "no longer valid",
               WatchOnlyReason.NO_ACCOUNT_INFO: "no account info"}
 EXPIRED_AT = NOW - timedelta(days=1)
@@ -54,7 +54,7 @@ class CardNotesTest(unittest.TestCase):
         return [t for t, _, _ in notes(card, board(card), lang, expiry_info)]
 
     def test_each_reason_has_its_note_in_both_languages(self):
-        for reason in WatchOnlyReason:
+        for reason in REASONS_ZH:
             with self.subTest(reason=reason):
                 self.assertIn(zh_note(reason), self.texts(watch_only(reason)))
                 self.assertIn(en_note(reason), self.texts(watch_only(reason), "en"))
@@ -69,7 +69,7 @@ class CardNotesTest(unittest.TestCase):
                 self.assertEqual(note[1:], colors)
 
     def test_remedy_is_said_only_once(self):
-        for reason in WatchOnlyReason:
+        for reason in REASONS_ZH:
             for expiring in (False, True):
                 with self.subTest(reason=reason, expiring=expiring):
                     card = watch_only(reason)
@@ -91,7 +91,7 @@ class CardNotesTest(unittest.TestCase):
         self.assertEqual(snapshot[1:], ("sub", "fg"))
 
     def test_table_layout_without_expiry_info_shows_only_the_watch_only_note(self):
-        for reason in WatchOnlyReason:
+        for reason in REASONS_ZH:
             with self.subTest(reason=reason):
                 shown = self.texts(watch_only(reason), expiry_info=False)
                 self.assertIn(zh_note(reason), shown)
@@ -126,7 +126,7 @@ class EveryLayoutTest(unittest.TestCase):
 
     def test_every_layout_shows_the_reason_in_both_languages(self):
         for make in LAYOUTS:
-            for reason in WatchOnlyReason:
+            for reason in REASONS_ZH:
                 with self.subTest(layout=make.__name__, reason=reason):
                     self.assertIn(zh_note(reason), self.shown(make, watch_only(reason), "zh-TW"))
                     self.assertIn(en_note(reason), self.shown(make, watch_only(reason), "en"))

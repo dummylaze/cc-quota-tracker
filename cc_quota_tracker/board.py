@@ -11,11 +11,16 @@ class Role(Enum):
     UNWATCHED = "unwatched"
 
 
+WRITEBACK_ATTEMPTS = 3  # 固定值：寫回同一份當前憑證最多寫這麼多次（含第一次），都失敗就停止重試
+
+
 class WatchOnlyReason(Enum):
     """監看帳號不能切換過去的原因（僅監看帳號）。同時符合多個時只帶一個，宣告順序即優先順序。
     補救一律是在 Claude Code 登入該帳號後重新納管。"""
     EXPIRED = "expired"
     INVALID = "invalid"
+    WRITEBACK_RETRYING = "writeback_retrying"  # 憑證同步寫回失敗，之後每輪自動重試；成功就恢復成納管帳號
+    WRITEBACK_STOPPED = "writeback_stopped"  # 寫回失敗已達次數上限、或當前憑證已不是那次登入：不再重試
     NO_ACCOUNT_INFO = "no_account_info"
 
 
@@ -118,6 +123,7 @@ class Card:
     # watch_only_reason 只有僅監看帳號有值；版面與 list 都從這兩個欄位渲染
     switchable: bool = False
     watch_only_reason: Optional[WatchOnlyReason] = None
+    writeback_failures: Optional[int] = None  # 寫回重試中時，已經失敗的次數（1 起算）；其他原因為 None
 
 
 @dataclass(frozen=True)

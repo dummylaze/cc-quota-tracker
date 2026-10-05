@@ -5,8 +5,8 @@ from datetime import datetime
 from typing import Optional, Tuple
 
 from . import COMMAND
-from .board import (AUTO_QUERY_FLOOR_MINUTES, Board, Card, Limit, QueryFailure, QueryStatus, ReadingState, Role,
-                    WatchOnlyReason)
+from .board import (AUTO_QUERY_FLOOR_MINUTES, WRITEBACK_ATTEMPTS, Board, Card, Limit, QueryFailure, QueryStatus,
+                    ReadingState, Role, WatchOnlyReason)
 from .fmt import absolute, age, snapshot_expiry, until, watch_only_reason
 from .i18n import text
 
@@ -39,11 +39,7 @@ def notes(card: Card, board: Board, lang: str, expiry_info: bool = True, short_p
     if card.locked_reason:
         result.append((text(lang, "reading.locked", reason=card.locked_reason), "critical", "critical"))
     if card.watch_only_reason:  # 補救只講一次：由這一條講，快照提示只留到期資訊
-        note = text(lang, "note.watch_only", reason=watch_only_reason(card.watch_only_reason, lang))
-        if card.watch_only_reason is WatchOnlyReason.NO_ACCOUNT_INFO:  # 讀數照常、只是不能切換，不算嚴重
-            result.append((note, "sub", "fg"))
-        else:
-            result.append((note, "critical", "critical"))
+        result.append(_watch_only_note(card, lang))
         if expiry_info and card.snapshot_expires_at is not None:
             result.append((snapshot_expiry(card.snapshot_expires_at, board.as_of, board.countdown_format, lang),
                            "sub", "fg"))
@@ -52,6 +48,20 @@ def notes(card: Card, board: Board, lang: str, expiry_info: bool = True, short_p
         if snapshot:
             result.append(snapshot)
     return result
+
+
+def _watch_only_note(card: Card, lang: str) -> Tuple[str, str, str]:
+    """僅監看帳號那一條。寫回重試中會自己好：整條換成重試的進度，不帶重新納管；沒有帳號資訊讀數照常、只是不能切換，
+    不算嚴重；其他都是 critical。"""
+    reason = card.watch_only_reason
+    if reason is WatchOnlyReason.WRITEBACK_RETRYING:
+        return (text(lang, "note.writeback_retrying", failures=card.writeback_failures, attempts=WRITEBACK_ATTEMPTS),
+                "warning", "fg")
+    # 卡片上寫回失敗的原因用完整的句子，不用 list 的「寫回失敗（已停止重試）」：免得括號裡又有括號
+    shown = (text(lang, "note.writeback_stopped") if reason is WatchOnlyReason.WRITEBACK_STOPPED
+             else watch_only_reason(reason, lang))
+    note = text(lang, "note.watch_only", reason=shown)
+    return (note, "sub", "fg") if reason is WatchOnlyReason.NO_ACCOUNT_INFO else (note, "critical", "critical")
 
 
 def query_entry(card: Card, status: QueryStatus) -> Optional[Tuple[str, bool]]:
