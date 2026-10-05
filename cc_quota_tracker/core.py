@@ -6,7 +6,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from enum import Enum
 from pathlib import Path
-from typing import Callable, Dict, FrozenSet, NamedTuple, Optional, Tuple
+from typing import Callable, Dict, FrozenSet, NamedTuple, Optional, Tuple, Union
 
 from . import atomic
 from . import claude_provider as provider
@@ -53,6 +53,14 @@ class _Account:
     account_id: Optional[str]
     expires_at: Optional[datetime] = None
     has_account_info: bool = False
+
+
+class _SwitchInputs(NamedTuple):
+    """切換寫入之前讀好的東西：當前憑證、Claude Code 設定檔的文字、目標的憑證快照與帳號資訊。"""
+    current: bytes
+    settings: str
+    target_credential: bytes
+    target_account_info: dict
 
 
 @dataclass(frozen=True)
@@ -259,44 +267,39 @@ class Core:
 
     def switch(self, label: str) -> SwitchResult:
         """切換到帳號標籤 label：寫入它的憑證快照，Claude Code 設定檔只改帳號資訊那一個鍵（ADR-0006）。
-        先跑一輪 poll 取得與畫面相同的分類，依序：檢查目標、同步當前憑證、保存切換前憑證、寫入、記切換紀錄。
-        寫入之前的任何一步不成就拒絕，當前憑證與 Claude Code 設定檔都不動。不檢查刷新鎖檔，也不跟其他程序互鎖。"""
-        refused = self._switch_refusal(label)
+        先跑一輪 poll 取得與畫面相同的分類，依序：檢查目標、同步當前憑證、替舊帳號查詢額度（跳過的條件見
+        _old_account_needs_query）、保存切換前憑證、寫入、記切換紀錄、替新帳號查詢額度兼作驗證。
+        寫入之前的任何一步不成就拒絕，當前憑證與 Claude Code 設定檔都不動（查詢只讓 Claude Code 寫它自己的額度快取）。
+        不檢查刷新鎖檔，也不跟其他程序互鎖。這是同步呼叫：兩次查詢最久各等 usage_query.TIMEOUT，GUI 要放在背景執行。"""
+        board = self._poll(auto_query=False)
+        refused = self._switch_refusal(label, board)
         if refused is not None:
             return refused
-        try:  # 以位元組讀再解碼：read_text 會把 CRLF 換成 LF，寫回時就不是逐字保留
-            current = self._credentials.read_bytes()
-            settings = self._source.read_bytes().decode("utf-8")
-            provider.with_account_info(settings, {})  # 先確認改得了這個鍵；寫入時會重讀
-            target = self._managed.switch_target(label)
-        except (OSError, ValueError):
-            return SwitchResult(SwitchOutcome.REFUSED, SwitchRefusal.UNREADABLE)
-        if target is None or BytesCredentialStore(current).fingerprint() is None:
-            return SwitchResult(SwitchOutcome.REFUSED, SwitchRefusal.UNREADABLE)
-        if not self._synced_before_switch(current):
-            return SwitchResult(SwitchOutcome.REFUSED, SwitchRefusal.SYNC_FAILED)
-        data, info = target
-        try:
-            replaced = self._managed.save_pre_switch(current, provider.account_info(settings))
-        except OSError:
-            return SwitchResult(SwitchOutcome.REFUSED, SwitchRefusal.UNWRITABLE)
-        try:
-            atomic.write_atomic(self._credentials, data)
-        except OSError:  # 拒絕不丟掉上一次切換的還原點
-            self._managed.restore_pre_switch(replaced)
-            return SwitchResult(SwitchOutcome.REFUSED, SwitchRefusal.UNWRITABLE)
-        try:  # 讀出到寫回之間盡量短：只用這時讀到的版本，切換開始後才寫進去的內容一併保留
-            text = self._source.read_bytes().decode("utf-8")
-            atomic.write_atomic(self._source, provider.with_account_info(text, info).encode("utf-8"))
-        except (OSError, ValueError):
-            return SwitchResult(SwitchOutcome.WRITE_FAILED)
-        self._record_switch()
-        return SwitchResult(SwitchOutcome.SWITCHED)
+        prepared = self._prepare_switch(label)
+        if isinstance(prepared, SwitchRefusal):
+            return SwitchResult(SwitchOutcome.REFUSED, prepared)
+        old_query_failed = False
+        if self._old_account_needs_query(board.cards[0]):
+            old_query_failed = self._switch_query().failure is not None
+            # 讀數落後的舊帳號：新讀數趁還沒切走就存成它的待命讀數，切換偵測才會拿它判斷離開時落不落後
+            self._refresh()
+            self._remember(self._accounts())
+            # 查詢是 Claude Code 在用當前憑證跑的，它可能順便刷新了憑證：同步與切換前憑證都要拿刷新之後的版本
+            prepared = self._prepare_switch(label)
+            if isinstance(prepared, SwitchRefusal):
+                return SwitchResult(SwitchOutcome.REFUSED, prepared, old_account_query_failed=old_query_failed)
+        result = replace(self._write_switch(prepared), old_account_query_failed=old_query_failed)
+        if result.outcome is not SwitchOutcome.SWITCHED:
+            return result
+        verified = self._switch_query()
+        if verified.failure is None:
+            return result
+        return replace(result, outcome=SwitchOutcome.VERIFY_FAILED, verify_failure=verified)
 
-    def _switch_refusal(self, label: str) -> Optional[SwitchResult]:
+    def _switch_refusal(self, label: str, board: Board) -> Optional[SwitchResult]:
         """依這一輪看板的分類檢查目標；能切換回傳 None。"""
         key = f"{provider.PROVIDER}:{label}"
-        card = next((c for c in self._poll(auto_query=False).cards if c.account_key == key), None)
+        card = next((c for c in board.cards if c.account_key == key), None)
         if card is None:
             return SwitchResult(SwitchOutcome.REFUSED, SwitchRefusal.UNKNOWN_LABEL)
         if card.role is Role.ACTIVE:
@@ -305,6 +308,59 @@ class Core:
             return SwitchResult(SwitchOutcome.REFUSED, SwitchRefusal.WATCH_ONLY, card.watch_only_reason,
                                 card.writeback_failures)
         return None
+
+    def _prepare_switch(self, label: str) -> Union[_SwitchInputs, SwitchRefusal]:
+        """寫入之前要讀的東西與不能寫的條件：讀得到當前憑證、Claude Code 設定檔與目標的憑證快照，切走前的同步成功。
+        以位元組讀再解碼：read_text 會把 CRLF 換成 LF，寫回時就不是逐字保留。"""
+        try:
+            current = self._credentials.read_bytes()
+            settings = self._source.read_bytes().decode("utf-8")
+            provider.with_account_info(settings, {})  # 先確認改得了這個鍵；寫入時會重讀
+            target = self._managed.switch_target(label)
+        except (OSError, ValueError):
+            return SwitchRefusal.UNREADABLE
+        if target is None or BytesCredentialStore(current).fingerprint() is None:
+            return SwitchRefusal.UNREADABLE
+        if not self._synced_before_switch(current):
+            return SwitchRefusal.SYNC_FAILED
+        return _SwitchInputs(current, settings, *target)
+
+    def _write_switch(self, prepared: _SwitchInputs) -> SwitchResult:
+        """保存切換前憑證、寫入目標的憑證與帳號資訊、記切換紀錄。"""
+        try:
+            replaced = self._managed.save_pre_switch(prepared.current, provider.account_info(prepared.settings))
+        except OSError:
+            return SwitchResult(SwitchOutcome.REFUSED, SwitchRefusal.UNWRITABLE)
+        try:
+            atomic.write_atomic(self._credentials, prepared.target_credential)
+        except OSError:  # 拒絕不丟掉上一次切換的還原點
+            self._managed.restore_pre_switch(replaced)
+            return SwitchResult(SwitchOutcome.REFUSED, SwitchRefusal.UNWRITABLE)
+        try:  # 讀出到寫回之間盡量短：只用這時讀到的版本，切換開始後才寫進去的內容一併保留
+            text = self._source.read_bytes().decode("utf-8")
+            atomic.write_atomic(self._source,
+                                provider.with_account_info(text, prepared.target_account_info).encode("utf-8"))
+        except (OSError, ValueError):
+            return SwitchResult(SwitchOutcome.WRITE_FAILED)
+        self._record_switch()
+        return SwitchResult(SwitchOutcome.SWITCHED)
+
+    def _old_account_needs_query(self, active: Card) -> bool:
+        """切換前要不要替舊帳號（當前憑證帳號）查詢額度：它是有綁定的監看帳號，而且讀數落後或待更新
+        （與自動查詢同一條規則），查了它變成待命帳號之後留下的讀數才是新的。未監看帳號沒有待命讀數可更新，
+        沒有綁定的帳號存不了待命讀數，沒有讀數或讀數沒落後的不必查；這些都跳過。"""
+        if active.role is not Role.ACTIVE or not (active.lagging or active.reading_state is ReadingState.PENDING):
+            return False
+        return any(a.key == active.account_key and a.account_id for a in self._accounts())
+
+    def _switch_query(self) -> UsageQueryResult:
+        """切換觸發的同步查詢（ADR-0010 修訂段）：不啟動手動查詢的冷卻，但算進自動查詢的間隔。失敗只由切換的
+        結果值回報，不記進看板的查詢狀態；成功才像其他查詢一樣讓連續失敗歸零、清掉上一次失敗。"""
+        self._last_query_started = self._clock()
+        result = self.query_usage()
+        if result.failure is None:
+            self._consecutive_failures, self._last_query_failure = 0, None
+        return result
 
     def _synced_before_switch(self, current: bytes) -> bool:
         """切走前同步一次（命令列的 poll 不同步，這裡一定要做）。沒寫成以結果判斷，不靠例外：同步之後，

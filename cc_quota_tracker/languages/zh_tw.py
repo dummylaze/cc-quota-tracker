@@ -173,7 +173,7 @@ STRINGS = {
                  "  {command} gui                開啟懸浮視窗；改用 pythonw 執行就不會出現主控台視窗\n"
                  "  {command} switch <帳號標籤> --yes\n"
                  "                               切換到這個納管帳號；--yes 表示不再確認、直接切換。\n"
-                 "                               成功結束代碼 0，拒絕（沒寫任何檔）1，寫了一半 3，沒帶 --yes 2",
+                 "                               成功結束代碼 0，拒絕（沒寫任何檔）1，已寫入但驗證失敗或只寫了一半 3，沒帶 --yes 2",
     "switch.done": "已切換到「{label}」",
     "switch.refused.watch_only": "「{label}」是僅監看帳號（{reason}），不能切換過去：在 Claude Code 登入這個帳號後重新納管",
     "switch.refused.already_active": "「{label}」已經是當前憑證帳號。",
@@ -181,6 +181,7 @@ STRINGS = {
     "switch.refused.unreadable": "讀不到目前的憑證或 Claude Code 的帳號資訊，沒有切換；請稍後再試。",
     "switch.refused.unwritable": "寫不進目前的憑證或切換前憑證（可能被其他程式鎖住），沒有切換；請稍後再試。",
     "switch.write_failed": "已寫入「{label}」的憑證，但沒能改寫 Claude Code 的帳號資訊，兩者目前不一致：請在 Claude Code 重新登入。",
+    "switch.verify_failed": "已切換到「{label}」，但替它查詢額度失敗，沒能確認切換有生效：{reason}",
     "query.success": "額度已更新，最新觀測時間：{time}",
     "query.failed": "查詢額度失敗：{reason}\n可改在 Claude Code 執行 /usage。",
     "query.reason.command_not_found": "找不到 claude 執行檔。請確認有在 PATH 裡，或在設定檔的 providers.claude.claudeCommand "

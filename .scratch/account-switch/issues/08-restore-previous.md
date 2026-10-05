@@ -24,3 +24,7 @@
 ### 來自 06（2026-10-06）
 
 切換前憑證存在納管目錄的 `.state/pre-switch.json`，格式 `{"credentials": <當前憑證原文>, "accountInfo": <帳號資訊或 null>}`，由 `ManagedDirectory.save_pre_switch` 寫入（`06-switch-core-and-cli.md`）。還原要寫回的是 `credentials` 原文，帳號資訊照 06 的做法只換 `oauthAccount` 一個鍵（`claude_provider.with_account_info`）。
+
+### 來自 07（2026-10-06）
+
+`Core.switch` 現在會替舊帳號、新帳號各查一次額度（`07-switch-queries.md`）。還原也是一次切換，要沿用同一套：結果值多了 `SwitchOutcome.VERIFY_FAILED`、`old_account_query_failed`、`verify_failure`；命令列「已寫入但驗證失敗」的訊息在 07 沒有提還原指令（當時 `switch --previous` 還不存在），本票做完後補上。舊帳號查詢之後要重讀當前憑證並再同步一次，再保存切換前憑證（查詢可能順便刷新憑證）；還原的路徑如果自己寫入當前憑證，也要注意這一點。

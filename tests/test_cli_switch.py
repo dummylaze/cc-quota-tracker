@@ -1,6 +1,7 @@
 """命令列 `switch <帳號標籤> --yes`：依切換的結果印出訊息、回傳結束代碼。互動確認由後續的票補上。"""
 import io
 import json
+import os
 from contextlib import redirect_stderr, redirect_stdout
 from datetime import timedelta
 from pathlib import Path
@@ -8,15 +9,16 @@ from unittest import mock
 
 from cc_quota_tracker import atomic
 from cc_quota_tracker.__main__ import main
-from tests.test_credential_sync import HOME, WORK, SyncTestCase
+from tests.fakehome import NOW
+from tests.test_credential_sync import HOME, WORK
+from tests.test_switch import SwitchTestCase
 
 
-class CliSwitchTest(SyncTestCase):
+class CliSwitchTest(SwitchTestCase):
     def setUp(self):
         super().setUp()
-        self.manage("home", "rt-h", "acct-h", HOME)
-        self.manage("work", "rt-w", "acct-w", WORK)
-        self.core.poll()
+        # 命令列讀真實的環境變數：假 claude 是批次檔，要有 COMSPEC 才開得起來
+        self.env.update(SYSTEMROOT=os.environ.get("SYSTEMROOT", ""), COMSPEC=os.environ.get("COMSPEC", ""))
 
     def run_cli(self, *args, system_language="zh-TW"):
         out, err = io.StringIO(), io.StringIO()
@@ -97,18 +99,46 @@ class CliSwitchTest(SyncTestCase):
         self.assertEqual(code, 3)
         self.assertIn("重新登入", err)
 
+    def test_failed_verification_exits_three_but_the_switch_stays_written(self):
+        self.script_queries({0: {"usage": "silent"}})
+        code, out, err = self.run_cli("switch", "home", "--yes")
+        self.assertEqual((code, out), (3, ""))
+        self.assertEqual(err.strip(), "已切換到「home」，但替它查詢額度失敗，沒能確認切換有生效：Claude Code 已結束，但額度快取沒有更新。")
+        self.assertEqual(self.current().read_bytes(), self.snapshot("home").read_bytes())
+
+    def test_failed_verification_in_english(self):
+        self.script_queries({0: {"usage": "error", "message": "Not logged in"}})
+        code, _, err = self.run_cli("switch", "home", "--yes", system_language="en-US")
+        self.assertEqual(code, 3)
+        self.assertEqual(err.strip(), 'Switched to "home", but the usage query for it failed, so the switch '
+                                      "couldn't be confirmed: Claude Code reported an error: Not logged in")
+
+    def test_old_account_query_failure_is_not_mentioned(self):
+        """切換前替舊帳號的查詢失敗：切換照常、訊息與成功時一樣、結束代碼 0。"""
+        self.write_cache(oauth="acct-w", account_uuid="acct-w", fetched_at=NOW - timedelta(hours=3))
+        talk = self.paths.claude_dir / "projects" / "proj" / "s1.jsonl"
+        talk.parent.mkdir(parents=True)
+        talk.write_text('{"type":"user"}\n', encoding="utf-8")
+        os.utime(talk, ((NOW - timedelta(hours=2)).timestamp(),) * 2)
+        self.script_queries({0: {"usage": "silent"}})
+        code, out, err = self.run_cli("switch", "home", "--yes")
+        self.assertEqual((code, out.strip(), err), (0, "已切換到「home」", ""))
+        self.assertEqual(self.starts(), 2)
+
     def test_wrong_arguments_are_a_usage_error(self):
         self.assertEqual(self.run_cli("switch")[0], 2)
         self.assertEqual(self.run_cli("switch", "home", "--yes", "extra")[0], 2)
         self.assertEqual(self.run_cli("switch", "--yes", "--yes")[0], 2)
 
     def test_help_mentions_switch_and_yes(self):
-        for lang, label in (("zh-TW", "switch <帳號標籤>"), ("en-US", "switch <label>")):
+        cases = (("zh-TW", "switch <帳號標籤>", "已寫入但驗證失敗"), ("en-US", "switch <label>", "3 if written but"))
+        for lang, label, exit_three in cases:
             with self.subTest(lang):
                 code, out, _ = self.run_cli("--help", system_language=lang)
                 self.assertEqual(code, 0)
                 self.assertIn(label, out)
                 self.assertIn("--yes", out)
+                self.assertIn(exit_three, out)  # 結束代碼 3 也包含「已寫入但驗證失敗」
 
     def test_switch_log_gets_one_line(self):
         log = self.home / ".claude-multi" / ".state" / "switches.jsonl"

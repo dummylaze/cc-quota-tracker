@@ -161,6 +161,7 @@ class SwitchOutcome(Enum):
     REFUSED = "refused"  # 沒寫當前憑證與 Claude Code 設定檔
     SWITCHED = "switched"
     WRITE_FAILED = "write_failed"  # 當前憑證已寫入，帳號資訊沒寫成：兩者錯配
+    VERIFY_FAILED = "verify_failed"  # 已寫入，但替新帳號查詢額度失敗：沒能確認切換有生效，原因見 SwitchResult.verify_failure
 
 
 class SwitchRefusal(Enum):
@@ -175,11 +176,14 @@ class SwitchRefusal(Enum):
 @dataclass(frozen=True)
 class SwitchResult:
     """切換的結果；GUI 與命令列都只依它呈現。refusal 只在 REFUSED 時有值；watch_only_reason 與
-    writeback_failures 照抄目標卡片上的值。"""
+    writeback_failures 照抄目標卡片上的值。old_account_query_failed：切換前替舊帳號查詢額度失敗了
+    （沒查、查成功都是 False）；不影響切換，也不該另外提示。verify_failure 只在 VERIFY_FAILED 時有值。"""
     outcome: SwitchOutcome
     refusal: Optional[SwitchRefusal] = None
     watch_only_reason: Optional[WatchOnlyReason] = None
     writeback_failures: Optional[int] = None
+    old_account_query_failed: bool = False
+    verify_failure: Optional[UsageQueryResult] = None
 
 
 @dataclass(frozen=True)

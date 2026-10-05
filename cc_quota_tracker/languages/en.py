@@ -204,8 +204,8 @@ STRINGS = {
                  "  {command} gui             open the floating window; run with pythonw to avoid a console window\n"
                  "  {command} switch <label> --yes\n"
                  "                            switch to this managed account; --yes switches without asking again.\n"
-                 "                            Exit code 0 on success, 1 if refused (nothing written), 3 if only partly "
-                 "written, 2 without --yes",
+                 "                            Exit code 0 on success, 1 if refused (nothing written), 3 if written but "
+                 "the usage check failed or only partly written, 2 without --yes",
     "switch.done": "Switched to \"{label}\"",
     "switch.refused.watch_only": "\"{label}\" is a watch-only account ({reason}) and can't be switched to: sign in to "
                                  "this account in Claude Code, then manage it again",
@@ -218,6 +218,8 @@ STRINGS = {
                                  "program may have it locked), so nothing was switched. Try again later.",
     "switch.write_failed": "Wrote the credential of \"{label}\", but couldn't update Claude Code's account info, so "
                            "the two don't match: sign in again in Claude Code.",
+    "switch.verify_failed": "Switched to \"{label}\", but the usage query for it failed, so the switch couldn't be "
+                            "confirmed: {reason}",
     "query.success": "Usage updated. Latest observed time: {time}",
     "query.failed": "Usage query failed: {reason}\nYou can run /usage in Claude Code instead.",
     "query.reason.command_not_found": "Couldn't find the claude executable. Make sure it is on PATH, or set the full "

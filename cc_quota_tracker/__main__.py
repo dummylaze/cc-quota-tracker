@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Optional
 
 from . import COMMAND, claude_provider, i18n
-from .board import QueryFailure, SwitchOutcome, SwitchRefusal
+from .board import QueryFailure, SwitchOutcome, SwitchRefusal, UsageQueryResult
 from .claude_provider import FieldStatus, NoReading, SchemaCheck
 from .core import BindingsUnreadable, Core, InvalidLabel, NoCredential, UnknownLabel
 from .fmt import date_time, watch_only_reason
@@ -112,13 +112,17 @@ def query(core: Core, lang: str) -> int:
     if result.failure is None:
         print(text(lang, "query.success", time=date_time(result.observed_at, lang)))
         return 0
-    if result.failure is QueryFailure.REPORTED_ERROR:  # Claude Code 的原始訊息，不翻譯
-        reason = (text(lang, "query.reason.reported_error", message=result.message) if result.message
-                  else text(lang, "query.reason.reported_error_no_message"))
-    else:
-        reason = text(lang, _QUERY_REASONS[result.failure])
-    print(text(lang, "query.failed", reason=reason), file=sys.stderr)
+    print(text(lang, "query.failed", reason=_query_reason(result, lang)), file=sys.stderr)
     return 1
+
+
+def _query_reason(result: UsageQueryResult, lang: str) -> str:
+    """查詢失敗的原因字樣：`query` 與切換的驗證失敗共用。"""
+    assert result.failure is not None
+    if result.failure is QueryFailure.REPORTED_ERROR:  # Claude Code 的原始訊息，不翻譯
+        return (text(lang, "query.reason.reported_error", message=result.message) if result.message
+                else text(lang, "query.reason.reported_error_no_message"))
+    return text(lang, _QUERY_REASONS[result.failure])
 
 
 def _switch_label(params) -> Optional[str]:
@@ -139,11 +143,17 @@ _SWITCH_REFUSALS = {
 
 
 def switch(core: Core, label: str, lang: str) -> int:
-    """切換到帳號標籤 label：成功結束代碼 0；拒絕（沒寫任何檔）印原因、1；寫了一半 3。"""
+    """切換到帳號標籤 label：成功結束代碼 0；拒絕（沒寫任何檔）印原因、1；已寫入但驗證失敗或寫了一半 3。
+    切換前替舊帳號的查詢失敗不另外提示。"""
     result = core.switch(label)
     if result.outcome is SwitchOutcome.SWITCHED:
         print(text(lang, "switch.done", label=label))
         return 0
+    if result.outcome is SwitchOutcome.VERIFY_FAILED:
+        assert result.verify_failure is not None
+        print(text(lang, "switch.verify_failed", label=label, reason=_query_reason(result.verify_failure, lang)),
+              file=sys.stderr)
+        return 3
     if result.outcome is SwitchOutcome.WRITE_FAILED:
         print(text(lang, "switch.write_failed", label=label), file=sys.stderr)
         return 3

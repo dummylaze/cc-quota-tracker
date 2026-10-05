@@ -10,21 +10,52 @@ from unittest import mock
 from cc_quota_tracker import atomic
 from cc_quota_tracker.board import Role, SwitchOutcome, SwitchRefusal, WatchOnlyReason
 from cc_quota_tracker.core import Core
-from tests.fakehome import NOW, WindowsAclAssertions
+from tests.fakehome import NOW, WindowsAclAssertions, usage_cache
 from tests.test_credential_sync import HOME, WORK, SyncTestCase
-from tests.test_usage_query import claude
+from tests.test_usage_query import claude, install_fake_claude
 
 
 def info(account_uuid):
     return {"accountUuid": account_uuid, "emailAddress": "someone@example.com"}
 
 
+def fetched(n):
+    """假 claude 第 n 次（從 0 起算）被啟動時寫回的觀測時間：一次比一次晚，都在時鐘之前。"""
+    return NOW - timedelta(hours=1) + timedelta(minutes=10 * n)
+
+
 class SwitchTestCase(SyncTestCase):
+    """切換會替新帳號查詢額度：預設有一支每次都寫回新讀數的假 claude，查詢一律成功。"""
+
     def setUp(self):
         super().setUp()
         self.manage("home", "rt-h", "acct-h", HOME)
         self.manage("work", "rt-w", "acct-w", WORK)
+        self.fake_dir = self.home / "fake-bin"
+        self.write_settings(providers=claude(claudeCommand=str(install_fake_claude(self.fake_dir))))
+        self.script_queries()
         self.core.poll()
+
+    def script_queries(self, runs=None):
+        """假 claude 的劇本：第 n 次被啟動時寫回 fetched(n)，runs 是 {n: 那一次要蓋掉的欄位}。
+        每次都記下被啟動當下的當前憑證（credential-at-start-<n>.txt）。"""
+        runs = runs or {}
+        fixed = {"usage": "write", "cache": str(self.paths.claude_json), "credential_path": str(self.current())}
+        script = {**fixed, "runs": [{"usage_cache": usage_cache(fetched_at=fetched(n)), **runs.get(n, {})}
+                                    for n in range(max([4, *runs]) + 1)]}
+        (self.fake_dir / "script.json").write_text(json.dumps(script), encoding="utf-8")
+
+    def queries_write_nothing(self):
+        """假 claude 不碰額度快取：驗證會失敗，但 Claude Code 設定檔的內容只剩切換自己寫的，位元組逐字比對才有意義。"""
+        self.script_queries({n: {"usage": "silent"} for n in range(5)})
+
+    def starts(self):
+        log = self.fake_dir / "starts.log"
+        return len(log.read_text(encoding="utf-8").splitlines()) if log.exists() else 0
+
+    def credential_at_start(self, n):
+        """假 claude 第 n 次被啟動當下的當前憑證。"""
+        return (self.fake_dir / f"credential-at-start-{n}.txt").read_bytes()
 
     def claude_json(self):
         return self.paths.claude_json
@@ -50,6 +81,7 @@ class SwitchTest(SwitchTestCase):
         self.assertEqual((cards[0].account_key, cards[0].role), ("claude:home", Role.ACTIVE))
 
     def test_other_keys_of_the_claude_code_settings_file_are_kept_byte_for_byte(self):
+        self.queries_write_nothing()
         head = '{\n  "numStartups": 1.0,\n  "tipsHistory": {\n    "x": 1e-07\n  },\n  "oauthAccount": '
         tail = ',\n  "名字": "\\u00fc",\n  "projects": {}\n}\n'
         self.claude_json().write_text(head + json.dumps(info("acct-w"), indent=2) + tail, encoding="utf-8")
@@ -75,6 +107,7 @@ class SwitchTest(SwitchTestCase):
         self.assertEqual(data["oauthAccount"], info("acct-h"))
 
     def test_crlf_line_endings_are_kept(self):
+        self.queries_write_nothing()
         head = b'{\r\n  "numStartups": 1,\r\n  "oauthAccount": '
         tail = b',\r\n  "projects": {}\r\n}\r\n'
         self.claude_json().write_bytes(head + json.dumps(info("acct-w")).encode() + tail)
@@ -84,9 +117,9 @@ class SwitchTest(SwitchTestCase):
         self.assertTrue(data.endswith(tail), data)
         self.assertNotIn(b"\n", data.replace(b"\r\n", b""))  # 換進去的帳號資訊也用同一種換行
 
-    def test_the_switch_itself_starts_no_usage_query(self):
-        """看板開著時，切換前那一輪不自動查詢：切換觸發的查詢由後續的票在確認後才做（ADR-0010）。"""
-        self.write_settings(providers=claude(autoUsageQuery=True))
+    def test_the_poll_before_the_switch_starts_no_automatic_query(self):
+        """看板開著時，切換前那一輪不自動查詢：切換的查詢只有切換前後那兩次（ADR-0010 修訂段）。"""
+        self.write_settings(providers=claude(autoUsageQuery=True, claudeCommand=str(self.fake_dir / "claude.cmd")))
         self.write_cache(oauth="acct-w", account_uuid="acct-h")  # 額度快取還是別的帳號的：讀數待更新
         self.clock.advance(hours=1)
         with mock.patch.object(Core, "_launch") as launch:
@@ -96,6 +129,7 @@ class SwitchTest(SwitchTestCase):
         self.assertEqual(launch.call_count, 1)
 
     def test_settings_file_without_account_info_gets_the_key(self):
+        self.queries_write_nothing()
         self.claude_json().write_text('{"projects": {}}', encoding="utf-8")
         self.core.switch("home")
         data = json.loads(self.claude_json().read_text(encoding="utf-8"))
