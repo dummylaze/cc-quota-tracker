@@ -11,7 +11,7 @@ from typing import Callable, FrozenSet, NamedTuple, Optional, Tuple
 from . import claude_provider as provider
 from . import usage_query
 from .board import (Board, Card, CountdownFormat, Limit, Preferences, QueryFailure, QueryStatus, ReadingState, Role,
-                    Severity, UsageQueryResult)
+                    Severity, UsageQueryResult, WatchOnlyReason)
 from .credstore import FileCredentialStore
 from .managed_directory import (BindingsUnreadable, InvalidLabel, ManagedDirectory, NoCredential,  # noqa: F401
                                 Observed, PermissionState, UnknownLabel, check_label)
@@ -44,11 +44,13 @@ class AddWarning(Enum):
 
 @dataclass(frozen=True)
 class _Account:
-    """監看帳號：帳號鍵、憑證快照的憑證指紋、綁定的帳號識別碼（沒有綁定為 None）、refreshToken 的到期時間。"""
+    """監看帳號：帳號鍵、憑證快照的憑證指紋、綁定的帳號識別碼（沒有綁定為 None）、refreshToken 的到期時間、
+    是否附有帳號資訊。"""
     key: str
     fingerprint: Optional[str]
     account_id: Optional[str]
     expires_at: Optional[datetime] = None
+    has_account_info: bool = False
 
 
 @dataclass(frozen=True)
@@ -213,10 +215,12 @@ class Core:
         except OSError:
             raise NoCredential() from None
         try:
-            account_id = provider.account_id(self._source.read_text(encoding="utf-8"))
+            text = self._source.read_text(encoding="utf-8")
         except OSError:
-            account_id = None
-        return self._store(label, data, account_id)
+            account_id, info = None, None
+        else:
+            account_id, info = provider.account_id(text), provider.account_info(text)
+        return self._store(label, data, account_id, info)
 
     def import_snapshot(self, source: Path, label: str) -> AddResult:
         """把一份憑證檔複製進納管目錄成為憑證快照，權限與 add 一樣收緊。不決定綁定：
@@ -226,11 +230,11 @@ class Core:
             data = Path(source).read_bytes()
         except OSError:
             raise NoCredential() from None
-        return self._store(label, data, None)
+        return self._store(label, data, None, None)
 
-    def _store(self, label: str, data: bytes, account_id: Optional[str]) -> AddResult:
-        # 沒有識別碼：同一憑證指紋原有的綁定仍然有效；沒有的話留給之後補學
-        stored = self._managed.store_snapshot(label, data, account_id)
+    def _store(self, label: str, data: bytes, account_id: Optional[str], info: Optional[dict]) -> AddResult:
+        # 沒有識別碼：同一憑證指紋原有的綁定仍然有效；沒有的話留給之後補學。沒有帳號資訊：成為僅監看帳號
+        stored = self._managed.store_snapshot(label, data, account_id, info)
         warnings = {AddWarning.PERMISSIONS_FIXED} if stored.permissions_fixed else set()
         if stored.untightened:
             warnings.add(AddWarning.PERMISSIONS_UNTIGHTENED)
@@ -244,7 +248,8 @@ class Core:
         self._managed.remove_snapshot(label)  # 綁定檔讀不到就不寫：留下的孤兒綁定由之後的 poll 清掉
 
     def _accounts(self) -> Tuple[_Account, ...]:
-        return tuple(_Account(f"{provider.PROVIDER}:{a.label}", a.fingerprint, a.account_id, a.expires_at)
+        return tuple(_Account(f"{provider.PROVIDER}:{a.label}", a.fingerprint, a.account_id, a.expires_at,
+                              a.has_account_info)
                      for a in self._managed.list_accounts())
 
     def _maintain_bindings(self, accounts: Tuple[_Account, ...]) -> Tuple[_Account, ...]:
@@ -415,17 +420,30 @@ class Core:
             first = replace(self._active_card(active.key, Role.ACTIVE, active.account_id), snapshot_invalid=invalid)
         else:
             first = self._active_card(None, Role.UNWATCHED, self._oauth_account_id)
-        return (self._with_expiry(first, active),
-                *(self._with_expiry(self._standby_card(a), a) for a in accounts if a is not active))
+        return (self._with_snapshot_state(first, active),
+                *(self._with_snapshot_state(self._standby_card(a), a) for a in accounts if a is not active))
 
-    def _with_expiry(self, card: Card, account: Optional[_Account]) -> Card:
+    def _with_snapshot_state(self, card: Card, account: Optional[_Account]) -> Card:
         """剩不到設定的天數（預設 7 天）才警示：畫面的倒數一律捨去，門檻 7 天時顯示「7天0小時」不警示、
-        「6天23小時」起才警示。每輪以當下時間與設定檔目前的值重算。"""
-        if account is None or account.expires_at is None:
+        「6天23小時」起才警示。每輪以當下時間與設定檔目前的值重算。
+        順帶標出能不能切換：監看帳號分納管帳號與僅監看帳號，原因的優先順序見 WatchOnlyReason。"""
+        if account is None:
+            return card
+        reason = self._watch_only_reason(account, card.snapshot_invalid)
+        card = replace(card, switchable=reason is None, watch_only_reason=reason)
+        if account.expires_at is None:
             return card
         warning = timedelta(days=self._provider_settings.expiry_warning_days)
         return replace(card, snapshot_expires_at=account.expires_at,
                        snapshot_expiring=account.expires_at - self._clock() < warning)
+
+    def _watch_only_reason(self, account: _Account, invalid: bool) -> Optional[WatchOnlyReason]:
+        """納管帳號回傳 None。快到期但還沒過期仍是納管帳號；憑證快照沒寫到期時間暫當無效資料，不算過期。"""
+        if account.expires_at is not None and account.expires_at <= self._clock():
+            return WatchOnlyReason.EXPIRED
+        if invalid:
+            return WatchOnlyReason.INVALID
+        return None if account.has_account_info else WatchOnlyReason.NO_ACCOUNT_INFO
 
     def _active_card(self, key: Optional[str], role: Role, owner: Optional[str]) -> Card:
         """額度快取的識別碼等於 owner 才歸屬；否則是別的帳號的讀數（例如剛切換），讀數待更新。"""

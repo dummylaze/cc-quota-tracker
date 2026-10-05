@@ -72,7 +72,7 @@ To have the window start when you log into Windows, use *Start at login* in the 
 
 A watched account is one that has a **credential snapshot** in the managed directory: a copy of its login credential that this tool keeps. The snapshots live in the managed directory (`~/.claude-multi/` by default), one file per account; the file name without `.json` is the **account label** shown on screen.
 
-> The label is the only account name the tool ever displays. It never reads or shows your email address. If you pick a label that looks like an email, the tool warns you, because it will appear on screen (and in screenshots).
+> The label is the only account name the tool ever displays. It never shows your email address. (When you manage an account, it keeps a copy of Claude Code's account info, which includes the email, next to the credential snapshot with the same restricted permissions. It is stored only, never displayed or sent anywhere.) If you pick a label that looks like an email, the tool warns you, because it will appear on screen (and in screenshots).
 
 There are three ways in:
 

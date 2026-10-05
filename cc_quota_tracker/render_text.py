@@ -1,12 +1,15 @@
 """把看板渲染成終端機文字；所有文案都在這一層套用，語系由呼叫端指定（i18n）。"""
 from . import COMMAND
-from .board import Board, Card, Limit, ReadingState, Role
+from .board import Board, Card, Limit, ReadingState, Role, WatchOnlyReason
 from .core import AddWarning
 from .fmt import absolute, account_label, age, countdown, date_time, money, until
 from .i18n import ZH_TW, text
 
 _WINDOW_NAMES = {"session": "window.session", "weekly_all": "window.weekly_all", "weekly_scoped": "window.weekly_scoped"}
 _ROLES = {Role.ACTIVE: "role.active", Role.STANDBY: "role.standby"}
+_WATCH_ONLY_REASONS = {WatchOnlyReason.EXPIRED: "watch_only.reason.expired",
+                       WatchOnlyReason.INVALID: "watch_only.reason.invalid",
+                       WatchOnlyReason.NO_ACCOUNT_INFO: "watch_only.reason.no_account_info"}
 _ADD_WARNINGS = {AddWarning.LABEL_LOOKS_LIKE_EMAIL: "add_warning.label_looks_like_email",
                  AddWarning.PERMISSIONS_FIXED: "add_warning.permissions_fixed",
                  AddWarning.PERMISSIONS_UNTIGHTENED: "add_warning.permissions_untightened"}
@@ -59,6 +62,10 @@ def _render_card(card: Card, board: Board, lang: str) -> str:
             body.append(when)
     if card.snapshot_invalid:
         body.insert(0, text(lang, "list.snapshot_invalid", command=COMMAND, label=label))
+    if card.watch_only_reason:  # 緊接在標頭下面：原因一行、補救一行；納管帳號不印
+        reason = text(lang, _WATCH_ONLY_REASONS[card.watch_only_reason])
+        body[:0] = [text(lang, "list.watch_only", reason=reason),
+                    text(lang, "list.watch_only_remedy", command=COMMAND, label=label)]
     return "\n".join([_header(card, lang)] + ["  " + line for line in body])
 
 

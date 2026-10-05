@@ -11,6 +11,14 @@ class Role(Enum):
     UNWATCHED = "unwatched"
 
 
+class WatchOnlyReason(Enum):
+    """監看帳號不能切換過去的原因（僅監看帳號）。同時符合多個時只帶一個，宣告順序即優先順序。
+    補救一律是在 Claude Code 登入該帳號後重新納管。"""
+    EXPIRED = "expired"
+    INVALID = "invalid"
+    NO_ACCOUNT_INFO = "no_account_info"
+
+
 class ReadingState(Enum):
     HAS_READING = "has_reading"
     PENDING = "pending"
@@ -106,6 +114,10 @@ class Card:
     # 憑證快照的 refreshToken 到期時間；未監看帳號或快照沒寫到期時間（暫當無效資料）為 None
     snapshot_expires_at: Optional[datetime] = None
     snapshot_expiring: bool = False  # 剩不到 7 天（含已過期）：要在該帳號下重新登入，再對同一標籤重新 add
+    # 能不能切換過去：監看帳號裡的納管帳號為 True；僅監看帳號與未監看帳號為 False。
+    # watch_only_reason 只有僅監看帳號有值；版面與 list 都從這兩個欄位渲染
+    switchable: bool = False
+    watch_only_reason: Optional[WatchOnlyReason] = None
 
 
 @dataclass(frozen=True)

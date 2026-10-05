@@ -10,6 +10,10 @@
 各檔案的寫入規則與失敗處理（全部在納管目錄底下）：
 - <帳號標籤>.json，憑證快照：本工具只在納管時寫入、移除時刪除（使用者也可能直接放檔進來）。替換前驗證讀得出憑證指紋，讀不出來就丟 NoCredential、
   既有的維持原樣。綁定檔讀不到時納管整個拒絕（BindingsUnreadable），移除照樣刪。
+- .state/account-info/<帳號標籤>.json，帳號資訊（oauthAccount 整份，含 email；只保存、不顯示）：納管時與憑證快照一起寫，
+  沒有帳號資訊的納管（匯入、讀不到）會把同標籤原有的刪掉；移除憑證快照時一併刪，憑證快照已不在的孤兒也在這時清掉。
+  帳號資訊的帳號識別碼必須等於憑證快照綁定的帳號識別碼才算「附有」：使用者手動換掉憑證快照的內容時，舊的帳號資訊不會被沿用。
+  讀不出來的視為沒有。寫不成丟 OSError（憑證快照與綁定已寫成，該帳號暫時是僅監看帳號）；刪不掉的孤兒不丟例外，下次再清。
 - .state/bindings.json，綁定：納管、移除、綁定維護會寫。讀不到時納管拒絕、移除與維護不寫；有憑證快照讀不出
   憑證指紋時只加不清。寫不成丟 OSError，原檔不變。
 - .state/readings.json，待命讀數：記住讀數時寫，綁定被清掉時連帶修剪。讀不到就什麼都不寫，下次再試。
@@ -38,6 +42,7 @@ from .permissions import is_private, make_private
 
 _LAGGING_FIELD = "_lagging"  # 讀數檔裡存落後標記的欄位；帳號識別碼不會是這個名字，舊版讀數檔的讀法會把它當成讀不懂的一筆略過
 _STATE_DIR = ".state"  # 納管目錄底下放工具狀態的子目錄，與憑證快照分開
+_ACCOUNT_INFO_DIR = "account-info"  # 工具狀態目錄底下，一個帳號標籤一個檔，存納管時的帳號資訊
 _ILLEGAL_IN_NAME = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 _RESERVED_NAMES = {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 10)),
                    *(f"LPT{i}" for i in range(1, 10))}
@@ -65,11 +70,12 @@ class BindingsUnreadable(Exception):
 
 class WatchedAccount(NamedTuple):
     """監看帳號：帳號標籤、憑證快照的憑證指紋（讀不出來為 None，即「未知」）、綁定的帳號識別碼（沒有為 None）、
-    憑證快照的到期時間。"""
+    憑證快照的到期時間、是否附有帳號資訊。"""
     label: str
     fingerprint: Optional[str]
     account_id: Optional[str]
     expires_at: Optional[datetime]
+    has_account_info: bool = False
 
 
 class Stored(NamedTuple):
@@ -110,6 +116,7 @@ class ManagedDirectory:
         self._switch_log = self._state_dir / "switches.jsonl"
         self._window_position = self._state_dir / "window.json"
         self._bindings_file = self._state_dir / "bindings.json"  # 憑證指紋 → 帳號識別碼
+        self._account_info_dir = self._state_dir / _ACCOUNT_INFO_DIR  # 帳號標籤 → 納管時的帳號資訊
         self._readings_file = self._state_dir / "readings.json"  # 待命帳號的最後讀數
         self._readings: Optional[Dict[str, provider.UsageReading]] = None  # 第一次用到才讀檔
         self._lagging: Dict[str, str] = {}  # 帳號識別碼 → 被標為落後的讀數的觀測時間；與 _readings 一起讀、一起寫
@@ -165,6 +172,8 @@ class ManagedDirectory:
         paths = [self._path, *(p for p in self._path.iterdir() if p.is_file() or p == self._state_dir)]
         if self._state_dir.is_dir():
             paths += [p for p in self._state_dir.iterdir() if p.is_file()]
+        if self._account_info_dir.is_dir():
+            paths += [self._account_info_dir, *(p for p in self._account_info_dir.iterdir() if p.is_file())]
         try:
             private = all(is_private(p) for p in paths)
         except OSError:
@@ -221,7 +230,8 @@ class ManagedDirectory:
             bound = bindings.get(fingerprint) if fingerprint else None
             account_id = _text(bound.get("accountId")) if isinstance(bound, dict) else None
             accounts.append(WatchedAccount(label, fingerprint, account_id,
-                                           credential.refresh_token_expires_at if credential else None))
+                                           credential.refresh_token_expires_at if credential else None,
+                                           self._has_account_info(label, account_id)))
         return tuple(accounts)
 
     def maintain_bindings(self, learn: Optional[Tuple[str, str]] = None) -> bool:
@@ -240,9 +250,11 @@ class ManagedDirectory:
         self._write_bindings(bindings, live)
         return True
 
-    def store_snapshot(self, label: str, data: bytes, account_id: Optional[str]) -> Stored:
+    def store_snapshot(self, label: str, data: bytes, account_id: Optional[str],
+                       account_info: Optional[dict] = None) -> Stored:
         """納管一份憑證快照：data 是憑證內容，寫成帳號標籤 label 的憑證快照，並記下綁定（account_id 為 None 時
         只沿用同一憑證指紋原有的綁定），順帶清掉被換掉的舊憑證指紋與它的待命讀數。
+        account_info 是納管時登入帳號的整份帳號資訊，與憑證快照一起保存；None 表示這次沒有（例如匯入），同標籤原有的會刪掉。
         依序：帳號標籤不合法丟 InvalidLabel；綁定檔讀不到丟 BindingsUnreadable（寫綁定會洗掉其他帳號的綁定）；
         data 讀不出憑證指紋丟 NoCredential（既有的憑證快照與綁定維持原樣，但納管目錄可能已先建立並收緊）。
         之後事後驗證納管目錄、工具狀態目錄、綁定檔與所有憑證快照的權限，不符就修正並回報。寫不成丟 OSError。"""
@@ -256,9 +268,11 @@ class ManagedDirectory:
         if account_id:
             bindings[fingerprint] = {"accountId": account_id}
         self._write_bindings(bindings, self._live_fingerprints())
+        self._write_account_info(label, account_info)
         fixed = any([self._tighten(self._state_dir), self._tighten(self._bindings_file)]) or fixed
-        # 事後驗證：連同既有的憑證快照一起檢查
+        # 事後驗證：連同既有的憑證快照與帳號資訊一起檢查
         fixed = any([self._tighten(self._snapshot(other)) for other in self._snapshot_labels()]) or fixed
+        fixed = any([self._tighten(p) for p in self._account_info_paths()]) or fixed
         return Stored(fingerprint in bindings, fixed, self._untightened)
 
     def remove_snapshot(self, label: str) -> None:
@@ -267,9 +281,47 @@ class ManagedDirectory:
         if label not in self._snapshot_labels():
             raise UnknownLabel(label)
         atomic.remove(self._snapshot(label))
+        self._prune_account_info()
         bindings = self._read_state(self._bindings_file)
         if bindings is not None:
             self._write_bindings(bindings, self._live_fingerprints())
+
+    def _has_account_info(self, label: str, account_id: Optional[str]) -> bool:
+        """帳號標籤 label 附有帳號資訊：讀得出帳號識別碼，而且等於憑證快照綁定的帳號識別碼（沒有綁定就不算）。"""
+        if account_id is None:
+            return False
+        info = self._read_state(self._account_info_file(label)) or {}
+        return _text(info.get("accountUuid")) == account_id
+
+    def _write_account_info(self, label: str, info: Optional[dict]) -> None:
+        """納管時把帳號資訊存成 label 的檔；沒有帳號資訊就刪掉原有的。順帶清掉憑證快照已不在的孤兒。
+        目錄先收緊再往裡面寫；寫不成丟 OSError。"""
+        if info:
+            self._mkdir_state_dir()
+            self._mkdir_private(self._account_info_dir)
+            self._write_json(self._account_info_file(label), info)
+        elif self._account_info_file(label).exists():
+            atomic.remove(self._account_info_file(label))
+        self._prune_account_info()
+
+    def _prune_account_info(self) -> None:
+        """刪掉憑證快照已不在的帳號資訊，免得它被日後放進同名檔案的別人憑證沿用。刪不掉不丟例外，下次再清。"""
+        labels = set(self._snapshot_labels())
+        for path in self._account_info_paths():
+            if path.suffix == ".json" and path.stem not in labels:
+                try:
+                    atomic.remove(path)
+                except OSError:
+                    pass
+
+    def _account_info_paths(self) -> Tuple[Path, ...]:
+        """帳號資訊的目錄（存在的話）與裡面的檔案。"""
+        if not self._account_info_dir.is_dir():
+            return ()
+        return (self._account_info_dir, *sorted(p for p in self._account_info_dir.iterdir() if p.is_file()))
+
+    def _account_info_file(self, label: str) -> Path:
+        return self._account_info_dir / f"{label}.json"
 
     def _write_snapshot(self, label: str, data: bytes) -> str:
         """替換前先驗證暫存檔讀得出憑證指紋：讀到寫到一半的憑證時，既有的憑證快照維持原樣。回傳憑證指紋。"""

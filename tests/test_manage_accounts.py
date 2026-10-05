@@ -115,12 +115,12 @@ class AddTest(ManageTestCase):
         self.core.poll()
         self.assertEqual([(p.read_bytes(), p.stat().st_mtime_ns) for p in watched], before)
 
-    def test_email_from_claude_json_is_never_stored(self):
-        self.log_in()  # oauthAccount 帶著 emailAddress
+    def test_email_from_claude_json_is_stored_only_as_account_info(self):
+        self.log_in()  # oauthAccount 帶著 emailAddress：整份帳號資訊只存在帳號資訊檔，其他檔案一律不帶
         self.core.add("work")
-        for path in (self.home / ".claude-multi").rglob("*"):
-            if path.is_file():
-                self.assertNotIn(b"example.com", path.read_bytes(), path.name)
+        holders = [p for p in (self.home / ".claude-multi").rglob("*")
+                   if p.is_file() and b"example.com" in p.read_bytes()]
+        self.assertEqual([p.parent.name for p in holders], ["account-info"])
 
     def test_add_returns_provider_prefixed_account_key(self):
         self.log_in()
@@ -326,9 +326,10 @@ class AtomicWriteTest(ManageTestCase):
         real, calls = os.unlink, []
 
         def flaky(path, *args, **kwargs):
-            calls.append(path)
-            if len(calls) <= 3:
-                raise PermissionError("locked by another process")
+            if Path(path) == self.snapshot("work"):  # 移除憑證快照時也會刪它的帳號資訊，那不是這裡要注入故障的對象
+                calls.append(path)
+                if len(calls) <= 3:
+                    raise PermissionError("locked by another process")
             real(path, *args, **kwargs)
         with mock.patch("os.unlink", side_effect=flaky):
             self.core.remove("work")

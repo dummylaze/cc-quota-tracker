@@ -305,12 +305,22 @@ def transcripts_modified_after(transcripts: Path, since: float) -> bool:
 
 
 def account_id(text: str) -> Optional[str]:
-    """目前登入帳號的識別碼（oauthAccount.accountUuid）；oauthAccount 裡的其他欄位（含 email）一律不取。"""
+    """目前登入帳號的識別碼（oauthAccount.accountUuid）；這個函式只取識別碼，整份帳號資訊見 account_info。"""
     try:
         value = json.loads(text)["oauthAccount"]["accountUuid"]
     except (ValueError, KeyError, TypeError):
         return None
     return value if isinstance(value, str) and value else None
+
+
+def account_info(text: str) -> Optional[dict]:
+    """目前登入帳號的整份帳號資訊（oauthAccount）。沒有帳號識別碼的不算帳號資訊。
+    內容（含 email）只交給納管目錄保存，不得顯示。"""
+    try:
+        value = json.loads(text)["oauthAccount"]
+    except (ValueError, KeyError, TypeError):
+        return None
+    return value if isinstance(value, dict) and account_id(text) else None
 
 
 def _to_reading(cache: dict) -> UsageReading:

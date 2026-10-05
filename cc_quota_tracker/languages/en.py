@@ -104,6 +104,11 @@ STRINGS = {
     "list.none_watched": "No accounts managed yet",
     "list.snapshot_invalid": "Credential snapshot is no longer valid, please manage it again: Claude Code is signed in "
                              "to this account; run {command} add {label}",
+    "list.watch_only": "Watch-only account: {reason}",
+    "list.watch_only_remedy": "To manage it again: sign in to this account in Claude Code, then run {command} add {label}",
+    "watch_only.reason.expired": "expired",
+    "watch_only.reason.invalid": "no longer valid",
+    "watch_only.reason.no_account_info": "no account info",
     "list.schema_changed": "The usage cache structure has changed and this tool can't read the new structure; "
                            "the last successful reading follows ({time})",
     "list.schema_changed_none": "The usage cache structure has changed and this tool can't read the new structure; "
