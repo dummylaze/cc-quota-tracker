@@ -323,6 +323,50 @@ def account_info(text: str) -> Optional[dict]:
     return value if isinstance(value, dict) and account_id(text) else None
 
 
+def with_account_info(text: str, info: dict) -> str:
+    """把 ~/.claude.json 的 oauthAccount 換成 info，其他內容逐字保留（不重新序列化，數字與跳脫寫法都不變）；
+    沒有這個鍵就加在最後。text 不是 JSON 物件丟 ValueError。"""
+    decoder, ws = json.JSONDecoder(), " \t\r\n"
+
+    def skip(i: int) -> int:
+        while i < len(text) and text[i] in ws:
+            i += 1
+        return i
+
+    i = skip(0)
+    if text[i:i + 1] != "{":
+        raise ValueError("not a JSON object")
+    i, span, last = skip(i + 1), None, None
+    while text[i:i + 1] != "}":
+        key, i = decoder.raw_decode(text, i)
+        if not isinstance(key, str):
+            raise ValueError("expected a key")
+        i = skip(i)
+        if text[i:i + 1] != ":":
+            raise ValueError("expected ':'")
+        start = skip(i + 1)
+        _, i = decoder.raw_decode(text, start)
+        if key == "oauthAccount":
+            span = (start, i)
+        last, i = i, skip(i)
+        if text[i:i + 1] == ",":
+            i = skip(i + 1)
+        elif text[i:i + 1] != "}":
+            raise ValueError("expected ',' or '}'")
+    if text[skip(i + 1):]:
+        raise ValueError("trailing data")
+    if span is not None:  # 縮排跟著鍵所在的那一行、換行跟著檔案；單行的檔案也照樣是合法的 JSON
+        line = text[text.rfind("\n", 0, span[0]) + 1:span[0]]
+        indent = line[:len(line) - len(line.lstrip(ws))]
+        newline = "\r\n" if "\r\n" in text else "\n"
+        value = json.dumps(info, indent=2, ensure_ascii=False).replace("\n", newline + indent)
+        return text[:span[0]] + value + text[span[1]:]
+    value = json.dumps(info, ensure_ascii=False)
+    insert = last if last is not None else i
+    separator = ", " if last is not None else ""
+    return text[:insert] + separator + '"oauthAccount": ' + value + text[insert:]
+
+
 def _to_reading(cache: dict) -> UsageReading:
     usage = cache["utilization"]
     items = usage["limits"]

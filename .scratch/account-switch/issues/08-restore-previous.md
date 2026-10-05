@@ -20,3 +20,7 @@
 ### 依賴補記（2026-10-05，切票時記）
 
 「寫入後查詢額度、驗證失敗回 3」這一項沿用 `07-switch-queries.md` 的做法。如果本票先做、07 還沒完成，這一項委派給 07 驗證，07 結案時回頭勾選。
+
+### 來自 06（2026-10-06）
+
+切換前憑證存在納管目錄的 `.state/pre-switch.json`，格式 `{"credentials": <當前憑證原文>, "accountInfo": <帳號資訊或 null>}`，由 `ManagedDirectory.save_pre_switch` 寫入（`06-switch-core-and-cli.md`）。還原要寫回的是 `credentials` 原文，帳號資訊照 06 的做法只換 `oauthAccount` 一個鍵（`claude_provider.with_account_info`）。

@@ -157,6 +157,31 @@ class UsageQueryResult:
     message: Optional[str] = None
 
 
+class SwitchOutcome(Enum):
+    REFUSED = "refused"  # 沒寫當前憑證與 Claude Code 設定檔
+    SWITCHED = "switched"
+    WRITE_FAILED = "write_failed"  # 當前憑證已寫入，帳號資訊沒寫成：兩者錯配
+
+
+class SwitchRefusal(Enum):
+    UNKNOWN_LABEL = "unknown_label"
+    WATCH_ONLY = "watch_only"  # 目標是僅監看帳號（含過期），原因見 SwitchResult.watch_only_reason
+    ALREADY_ACTIVE = "already_active"  # 目標就是當前憑證帳號
+    SYNC_FAILED = "sync_failed"  # 當前憑證帳號是監看帳號，切走前的憑證同步沒寫成
+    UNREADABLE = "unreadable"  # 讀不到當前憑證或 Claude Code 設定檔（被鎖住、讀不懂、沒登入）
+    UNWRITABLE = "unwritable"  # 切換前憑證或當前憑證寫不進去，當前憑證維持原樣
+
+
+@dataclass(frozen=True)
+class SwitchResult:
+    """切換的結果；GUI 與命令列都只依它呈現。refusal 只在 REFUSED 時有值；watch_only_reason 與
+    writeback_failures 照抄目標卡片上的值。"""
+    outcome: SwitchOutcome
+    refusal: Optional[SwitchRefusal] = None
+    watch_only_reason: Optional[WatchOnlyReason] = None
+    writeback_failures: Optional[int] = None
+
+
 @dataclass(frozen=True)
 class QueryStatus:
     """查詢額度的狀態，只存在記憶體，重新啟動後從頭開始。in_progress 與 cooling_down 時不能再觸發；

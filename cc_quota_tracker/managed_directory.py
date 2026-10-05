@@ -26,6 +26,8 @@
   是否已停止重試），寫回成功、重新納管或移除（那份憑證指紋不在了）時清掉。讀不到時照樣寫回，但失敗不記次數；
   寫不成不丟例外，下一輪再記。沒有這個檔的舊版視為沒有寫回失敗。
 - .state/switches.jsonl，切換紀錄：只追加。寫不成丟 OSError，既有的行不變。
+- .state/pre-switch.json，切換前憑證（當前憑證原文＋帳號資訊，含 email；只保存、不顯示）：每次切換在寫入當前憑證之前覆寫，
+  只有一份。寫不成丟 OSError，呼叫端不切換。
 - .state/window.json，視窗位置：寫不成是「這次沒記住」，不丟例外；收不緊權限照常寫入。
 - .state/warnings.json，關掉看板「未收緊」告警的紀錄：使用者關掉時寫，某一輪權限全部收緊成功時清掉。
   讀不到當成沒關、下次再讀；寫不成不丟例外，記憶體裡照樣生效，下一輪重試寫入。
@@ -152,6 +154,7 @@ class ManagedDirectory:
         self._bindings_file = self._state_dir / "bindings.json"  # 憑證指紋 → 帳號識別碼
         self._writeback_file = self._state_dir / "writeback.json"  # 沒寫成的憑證快照的憑證指紋 → 寫回失敗
         self._account_info_dir = self._state_dir / _ACCOUNT_INFO_DIR  # 帳號標籤 → 納管時的帳號資訊
+        self._pre_switch_file = self._state_dir / "pre-switch.json"  # 切換前憑證，只有一份
         self._readings_file = self._state_dir / "readings.json"  # 待命帳號的最後讀數
         self._readings: Optional[Dict[str, provider.UsageReading]] = None  # 第一次用到才讀檔
         self._lagging: Dict[str, str] = {}  # 帳號識別碼 → 被標為落後的讀數的觀測時間；與 _readings 一起讀、一起寫
@@ -394,6 +397,43 @@ class ManagedDirectory:
         except OSError:
             return None
         return Synced(old, fingerprint)
+
+    def switch_target(self, label: str) -> Optional[Tuple[bytes, dict]]:
+        """切換到帳號標籤 label 要寫的內容：憑證快照的位元組與帳號資訊。沒有這份憑證快照、或沒有附帳號資訊回傳 None；
+        讀不到丟 OSError。"""
+        if label not in self._snapshot_labels():
+            return None
+        accounts = {a.label: a for a in self.list_accounts()}
+        account = accounts.get(label)
+        if account is None or not account.has_account_info:
+            return None
+        info = self._read_state(self._account_info_file(label))
+        if info is None:
+            raise OSError("account info unreadable")
+        return self._snapshot(label).read_bytes(), info
+
+    def save_pre_switch(self, credentials: bytes, account_info: Optional[dict]) -> Optional[bytes]:
+        """保存切換前憑證：切換當下的當前憑證（原樣）與帳號資訊（讀不到為 None）。只有一份，每次切換都覆寫；
+        放在工具狀態目錄，不是憑證快照，不產生卡片。回傳被蓋掉的那份（原本沒有為 None），切換沒寫成時交給
+        restore_pre_switch 放回去。原本那份讀不到、或寫不成都丟 OSError，原檔不變。"""
+        try:
+            replaced: Optional[bytes] = self._pre_switch_file.read_bytes()
+        except FileNotFoundError:
+            replaced = None
+        self._write_state(self._pre_switch_file, {"credentials": credentials.decode("utf-8"),
+                                                  "accountInfo": account_info})
+        return replaced
+
+    def restore_pre_switch(self, replaced: Optional[bytes]) -> None:
+        """放回 save_pre_switch 蓋掉的那份；原本沒有就刪掉。放不回去不丟例外：還原點這次就丟了。"""
+        try:
+            if replaced is None:
+                atomic.remove(self._pre_switch_file)
+            else:
+                atomic.write_atomic(self._pre_switch_file, replaced,
+                                    before_replace=lambda tmp: self._tighten(tmp, new=True))
+        except OSError:
+            pass
 
     def remove_snapshot(self, label: str) -> None:
         """移除帳號標籤 label 的憑證快照，清掉它的孤兒綁定與待命讀數。沒有這份憑證快照丟 UnknownLabel。

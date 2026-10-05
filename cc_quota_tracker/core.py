@@ -1,4 +1,4 @@
-"""核心：接收解析後的路徑與時鐘，對外只有 poll、add、remove。"""
+"""核心：接收解析後的路徑與時鐘，對外只有 poll、add、remove、switch。"""
 import os
 import re
 import time
@@ -8,11 +8,12 @@ from enum import Enum
 from pathlib import Path
 from typing import Callable, Dict, FrozenSet, NamedTuple, Optional, Tuple
 
+from . import atomic
 from . import claude_provider as provider
 from . import usage_query
 from .board import (Board, Card, CountdownFormat, Limit, Preferences, QueryFailure, QueryStatus, ReadingState, Role,
-                    Severity, UsageQueryResult, WatchOnlyReason)
-from .credstore import FileCredentialStore
+                    Severity, SwitchOutcome, SwitchRefusal, SwitchResult, UsageQueryResult, WatchOnlyReason)
+from .credstore import BytesCredentialStore, FileCredentialStore
 from .managed_directory import (BindingsUnreadable, InvalidLabel, ManagedDirectory, NoCredential,  # noqa: F401
                                 Observed, PermissionState, Synced, UnknownLabel, WritebackFailure, check_label,
                                 same_login)
@@ -94,6 +95,9 @@ class Core:
         self._consecutive_failures = 0  # 查詢連續失敗的次數，一次成功歸零
 
     def poll(self) -> Board:
+        return self._poll(self._auto_query)
+
+    def _poll(self, auto_query: bool) -> Board:
         self._managed.begin_round()
         self._poll_query()  # 先於 _refresh：查詢剛寫回的額度快取，這一輪就讀得到
         self._refresh()
@@ -104,7 +108,8 @@ class Core:
         active, invalid = self._observe(accounts, synced)
         reading = self._reading
         cards = self._cards(accounts, active, invalid)
-        self._maybe_auto_query(cards[0])  # 在建看板之前：這一輪啟動的查詢，這一輪的看板就顯示進行中
+        if auto_query:
+            self._maybe_auto_query(cards[0])  # 在建看板之前：這一輪啟動的查詢，這一輪的看板就顯示進行中
         self._managed.end_round()
         return Board(cards=cards,
                      schema_changed=self._mismatch_rounds >= SCHEMA_CHANGE_ROUNDS,
@@ -143,7 +148,7 @@ class Core:
         且距離「工具上一次查詢的開始」與「目前讀數的觀測時間」兩者中較晚的那個已滿一個間隔
         （後者讓使用者自己打的 /usage 也算一次）。閒置時讀數不落後，所以自然不查。"""
         settings, reading = self._provider_settings, self._reading
-        if (not self._auto_query or not settings.auto_usage_query or self._query is not None
+        if (not settings.auto_usage_query or self._query is not None
                 or self._consecutive_failures >= AUTO_QUERY_PAUSE_AFTER or reading is None
                 or not (active.lagging or active.reading_state is ReadingState.PENDING)):
             return
@@ -251,6 +256,74 @@ class Core:
 
     def remove(self, label: str) -> None:
         self._managed.remove_snapshot(label)  # 綁定檔讀不到就不寫：留下的孤兒綁定由之後的 poll 清掉
+
+    def switch(self, label: str) -> SwitchResult:
+        """切換到帳號標籤 label：寫入它的憑證快照，Claude Code 設定檔只改帳號資訊那一個鍵（ADR-0006）。
+        先跑一輪 poll 取得與畫面相同的分類，依序：檢查目標、同步當前憑證、保存切換前憑證、寫入、記切換紀錄。
+        寫入之前的任何一步不成就拒絕，當前憑證與 Claude Code 設定檔都不動。不檢查刷新鎖檔，也不跟其他程序互鎖。"""
+        refused = self._switch_refusal(label)
+        if refused is not None:
+            return refused
+        try:  # 以位元組讀再解碼：read_text 會把 CRLF 換成 LF，寫回時就不是逐字保留
+            current = self._credentials.read_bytes()
+            settings = self._source.read_bytes().decode("utf-8")
+            provider.with_account_info(settings, {})  # 先確認改得了這個鍵；寫入時會重讀
+            target = self._managed.switch_target(label)
+        except (OSError, ValueError):
+            return SwitchResult(SwitchOutcome.REFUSED, SwitchRefusal.UNREADABLE)
+        if target is None or BytesCredentialStore(current).fingerprint() is None:
+            return SwitchResult(SwitchOutcome.REFUSED, SwitchRefusal.UNREADABLE)
+        if not self._synced_before_switch(current):
+            return SwitchResult(SwitchOutcome.REFUSED, SwitchRefusal.SYNC_FAILED)
+        data, info = target
+        try:
+            replaced = self._managed.save_pre_switch(current, provider.account_info(settings))
+        except OSError:
+            return SwitchResult(SwitchOutcome.REFUSED, SwitchRefusal.UNWRITABLE)
+        try:
+            atomic.write_atomic(self._credentials, data)
+        except OSError:  # 拒絕不丟掉上一次切換的還原點
+            self._managed.restore_pre_switch(replaced)
+            return SwitchResult(SwitchOutcome.REFUSED, SwitchRefusal.UNWRITABLE)
+        try:  # 讀出到寫回之間盡量短：只用這時讀到的版本，切換開始後才寫進去的內容一併保留
+            text = self._source.read_bytes().decode("utf-8")
+            atomic.write_atomic(self._source, provider.with_account_info(text, info).encode("utf-8"))
+        except (OSError, ValueError):
+            return SwitchResult(SwitchOutcome.WRITE_FAILED)
+        self._record_switch()
+        return SwitchResult(SwitchOutcome.SWITCHED)
+
+    def _switch_refusal(self, label: str) -> Optional[SwitchResult]:
+        """依這一輪看板的分類檢查目標；能切換回傳 None。"""
+        key = f"{provider.PROVIDER}:{label}"
+        card = next((c for c in self._poll(auto_query=False).cards if c.account_key == key), None)
+        if card is None:
+            return SwitchResult(SwitchOutcome.REFUSED, SwitchRefusal.UNKNOWN_LABEL)
+        if card.role is Role.ACTIVE:
+            return SwitchResult(SwitchOutcome.REFUSED, SwitchRefusal.ALREADY_ACTIVE)
+        if not card.switchable:
+            return SwitchResult(SwitchOutcome.REFUSED, SwitchRefusal.WATCH_ONLY, card.watch_only_reason,
+                                card.writeback_failures)
+        return None
+
+    def _synced_before_switch(self, current: bytes) -> bool:
+        """切走前同步一次（命令列的 poll 不同步，這裡一定要做）。沒寫成以結果判斷，不靠例外：同步之後，
+        當前憑證仍對不上任何憑證快照、卻有唯一一份出自同一次登入的，就是沒寫成（含重試中與已停止重試）。
+        當前憑證帳號是未監看帳號、或快照已失效（沒有同一次登入的快照）時沒有東西要同步。"""
+        self._managed.sync_snapshot(current)
+        store = BytesCredentialStore(current)
+        fingerprint, credential = store.fingerprint(), store.read()
+        expires = credential.refresh_token_expires_at if credential else None
+        accounts = self._accounts()
+        if any(a.fingerprint == fingerprint for a in accounts):
+            return True
+        return len([a for a in accounts if same_login(a.expires_at, expires)]) != 1
+
+    def _record_switch(self) -> None:
+        """寫入後馬上跑一次切換偵測：以寫入時間追加切換紀錄、推進上一輪的觀測，之後的 poll 就不會再記同一次切換。
+        離開的帳號的讀數也照常判斷落後。紀錄寫不成時由下一輪 poll 補記。"""
+        self._refresh()
+        self._observe(self._accounts(), None)
 
     def _accounts(self) -> Tuple[_Account, ...]:
         return tuple(_Account(f"{provider.PROVIDER}:{a.label}", a.fingerprint, a.account_id, a.expires_at,

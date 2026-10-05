@@ -6,10 +6,10 @@ from pathlib import Path
 from typing import Optional
 
 from . import COMMAND, claude_provider, i18n
-from .board import QueryFailure
+from .board import QueryFailure, SwitchOutcome, SwitchRefusal
 from .claude_provider import FieldStatus, NoReading, SchemaCheck
 from .core import BindingsUnreadable, Core, InvalidLabel, NoCredential, UnknownLabel
-from .fmt import date_time
+from .fmt import date_time, watch_only_reason
 from .i18n import text
 from .managed_directory import ManagedDirectory, PermissionState
 from .render_text import add_warning, render
@@ -42,7 +42,9 @@ def main(argv=None) -> int:
     if (command, len(params)) in {("--help", 0), ("-h", 0)}:  # 使用者主動要用法：stdout、成功
         print(text(configured_language(None), "cli.usage", command=COMMAND))
         return 0
-    if (command, len(params)) not in {("add", 1), ("remove", 1), ("list", 0), ("query", 0), ("check", 0), ("gui", 0)}:
+    switch_label = _switch_label(params) if command == "switch" else None
+    if switch_label is None and (command, len(params)) not in {("add", 1), ("remove", 1), ("list", 0), ("query", 0),
+                                                               ("check", 0), ("gui", 0)}:
         print(text(configured_language(None), "cli.usage", command=COMMAND), file=sys.stderr)  # 還沒解析路徑，讀不到設定檔
         return 2
     try:
@@ -69,6 +71,8 @@ def main(argv=None) -> int:
         print(text(lang, "notice", text=text(lang, "settings.unreadable")), file=sys.stderr)
     if command == "query":
         return query(core, lang)
+    if switch_label is not None:
+        return switch(core, switch_label, lang)
     label = params[0]
     try:
         if command == "add":
@@ -114,6 +118,44 @@ def query(core: Core, lang: str) -> int:
     else:
         reason = text(lang, _QUERY_REASONS[result.failure])
     print(text(lang, "query.failed", reason=reason), file=sys.stderr)
+    return 1
+
+
+def _switch_label(params) -> Optional[str]:
+    """`switch <帳號標籤> --yes`（順序不拘）的帳號標籤；不是這個形狀就是 None（用法錯誤）。
+    沒帶 --yes 也是 None：終端機裡的互動確認還沒有，不確認就不切換。"""
+    if len(params) != 2 or "--yes" not in params:
+        return None
+    label = params[1] if params[0] == "--yes" else params[0]
+    return None if label == "--yes" else label
+
+
+_SWITCH_REFUSALS = {
+    SwitchRefusal.ALREADY_ACTIVE: "switch.refused.already_active",
+    SwitchRefusal.SYNC_FAILED: "switch.refused.sync_failed",
+    SwitchRefusal.UNREADABLE: "switch.refused.unreadable",
+    SwitchRefusal.UNWRITABLE: "switch.refused.unwritable",
+}
+
+
+def switch(core: Core, label: str, lang: str) -> int:
+    """切換到帳號標籤 label：成功結束代碼 0；拒絕（沒寫任何檔）印原因、1；寫了一半 3。"""
+    result = core.switch(label)
+    if result.outcome is SwitchOutcome.SWITCHED:
+        print(text(lang, "switch.done", label=label))
+        return 0
+    if result.outcome is SwitchOutcome.WRITE_FAILED:
+        print(text(lang, "switch.write_failed", label=label), file=sys.stderr)
+        return 3
+    assert result.refusal is not None  # 拒絕一定帶原因
+    if result.refusal is SwitchRefusal.UNKNOWN_LABEL:
+        message = text(lang, "error.unknown_label", label=label)
+    elif result.watch_only_reason is not None:
+        reason = watch_only_reason(result.watch_only_reason, lang, result.writeback_failures)
+        message = text(lang, "switch.refused.watch_only", label=label, reason=reason)
+    else:
+        message = text(lang, _SWITCH_REFUSALS[result.refusal], label=label)
+    print(message, file=sys.stderr)
     return 1
 
 

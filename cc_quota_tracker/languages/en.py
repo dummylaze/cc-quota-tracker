@@ -201,7 +201,23 @@ STRINGS = {
                  "with this tool, and list the directories actually used\n"
                  "  {command} query           ask Claude Code for the latest usage once and wait for it; "
                  "exit code 0 on success, 1 on failure\n"
-                 "  {command} gui             open the floating window; run with pythonw to avoid a console window",
+                 "  {command} gui             open the floating window; run with pythonw to avoid a console window\n"
+                 "  {command} switch <label> --yes\n"
+                 "                            switch to this managed account; --yes switches without asking again.\n"
+                 "                            Exit code 0 on success, 1 if refused (nothing written), 3 if only partly "
+                 "written, 2 without --yes",
+    "switch.done": "Switched to \"{label}\"",
+    "switch.refused.watch_only": "\"{label}\" is a watch-only account ({reason}) and can't be switched to: sign in to "
+                                 "this account in Claude Code, then manage it again",
+    "switch.refused.already_active": "\"{label}\" is already the active account.",
+    "switch.refused.sync_failed": "Couldn't sync the current account's credential back to its snapshot, so nothing "
+                                  "was switched. Try again later.",
+    "switch.refused.unreadable": "Couldn't read the current credential or Claude Code's account info, so nothing was "
+                                 "switched. Try again later.",
+    "switch.refused.unwritable": "Couldn't write the current credential or the pre-switch credential (another "
+                                 "program may have it locked), so nothing was switched. Try again later.",
+    "switch.write_failed": "Wrote the credential of \"{label}\", but couldn't update Claude Code's account info, so "
+                           "the two don't match: sign in again in Claude Code.",
     "query.success": "Usage updated. Latest observed time: {time}",
     "query.failed": "Usage query failed: {reason}\nYou can run /usage in Claude Code instead.",
     "query.reason.command_not_found": "Couldn't find the claude executable. Make sure it is on PATH, or set the full "
