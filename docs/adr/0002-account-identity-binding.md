@@ -1,5 +1,7 @@
 # 納管時綁定帳號識別碼，以 refreshToken 雜湊偵測切換
 
+> 已被 ADR-0011 取代：實測發現每次刷新都會輪替 refreshToken，本則「refreshToken 不變」的前提不成立。
+
 `~/.claude/.credentials.json` 裡沒有任何穩定的帳號身分欄位，額度快取裡的帳號識別碼又要等 Claude Code 下一次讀取額度才會跟著變，可能落後好幾個小時。因此分成兩個訊號：納管帳號的當下（使用者剛執行 `claude login`）就從 `~/.claude.json` 取得帳號識別碼，和那份憑證快照綁定；平常則每輪比對當前憑證 refreshToken 的雜湊，幾秒內就能偵測到切換並知道切到哪個帳號。實測刷新只會更換 accessToken，refreshToken 不變，所以雜湊不會把刷新誤判成切換。
 
 ## Considered Options
