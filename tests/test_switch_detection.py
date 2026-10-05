@@ -137,7 +137,9 @@ class RestartTest(SwitchTestCase):
         self.assertEqual([line["accountId"] for line in self.poll_after()], ["acct-w"])
 
 
-class RotationTest(SwitchTestCase):
+class SameAccountReloginTest(SwitchTestCase):
+    """當前憑證帳號原地重新登入：憑證指紋換了、到期時間也換了（另一次登入），帳號資訊仍是同一個帳號。
+    刷新（同一次登入）由憑證同步處理，見 test_credential_sync。"""
     def setUp(self):
         super().setUp()
         self.manage("home", "rt-h", "acct-h")
@@ -146,12 +148,12 @@ class RotationTest(SwitchTestCase):
         self.snapshot = (self.home / ".claude-multi" / "work.json").read_bytes()
 
     def rotate(self):
-        self.write_credentials(refresh="rt-w2")  # oauthAccount 仍是 acct-w
+        self.write_credentials(refresh="rt-w2")  # 新的一次登入；oauthAccount 仍是 acct-w
 
-    def test_rotation_is_not_a_switch(self):
+    def test_relogin_is_not_a_switch(self):
         self.assertEqual(self.poll_after(self.rotate), [])
 
-    def test_rotation_flags_the_snapshot_and_keeps_the_account_active(self):
+    def test_relogin_flags_the_snapshot_and_keeps_the_account_active(self):
         self.rotate()
         card = self.core.poll().cards[0]
         self.assertEqual((card.account_key, card.role, card.snapshot_invalid), ("claude:work", Role.ACTIVE, True))
@@ -163,7 +165,7 @@ class RotationTest(SwitchTestCase):
         self.start()
         self.assertTrue(self.cards()["claude:work"].snapshot_invalid)
 
-    def test_rotation_leaves_the_snapshot_file_unchanged(self):
+    def test_relogin_leaves_the_snapshot_file_unchanged(self):
         self.rotate()
         self.core.poll()
         self.core.poll()
@@ -186,12 +188,12 @@ class RotationTest(SwitchTestCase):
         self.assertEqual(cards[None].role, Role.UNWATCHED)
         self.assertFalse(cards["claude:work"].snapshot_invalid)
 
-    def test_switch_to_another_snapshot_after_rotation(self):
+    def test_switch_to_another_snapshot_after_relogin_keeps_the_flag(self):
         self.rotate()
         self.core.poll()
         lines = self.poll_after(lambda: self.log_in(refresh="rt-h", account_uuid="acct-h"))
         self.assertEqual([line["accountId"] for line in lines], ["acct-h"])
-        self.assertFalse(self.cards()["claude:work"].snapshot_invalid)
+        self.assertTrue(self.cards()["claude:work"].snapshot_invalid)
 
     def test_different_oauth_account_is_a_switch_to_unwatched(self):
         lines = self.poll_after(lambda: self.log_in(refresh="rt-x", account_uuid="acct-x"))

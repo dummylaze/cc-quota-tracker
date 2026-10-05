@@ -8,18 +8,20 @@
 - 權限只有一套政策：收緊後事後驗證，仍不符（或收緊本身回報錯誤）就照常寫入，並記下「未收緊」讓呼叫端告警（ADR-0008）。
 
 各檔案的寫入規則與失敗處理（全部在納管目錄底下）：
-- <帳號標籤>.json，憑證快照：本工具只在納管時寫入、移除時刪除（使用者也可能直接放檔進來）。替換前驗證讀得出憑證指紋，讀不出來就丟 NoCredential、
-  既有的維持原樣。綁定檔讀不到時納管整個拒絕（BindingsUnreadable），移除照樣刪。
+- <帳號標籤>.json，憑證快照：本工具在納管與憑證同步時寫入、移除時刪除（使用者也可能直接放檔進來）。替換前驗證讀得出憑證指紋，讀不出來就丟 NoCredential、
+  既有的維持原樣。綁定檔讀不到時納管整個拒絕（BindingsUnreadable）、同步不寫（丟 OSError），移除照樣刪。
+  同步寫回時先把綁定複製到新的憑證指紋再寫憑證快照：憑證快照寫不成時多出的那筆綁定由之後的維護清掉，舊憑證指紋的綁定也一樣。
 - .state/account-info/<帳號標籤>.json，帳號資訊（oauthAccount 整份，含 email；只保存、不顯示）：納管時與憑證快照一起寫，
   沒有帳號資訊的納管（匯入、讀不到）會把同標籤原有的刪掉；移除憑證快照時一併刪，憑證快照已不在的孤兒也在這時清掉。
   帳號資訊的帳號識別碼必須等於憑證快照綁定的帳號識別碼才算「附有」：使用者手動換掉憑證快照的內容時，舊的帳號資訊不會被沿用。
   讀不出來的視為沒有。寫不成丟 OSError（憑證快照與綁定已寫成，該帳號暫時是僅監看帳號）；刪不掉的孤兒不丟例外，下次再清。
-- .state/bindings.json，綁定：納管、移除、綁定維護會寫。讀不到時納管拒絕、移除與維護不寫；有憑證快照讀不出
-  憑證指紋時只加不清。寫不成丟 OSError，原檔不變。
+- .state/bindings.json，綁定：納管、移除、綁定維護、憑證同步會寫。讀不到時納管拒絕、移除、維護與同步不寫；有憑證快照讀不出
+  憑證指紋時只加不清（同步只加不清：舊憑證指紋留給之後的維護）。寫不成丟 OSError，原檔不變。
 - .state/readings.json，待命讀數：記住讀數時寫，綁定被清掉時連帶修剪。讀不到就什麼都不寫，下次再試。
   同一個檔案裡的 _lagging 欄位是「切換前已落後」的標記：帳號識別碼 → 被標記的讀數的觀測時間。標記只在讀數的觀測時間
   相同時才成立，讀數換了就失效並隨寫入清掉；沒有這個欄位的舊檔視為沒有標記。
 - .state/observed.json，上一輪觀測：每輪寫。讀不到時呼叫端這一輪不判定；寫不成丟 OSError。
+  invalidSnapshots（持久的失效旗標）與 expiresAt（上一輪當前憑證的到期時間）是後加的欄位，沒有的舊檔視為沒有旗標、不知道到期時間。
 - .state/switches.jsonl，切換紀錄：只追加。寫不成丟 OSError，既有的行不變。
 - .state/window.json，視窗位置：寫不成是「這次沒記住」，不丟例外；收不緊權限照常寫入。
 - .state/warnings.json，關掉看板「未收緊」告警的紀錄：使用者關掉時寫，某一輪權限全部收緊成功時清掉。
@@ -30,20 +32,23 @@
 """
 import json
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 from enum import Enum
 from pathlib import Path
 from typing import Dict, NamedTuple, Optional, Set, Tuple
 
 from . import atomic
 from . import claude_provider as provider
-from .credstore import FileCredentialStore
+from .credstore import BytesCredentialStore, FileCredentialStore
 from .permissions import is_private, make_private
 
 _LAGGING_FIELD = "_lagging"  # 讀數檔裡存落後標記的欄位；帳號識別碼不會是這個名字，舊版讀數檔的讀法會把它當成讀不懂的一筆略過
 _STATE_DIR = ".state"  # 納管目錄底下放工具狀態的子目錄，與憑證快照分開
 _ACCOUNT_INFO_DIR = "account-info"  # 工具狀態目錄底下，一個帳號標籤一個檔，存納管時的帳號資訊
 _ILLEGAL_IN_NAME = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+# 固定值：兩份憑證的 refreshToken 到期時間相差在這之內，就算出自同一次登入（ADR-0011）。
+# Claude Code 存的是「本機時間加剩餘秒數」，同一次登入的輪替前後實測差距最大約 1.2 秒
+SAME_LOGIN_TOLERANCE = timedelta(seconds=60)
 _RESERVED_NAMES = {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 10)),
                    *(f"LPT{i}" for i in range(1, 10))}
 
@@ -86,9 +91,22 @@ class Stored(NamedTuple):
 
 
 class Observed(NamedTuple):
-    """上一輪的觀測：當時的憑證指紋，以及已失效（被輪替）而留著標記的憑證快照的憑證指紋。沒有上一輪時兩者都是 None。"""
+    """上一輪的觀測：當時當前憑證的憑證指紋；暫定的失效旗標（當前憑證帳號的憑證快照，帳號資訊還可能跟上而改判）；
+    持久的失效旗標（保留到重新納管）；當時當前憑證的到期時間。沒有上一輪時全部是空的。"""
     fingerprint: Optional[str] = None
-    invalid_snapshot: Optional[str] = None
+    pending_invalid: Optional[str] = None
+    kept_invalid: Tuple[str, ...] = ()
+    expires_at: Optional[datetime] = None
+
+
+class Synced(NamedTuple):
+    """憑證同步寫回了一份憑證快照：它原本與現在的憑證指紋。"""
+    old_fingerprint: str
+    new_fingerprint: str
+
+    def follow(self, fingerprint: Optional[str]) -> Optional[str]:
+        """記著舊憑證指紋的地方，換成寫回後的新憑證指紋；其他的原樣。"""
+        return self.new_fingerprint if fingerprint == self.old_fingerprint else fingerprint
 
 
 class PermissionState(Enum):
@@ -96,6 +114,11 @@ class PermissionState(Enum):
     TIGHTENED = "tightened"
     UNTIGHTENED = "untightened"
     NOT_CREATED = "not_created"
+
+
+def same_login(a: Optional[datetime], b: Optional[datetime]) -> bool:
+    """兩份憑證出自同一次登入：refreshToken 的到期時間都知道，而且相差在容許範圍內。不看事件先後。"""
+    return a is not None and b is not None and abs(a - b) <= SAME_LOGIN_TOLERANCE
 
 
 def check_label(label: str) -> None:
@@ -206,12 +229,18 @@ class ManagedDirectory:
         state = self._read_state(self._observed)
         if state is None:
             return None
-        return Observed(_text(state.get("fingerprint")), _text(state.get("invalidSnapshot")))
+        flags = state.get("invalidSnapshots")
+        return Observed(_text(state.get("fingerprint")), _text(state.get("invalidSnapshot")),
+                        tuple(f for f in flags if _text(f)) if isinstance(flags, list) else (),
+                        _datetime(state.get("expiresAt")))
 
     def write_observed(self, last_run_at: datetime, observed: Observed) -> None:
         """記下這一輪的觀測與運作時間，下一輪（含重新啟動後）接著比對。寫不成就丟 OSError。"""
+        expires = observed.expires_at.isoformat() if observed.expires_at else None
         self._write_state(self._observed, {"lastRunAt": last_run_at.isoformat(), "fingerprint": observed.fingerprint,
-                                          "invalidSnapshot": observed.invalid_snapshot})
+                                          "invalidSnapshot": observed.pending_invalid,
+                                          "invalidSnapshots": sorted(observed.kept_invalid),
+                                          "expiresAt": expires})
 
     def append_switch(self, at: datetime, account_id: Optional[str]) -> None:
         """切換紀錄只追加：時間、切到的帳號識別碼（拿不到為 null）、來源。不記帳號鍵（ADR-0009）。寫不成就丟 OSError。"""
@@ -274,6 +303,31 @@ class ManagedDirectory:
         fixed = any([self._tighten(self._snapshot(other)) for other in self._snapshot_labels()]) or fixed
         fixed = any([self._tighten(p) for p in self._account_info_paths()]) or fixed
         return Stored(fingerprint in bindings, fixed, self._untightened)
+
+    def sync_snapshot(self, data: bytes) -> Optional[Synced]:
+        """憑證同步（ADR-0011）：data 是當前憑證的內容。它的 refreshToken 到期時間與某份憑證快照出自同一次登入、
+        只有這一份符合、而且憑證指紋不同，就把 data 寫回那份憑證快照，綁定跟著換到新的憑證指紋；帳號資訊以帳號標籤
+        為鍵，不必動。沒有要寫的（讀不出憑證、沒有或有兩份以上符合、已經相同）回傳 None。
+        綁定檔讀不到時不寫：寫回後綁定換不過去，帳號會被當成沒有帳號資訊。寫不成（含綁定檔讀不到）丟 OSError。"""
+        current = BytesCredentialStore(data)
+        fingerprint, credential = current.fingerprint(), current.read()
+        expires = credential.refresh_token_expires_at if credential else None
+        if fingerprint is None or expires is None:
+            return None
+        matches = [a for a in self.list_accounts() if same_login(a.expires_at, expires)]
+        if len(matches) != 1:
+            return None
+        target, old = matches[0], matches[0].fingerprint
+        if old is None or old == fingerprint:
+            return None
+        bindings = self._read_state(self._bindings_file)
+        if bindings is None:
+            raise OSError(f"bindings unreadable: {self._bindings_file}")
+        if old in bindings:
+            bindings[fingerprint] = bindings[old]
+            self._write_state(self._bindings_file, bindings)
+        self._write_snapshot(target.label, data)
+        return Synced(old, fingerprint)
 
     def remove_snapshot(self, label: str) -> None:
         """移除帳號標籤 label 的憑證快照，清掉它的孤兒綁定與待命讀數。沒有這份憑證快照丟 UnknownLabel。
@@ -471,6 +525,15 @@ def _private(path: Path) -> bool:
 def _stamp(reading: provider.UsageReading) -> str:
     """落後標記記的是哪一份讀數：以觀測時間認，讀數換了標記就對不上。"""
     return reading.observed_at.isoformat()
+
+
+def _datetime(value) -> Optional[datetime]:
+    """工具狀態裡的 ISO 時間；讀不懂、沒帶時區（無法跟憑證的到期時間比較）的視為沒有。"""
+    try:
+        parsed = datetime.fromisoformat(value) if isinstance(value, str) else None
+    except ValueError:
+        return None
+    return parsed if parsed and parsed.tzinfo else None
 
 
 def _text(value) -> Optional[str]:

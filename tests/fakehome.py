@@ -1,5 +1,6 @@
 """假 home 與可控時鐘：所有核心測試共用的骨架。"""
 import contextlib
+import hashlib
 import json
 import os
 import subprocess
@@ -16,6 +17,12 @@ NOW = datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc)
 
 _DEFAULT = object()
 MISSING = object()  # 傳給 limit(severity=…)：該鍵整個不存在
+
+
+def login_expiry(refresh):
+    """refreshToken 的到期時間依登入固定、各次登入不同（ADR-0011）：預設依 token 給一個 30 天後的值，
+    不同 token 之間相差超過憑證同步的容許範圍，免得每份憑證都被當成同一次登入。"""
+    return NOW + timedelta(days=30, minutes=int(hashlib.sha256(refresh.encode()).hexdigest()[:6], 16) % 10000)
 
 
 class FakeClock:
@@ -129,8 +136,11 @@ class HomeTestCase(unittest.TestCase):
             os.utime(path, ns=(mtime, mtime))
 
     def write_credentials(self, refresh="rt-1", access="at-1", expires_at=NOW + timedelta(hours=8),
-                          refresh_expires_at=NOW + timedelta(days=30)):
-        """Claude Code 維護的當前憑證，寫在解析出的 Claude Code 目錄；到期時間是毫秒時間戳。"""
+                          refresh_expires_at=_DEFAULT):
+        """Claude Code 維護的當前憑證，寫在解析出的 Claude Code 目錄；到期時間是毫秒時間戳。
+        refreshToken 的到期時間預設見 login_expiry：換 token 就是換一次登入，要模擬刷新請明確給同一個到期時間。"""
+        if refresh_expires_at is _DEFAULT:
+            refresh_expires_at = login_expiry(refresh)
         path = self.paths.claude_dir / ".credentials.json"
         path.parent.mkdir(exist_ok=True)
         oauth = {"accessToken": access, "refreshToken": refresh,

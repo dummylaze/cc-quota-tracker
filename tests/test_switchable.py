@@ -256,7 +256,7 @@ class ListTextTest(SwitchableTestCase):
         self.manage("rotated", "rt-3", "acct-3")
         self.log_in(refresh="rt-4", account_uuid="acct-3")
         self.clock.advance(days=2)
-        self.write_credentials(refresh="rt-4", refresh_expires_at=NOW + timedelta(days=30))
+        self.write_credentials(refresh="rt-4", refresh_expires_at=NOW + timedelta(days=31))  # 重新登入：另一次登入
         text = render(self.core.poll())
         for label, reason in (("legacy", "沒有帳號資訊"), ("old", "已過期"), ("rotated", "已失效")):
             with self.subTest(label=label):

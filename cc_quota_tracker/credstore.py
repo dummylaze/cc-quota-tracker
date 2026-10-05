@@ -59,11 +59,24 @@ class FileCredentialStore:
 
     def _oauth(self) -> Optional[dict]:
         try:
-            raw = json.loads(self._path.read_text(encoding="utf-8"))
+            raw = json.loads(self._text())
         except (OSError, ValueError):
             return None
         oauth = raw.get("claudeAiOauth") if isinstance(raw, dict) else None
         return oauth if isinstance(oauth, dict) else None
+
+    def _text(self) -> str:
+        return self._path.read_text(encoding="utf-8")
+
+
+class BytesCredentialStore(FileCredentialStore):
+    """已經讀進來的一份憑證內容：判斷與寫入用的是同一份位元組，中間不會被別人改掉。"""
+
+    def __init__(self, data: bytes):
+        self._data = data
+
+    def _text(self) -> str:
+        return self._data.decode("utf-8")
 
 
 def _digest(text: str) -> str:

@@ -60,7 +60,8 @@ def main(argv=None) -> int:
         return check(paths, lang)
     if command == "gui":
         return gui(paths)
-    core = Core(paths, lambda: datetime.now(timezone.utc), auto_query=False)  # 命令列不做自動查詢
+    core = Core(paths, lambda: datetime.now(timezone.utc), auto_query=False,
+                sync_credentials=False)  # 命令列不做自動查詢，也不寫回憑證快照
     if command == "list":
         print(render(core.poll(), lang))
         return 0

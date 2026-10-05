@@ -60,7 +60,7 @@ def _render_card(card: Card, board: Board, lang: str) -> str:
             body.insert(0, text(lang, "snapshot.relogin", when=when, command=COMMAND, label=label))
         else:
             body.append(when)
-    if card.snapshot_invalid:
+    if card.snapshot_invalid and card.role is Role.ACTIVE:  # 「目前登入的就是這個帳號」只對當前憑證帳號成立
         body.insert(0, text(lang, "list.snapshot_invalid", command=COMMAND, label=label))
     if card.watch_only_reason:  # 緊接在標頭下面：原因一行、補救一行；納管帳號不印
         reason = text(lang, _WATCH_ONLY_REASONS[card.watch_only_reason])

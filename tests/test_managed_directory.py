@@ -54,10 +54,16 @@ class ReadObservedTest(ManagedDirectoryTestCase):
         self.assertEqual(self.managed.read_observed(), Observed())
 
     def test_written_observation_reads_back(self):
-        self.managed.write_observed(AT, Observed("fp-1", "fp-0"))
-        self.assertEqual(self.managed.read_observed(), Observed("fp-1", "fp-0"))
+        observed = Observed("fp-1", "fp-0", ("fp-8", "fp-7"), AT)
+        self.managed.write_observed(AT, observed)
+        self.assertEqual(self.managed.read_observed(), Observed("fp-1", "fp-0", ("fp-7", "fp-8"), AT))
         self.assertEqual(json.loads(self.observed_file.read_text(encoding="utf-8")),
-                         {"lastRunAt": AT.isoformat(), "fingerprint": "fp-1", "invalidSnapshot": "fp-0"})
+                         {"lastRunAt": AT.isoformat(), "fingerprint": "fp-1", "invalidSnapshot": "fp-0",
+                          "invalidSnapshots": ["fp-7", "fp-8"], "expiresAt": AT.isoformat()})
+
+    def test_file_without_the_later_fields_reads_without_flags_or_expiry(self):
+        self.put(self.observed_file, json.dumps({"fingerprint": "fp-1", "invalidSnapshot": "fp-0"}))
+        self.assertEqual(self.managed.read_observed(), Observed("fp-1", "fp-0", (), None))
 
     def test_existing_file_with_the_last_run_time_is_readable(self):
         self.put(self.observed_file, json.dumps({"lastRunAt": "2026-01-01T12:00:00+00:00",

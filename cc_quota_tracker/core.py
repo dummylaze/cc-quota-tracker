@@ -14,7 +14,7 @@ from .board import (Board, Card, CountdownFormat, Limit, Preferences, QueryFailu
                     Severity, UsageQueryResult, WatchOnlyReason)
 from .credstore import FileCredentialStore
 from .managed_directory import (BindingsUnreadable, InvalidLabel, ManagedDirectory, NoCredential,  # noqa: F401
-                                Observed, PermissionState, UnknownLabel, check_label)
+                                Observed, PermissionState, Synced, UnknownLabel, check_label, same_login)
 # 納管會丟的例外定義在納管目錄，核心仍對外匯出：命令列、GUI 與既有測試的匯入路徑不變
 from .settings import (CLAUDE_CONFIG_DIR, COUNTDOWN_FORMAT_FIELD, PathSource, ResolvedPaths, path_fields,
                        read_preferences, read_settings)
@@ -60,9 +60,12 @@ class AddResult:
 
 
 class Core:
-    def __init__(self, paths: ResolvedPaths, clock: Callable[[], datetime], auto_query: bool = True):
-        """auto_query：poll 可以依設定自動查詢額度。只有常駐的視窗該開；命令列的 poll 一次就結束，不該留下查詢。"""
+    def __init__(self, paths: ResolvedPaths, clock: Callable[[], datetime], auto_query: bool = True,
+                 sync_credentials: bool = True):
+        """auto_query：poll 可以依設定自動查詢額度。只有常駐的視窗該開；命令列的 poll 一次就結束，不該留下查詢。
+        sync_credentials：poll 做憑證同步、寫回憑證快照（ADR-0011）。只有視窗該開；命令列的 list 不改寫任何憑證快照。"""
         self._auto_query = auto_query
+        self._sync_credentials = sync_credentials
         self._source = paths.claude_json
         self._credentials = paths.claude_dir / provider.CREDENTIALS
         self._transcripts = paths.claude_dir / provider.TRANSCRIPTS
@@ -94,9 +97,10 @@ class Core:
         self._poll_query()  # 先於 _refresh：查詢剛寫回的額度快取，這一輪就讀得到
         self._refresh()
         self._reread_settings()
+        synced = self._sync()  # 先於綁定維護：寫回後舊憑證指紋的綁定，這一輪就清掉
         accounts = self._maintain_bindings(self._accounts())
         self._remember(accounts)
-        active, invalid = self._observe(accounts)
+        active, invalid = self._observe(accounts, synced)
         reading = self._reading
         cards = self._cards(accounts, active, invalid)
         self._maybe_auto_query(cards[0])  # 在建看板之前：這一輪啟動的查詢，這一輪的看板就顯示進行中
@@ -252,6 +256,15 @@ class Core:
                               a.has_account_info)
                      for a in self._managed.list_accounts())
 
+    def _sync(self) -> Optional[Synced]:
+        """憑證同步：把當前憑證寫回出自同一次登入的那份憑證快照。讀不到當前憑證、或寫不成，這一輪就不寫，下一輪再試。"""
+        if not self._sync_credentials:
+            return None
+        try:
+            return self._managed.sync_snapshot(self._credentials.read_bytes())
+        except OSError:
+            return None
+
     def _maintain_bindings(self, accounts: Tuple[_Account, ...]) -> Tuple[_Account, ...]:
         """不經過 add 的綁定維護：直接放進目錄的憑證快照補學綁定，快照被刪掉的孤兒綁定清掉。
         這一輪能不能動（綁定檔讀不到、有憑證快照讀不出憑證指紋）由納管目錄判斷；寫不成時什麼都不動。"""
@@ -282,52 +295,73 @@ class Core:
         if self._reading is not None:
             self._managed.remember_standby_reading(self._reading, {a.account_id for a in accounts if a.account_id})
 
-    def _observe(self, accounts: Tuple[_Account, ...]) -> Tuple[Optional[_Account], bool]:
-        """每輪的切換偵測。回傳當前憑證的監看帳號（未監看為 None），以及它的憑證快照是否已失效。
-        當前指紋對不上任何憑證快照時，看 oauthAccount 的識別碼綁給哪份憑證快照：有就是那個帳號、快照已失效。
-        上一輪的憑證指紋與失效標記存在工具狀態，重新啟動後接著比對；第一次運作也算一次切換。
+    def _observe(self, accounts: Tuple[_Account, ...],
+                 synced: Optional[Synced]) -> Tuple[Optional[_Account], FrozenSet[str]]:
+        """每輪的切換偵測。回傳當前憑證的監看帳號（未監看為 None），以及失效的憑證快照的憑證指紋。
+        當前憑證帳號依序認：憑證指紋相同的憑證快照、出自同一次登入但還沒寫回的唯一一份憑證快照（命令列不同步、
+        或寫回失敗）、帳號資訊的識別碼綁定的憑證快照（找不到同一次登入的證據，標為失效）。
+        失效旗標分兩段：當前憑證帳號的那份是暫定的，帳號資訊在同一份憑證下改變時跟著改判（/login 先寫憑證、
+        後寫帳號資訊）；切換離開時轉為持久，保留到重新納管（憑證指紋換掉）為止。
+        上一輪的觀測存在工具狀態，重新啟動後接著比對；第一次運作也算一次切換。
         讀不到當前憑證（寫到一半、登出）時不動：不記錄，也不覆蓋上一輪的憑證指紋。"""
-        current = FileCredentialStore(self._credentials).fingerprint()
+        store = FileCredentialStore(self._credentials)
+        current, credential = store.fingerprint(), store.read()
+        expires = credential.refresh_token_expires_at if credential else None
         by_fp = {a.fingerprint: a for a in accounts if a.fingerprint}
+        # 同一次登入、還沒寫回的憑證快照：有就是找到了同一次登入的證據；唯一一份時就是當前憑證帳號
+        same_login_snapshots = [a for a in accounts if same_login(a.expires_at, expires)] if current not in by_fp else []
+        unsynced = same_login_snapshots[0] if len(same_login_snapshots) == 1 else None
         state = self._managed.read_observed()
         if state is None:  # 讀不到上一輪的觀測（例如短暫鎖住）：這一輪不判定
-            return by_fp.get(current), False
-        previous, invalid_snapshot = state.fingerprint, state.invalid_snapshot
+            return by_fp.get(current) or unsynced, frozenset()
+        previous, provisional, flagged = state.fingerprint, state.pending_invalid, set(state.kept_invalid)
+        if synced is not None:  # 寫回換掉了憑證快照的憑證指紋：上一輪記的舊指紋跟著換
+            previous, provisional = synced.follow(previous), synced.follow(provisional)
+            flagged = {fp for fp in map(synced.follow, flagged) if fp}
         switched, account_id, left_account = False, None, None
         if current is not None and current != previous:
-            previous_account = by_fp.get(previous) or by_fp.get(invalid_snapshot)  # 前一個當前憑證的監看帳號
-            if current in by_fp:
+            previous_account = by_fp.get(previous) or by_fp.get(provisional)  # 前一個當前憑證的監看帳號
+            if same_login(state.expires_at, expires) or (previous_account and by_fp.get(current) is previous_account):
+                pass  # 同一次登入的輪替（例如命令列看過、看板還沒寫回），或寫回後回到同一份憑證快照：不算切換
+            elif current in by_fp:
                 switched, account_id, left_account = True, by_fp[current].account_id, previous_account
             elif previous_account and previous_account.account_id \
                     and self._oauth_account_id == previous_account.account_id:
-                invalid_snapshot = previous_account.fingerprint  # 憑證被輪替：同一個帳號，不算切換（ADR-0002）
+                pass  # 憑證指紋變了、帳號資訊仍是同一個帳號：不算切換（ADR-0009）
             else:
                 switched, account_id, left_account = True, self._oauth_account_id, previous_account
-        elif current is not None and invalid_snapshot:
-            flagged = by_fp.get(invalid_snapshot)
-            if flagged is None:  # 憑證快照已移除或重新納管
-                invalid_snapshot = None
-            elif self._oauth_account_id not in (None, flagged.account_id):
-                # Claude Code 先寫憑證、後寫 oauthAccount：上一輪看起來像輪替，其實是切到未監看帳號
-                switched, account_id, left_account = True, self._oauth_account_id, flagged
-        if switched or current in by_fp:
-            invalid_snapshot = None
-        if current is not None and current not in by_fp:
+            if switched and provisional:
+                flagged.add(provisional)  # 切換離開：旗標保留到重新納管，換到別的帳號也不熄滅
+        elif current is not None and provisional:
+            pending = by_fp.get(provisional)
+            if pending is not None and self._oauth_account_id not in (None, pending.account_id):
+                # Claude Code 先寫憑證、後寫 oauthAccount：上一輪看起來像同一個帳號重新登入，其實是換了帳號
+                switched, account_id, left_account = True, self._oauth_account_id, pending
+        if switched or current in by_fp or same_login_snapshots or not provisional or provisional not in by_fp:
+            provisional = None  # 換了帳號、找到同一次登入的證據、或憑證快照已移除或重新納管
+        if current is not None and current not in by_fp and not same_login_snapshots:
             stale = self._stale_snapshot(accounts)
             if stale is not None:  # 判定只看識別碼綁給誰，不看前一個當前憑證帳號；是不是切換已在上面判完
-                invalid_snapshot = stale.fingerprint
+                provisional = stale.fingerprint
+        if None not in (a.fingerprint for a in accounts):  # 憑證快照都讀得出指紋才修剪，免得鎖住的那份被洗掉旗標
+            flagged &= set(by_fp)
         try:
             if switched:
                 self._mark_lagging_before_switch(left_account, account_id)
                 self._managed.append_switch(self._clock(), account_id)
             # 紀錄寫成、這裡寫失敗時，下一輪會再記一次同一個帳號；重複的一行不影響歸屬
-            self._managed.write_observed(self._clock(), Observed(current or previous, invalid_snapshot))
+            self._managed.write_observed(self._clock(), Observed(
+                current or previous, provisional, tuple(flagged), expires if current else state.expires_at))
         except OSError:
             pass  # 不推進上一輪的觀測，下一輪重試
+        invalid = frozenset(flagged | {provisional} if provisional else flagged)
         if current in by_fp:
-            return by_fp[current], False
-        flagged = by_fp.get(invalid_snapshot) if current is not None and invalid_snapshot else None
-        return flagged, flagged is not None
+            return by_fp[current], invalid
+        if current is not None and unsynced:
+            return unsynced, invalid
+        if current is not None and provisional:
+            return by_fp[provisional], invalid
+        return None, invalid
 
     def _stale_snapshot(self, accounts: Tuple[_Account, ...]) -> Optional[_Account]:
         """oauthAccount 的識別碼綁定的憑證快照，沒有就是 None（識別碼讀不到、或沒綁給任何憑證快照）。
@@ -413,22 +447,24 @@ class Core:
                 self._oauth_account_id = provider.account_id(text)
         return self._result
 
-    def _cards(self, accounts: Tuple[_Account, ...], active: Optional[_Account], invalid: bool) -> Tuple[Card, ...]:
+    def _cards(self, accounts: Tuple[_Account, ...], active: Optional[_Account],
+               invalid: FrozenSet[str]) -> Tuple[Card, ...]:
         """當前憑證帳號在最前面，其餘監看帳號是待命帳號，依帳號鍵排序。
-        active 為 None：當前憑證對不上任何憑證快照，當前憑證帳號是未監看帳號。"""
+        active 為 None：當前憑證對不上任何憑證快照，當前憑證帳號是未監看帳號。invalid 是失效的憑證快照的憑證指紋。"""
         if active:
-            first = replace(self._active_card(active.key, Role.ACTIVE, active.account_id), snapshot_invalid=invalid)
+            first = self._active_card(active.key, Role.ACTIVE, active.account_id)
         else:
             first = self._active_card(None, Role.UNWATCHED, self._oauth_account_id)
-        return (self._with_snapshot_state(first, active),
-                *(self._with_snapshot_state(self._standby_card(a), a) for a in accounts if a is not active))
+        return (self._with_snapshot_state(first, active, invalid),
+                *(self._with_snapshot_state(self._standby_card(a), a, invalid) for a in accounts if a is not active))
 
-    def _with_snapshot_state(self, card: Card, account: Optional[_Account]) -> Card:
+    def _with_snapshot_state(self, card: Card, account: Optional[_Account], invalid: FrozenSet[str]) -> Card:
         """剩不到設定的天數（預設 7 天）才警示：畫面的倒數一律捨去，門檻 7 天時顯示「7天0小時」不警示、
         「6天23小時」起才警示。每輪以當下時間與設定檔目前的值重算。
         順帶標出能不能切換：監看帳號分納管帳號與僅監看帳號，原因的優先順序見 WatchOnlyReason。"""
         if account is None:
             return card
+        card = replace(card, snapshot_invalid=account.fingerprint in invalid)
         reason = self._watch_only_reason(account, card.snapshot_invalid)
         card = replace(card, switchable=reason is None, watch_only_reason=reason)
         if account.expires_at is None:

@@ -110,7 +110,7 @@ class Card:
     weekly_breakdown: Optional[WeeklyBreakdown] = None
     extra_usage: Optional[ExtraUsage] = None
     spend: Optional[Spend] = None
-    snapshot_invalid: bool = False  # 憑證被輪替：這張卡片的憑證快照已失效，需要重新納管
+    snapshot_invalid: bool = False  # 失效的憑證快照：找不到與當前憑證同一次登入的證據，保留到重新納管
     # 憑證快照的 refreshToken 到期時間；未監看帳號或快照沒寫到期時間（暫當無效資料）為 None
     snapshot_expires_at: Optional[datetime] = None
     snapshot_expiring: bool = False  # 剩不到 7 天（含已過期）：要在該帳號下重新登入，再對同一標籤重新 add
