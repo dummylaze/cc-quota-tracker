@@ -6,7 +6,7 @@ from datetime import timedelta
 
 from cc_quota_tracker import COMMAND
 from cc_quota_tracker.board import (Board, BreakdownRow, Card, ExtraUsage, Limit, Money, ReadingState, Role, Severity,
-                                    Spend, WeeklyBreakdown)
+                                    Spend, WatchOnlyReason, WeeklyBreakdown)
 from cc_quota_tracker.fmt import absolute
 from cc_quota_tracker.canvas_text import LINE_TAG
 from cc_quota_tracker.layout_a import EXPANDED_TAG, LayoutA
@@ -33,7 +33,8 @@ BOARDS = [
     board(Card(None, Role.UNWATCHED, ReadingState.NO_READING)),
     board(Card("claude:work", Role.ACTIVE, ReadingState.HAS_READING, reading_age=timedelta(hours=2),
                limits=(window("session", None, resets_at=None), window("weekly_all", None, resets_at=None, reset=True)),
-               snapshot_invalid=True, snapshot_expires_at=NOW - timedelta(days=1), snapshot_expiring=True)),
+               snapshot_invalid=True, snapshot_expires_at=NOW - timedelta(days=1), snapshot_expiring=True,
+               watch_only_reason=WatchOnlyReason.EXPIRED)),
     board(Card("claude:work", Role.ACTIVE, ReadingState.HAS_READING, reading_age=timedelta(0),
                limits=(window("weekly_all", 0, Severity.WARNING),))),
 ]

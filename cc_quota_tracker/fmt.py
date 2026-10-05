@@ -2,8 +2,26 @@
 from datetime import datetime, timedelta
 from typing import Optional
 
-from .board import CountdownFormat, Money
+from .board import CountdownFormat, Money, WatchOnlyReason
 from .i18n import text
+
+
+_WATCH_ONLY_REASONS = {WatchOnlyReason.EXPIRED: "watch_only.reason.expired",
+                       WatchOnlyReason.INVALID: "watch_only.reason.invalid",
+                       WatchOnlyReason.NO_ACCOUNT_INFO: "watch_only.reason.no_account_info"}
+
+
+def watch_only_reason(reason: WatchOnlyReason, lang: str) -> str:
+    """僅監看帳號不能切換的原因：卡片與 list 共用同一組字樣。"""
+    return text(lang, _WATCH_ONLY_REASONS[reason])
+
+
+def snapshot_expiry(expires: datetime, now: datetime, fmt: CountdownFormat, lang: str) -> str:
+    """只是告知的到期資訊：「憑證快照已過期（…）」或「憑證快照 n 後到期（…）」，不帶補救。"""
+    when = absolute(expires, now)
+    if expires <= now:
+        return text(lang, "snapshot.expired", when=when)
+    return text(lang, "snapshot.expires_in", left=countdown(expires - now, fmt, lang), when=when)
 
 
 def account_label(account_key: str) -> str:

@@ -1,15 +1,12 @@
 """把看板渲染成終端機文字；所有文案都在這一層套用，語系由呼叫端指定（i18n）。"""
 from . import COMMAND
-from .board import Board, Card, Limit, ReadingState, Role, WatchOnlyReason
+from .board import Board, Card, Limit, ReadingState, Role
 from .core import AddWarning
-from .fmt import absolute, account_label, age, countdown, date_time, money, until
+from .fmt import account_label, age, date_time, money, snapshot_expiry, until, watch_only_reason
 from .i18n import ZH_TW, text
 
 _WINDOW_NAMES = {"session": "window.session", "weekly_all": "window.weekly_all", "weekly_scoped": "window.weekly_scoped"}
 _ROLES = {Role.ACTIVE: "role.active", Role.STANDBY: "role.standby"}
-_WATCH_ONLY_REASONS = {WatchOnlyReason.EXPIRED: "watch_only.reason.expired",
-                       WatchOnlyReason.INVALID: "watch_only.reason.invalid",
-                       WatchOnlyReason.NO_ACCOUNT_INFO: "watch_only.reason.no_account_info"}
 _ADD_WARNINGS = {AddWarning.LABEL_LOOKS_LIKE_EMAIL: "add_warning.label_looks_like_email",
                  AddWarning.PERMISSIONS_FIXED: "add_warning.permissions_fixed",
                  AddWarning.PERMISSIONS_UNTIGHTENED: "add_warning.permissions_untightened"}
@@ -50,20 +47,13 @@ def _render_card(card: Card, board: Board, lang: str) -> str:
     expires = card.snapshot_expires_at
     label = account_label(card.account_key) if card.account_key else None
     if expires is not None:
-        when = absolute(expires, board.as_of)
-        if expires <= board.as_of:
-            when = text(lang, "snapshot.expired", when=when)
-        else:
-            left = countdown(expires - board.as_of, board.countdown_format, lang)
-            when = text(lang, "snapshot.expires_in", left=left, when=when)
-        if card.snapshot_expiring:
+        when = snapshot_expiry(expires, board.as_of, board.countdown_format, lang)
+        if card.snapshot_expiring and not card.watch_only_reason:  # 僅監看帳號的補救由原因下面那一行講，只講一次
             body.insert(0, text(lang, "snapshot.relogin", when=when, command=COMMAND, label=label))
         else:
             body.append(when)
-    if card.snapshot_invalid and card.role is Role.ACTIVE:  # 「目前登入的就是這個帳號」只對當前憑證帳號成立
-        body.insert(0, text(lang, "list.snapshot_invalid", command=COMMAND, label=label))
     if card.watch_only_reason:  # 緊接在標頭下面：原因一行、補救一行；納管帳號不印
-        reason = text(lang, _WATCH_ONLY_REASONS[card.watch_only_reason])
+        reason = watch_only_reason(card.watch_only_reason, lang)
         body[:0] = [text(lang, "list.watch_only", reason=reason),
                     text(lang, "list.watch_only_remedy", command=COMMAND, label=label)]
     return "\n".join([_header(card, lang)] + ["  " + line for line in body])

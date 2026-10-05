@@ -5,8 +5,9 @@ from datetime import datetime
 from typing import Optional, Tuple
 
 from . import COMMAND
-from .board import AUTO_QUERY_FLOOR_MINUTES, Board, Card, Limit, QueryFailure, QueryStatus, ReadingState, Role
-from .fmt import absolute, age, countdown, until
+from .board import (AUTO_QUERY_FLOOR_MINUTES, Board, Card, Limit, QueryFailure, QueryStatus, ReadingState, Role,
+                    WatchOnlyReason)
+from .fmt import absolute, age, snapshot_expiry, until, watch_only_reason
 from .i18n import text
 
 LINE_TAG = "wrapped-line"  # 多行文字的逐行 item；同一段的各行共用最後一個 tag。測試靠它把各行接回一段
@@ -37,7 +38,16 @@ def notes(card: Card, board: Board, lang: str, expiry_info: bool = True, short_p
         result.append((text(lang, "reading.lagging_before_switch" if standby else "reading.lagging"), "warning", "fg"))
     if card.locked_reason:
         result.append((text(lang, "reading.locked", reason=card.locked_reason), "critical", "critical"))
-    if expiry_info or card.snapshot_invalid or card.snapshot_expiring:
+    if card.watch_only_reason:  # 補救只講一次：由這一條講，快照提示只留到期資訊
+        note = text(lang, "note.watch_only", reason=watch_only_reason(card.watch_only_reason, lang))
+        if card.watch_only_reason is WatchOnlyReason.NO_ACCOUNT_INFO:  # 讀數照常、只是不能切換，不算嚴重
+            result.append((note, "sub", "fg"))
+        else:
+            result.append((note, "critical", "critical"))
+        if expiry_info and card.snapshot_expires_at is not None:
+            result.append((snapshot_expiry(card.snapshot_expires_at, board.as_of, board.countdown_format, lang),
+                           "sub", "fg"))
+    elif expiry_info or card.snapshot_expiring:
         snapshot = _snapshot_note(card, board, lang)
         if snapshot:
             result.append(snapshot)
@@ -115,20 +125,17 @@ def reset_text(lim: Limit, board: Board, lang: str) -> Optional[str]:
 
 
 def _snapshot_note(card: Card, board: Board, lang: str):
-    if card.snapshot_invalid:
-        return text(lang, "snapshot.invalid"), "critical", "critical"
+    """納管帳號的快照提示。失效的快照一定是僅監看帳號，由 notes() 的僅監看那一條處理，不會走到這裡。"""
     expires = card.snapshot_expires_at
     if expires is None:
         return None
-    when = absolute(expires, board.as_of)
-    expired = expires <= board.as_of
-    note = (text(lang, "snapshot.expired", when=when) if expired
-            else text(lang, "snapshot.expires_in", left=countdown(expires - board.as_of, board.countdown_format, lang),
-                      when=when))
+    note = snapshot_expiry(expires, board.as_of, board.countdown_format, lang)
     if not card.snapshot_expiring:
         return note, "sub", "fg"
     note = text(lang, "snapshot.renew", when=note)
+    expired = expires <= board.as_of
     return (note, "critical", "critical") if expired else (note, "warning", "fg")
+
 
 
 def stalled_banner(lang: str, done_at: Optional[datetime], now: datetime) -> str:

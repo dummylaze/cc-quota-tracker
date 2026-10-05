@@ -62,11 +62,11 @@ STRINGS = {
     "note.how_to_manage": "這個帳號還沒納管：在 Claude Code 登入它之後執行 {command} add <帳號標籤>，"
                           "或在視窗按右鍵選「納管目前登入的帳號…」",
     "note.named": "{label}：{text}",
+    "note.watch_only": "僅監看帳號（{reason}）：在 Claude Code 登入這個帳號後重新納管",  # reason 是 watch_only.reason.*
     "snapshot.expired": "憑證快照已過期（{when}）",
     "snapshot.expires_in": "憑證快照 {left}後到期（{when}）",
     "snapshot.relogin": "{when}：在 Claude Code 重新登入這個帳號，再執行 {command} add {label}",
     "snapshot.renew": "{when}，請重新納管",
-    "snapshot.invalid": "憑證快照已失效，請重新納管",
 
     # 橫幅
     "settings.invalid": "設定檔的 {fields} 值不合法，這幾項改用預設值；請參考 README 的欄位說明修正。",
@@ -91,7 +91,6 @@ STRINGS = {
     "list.breakdown": "本週用量去向（{start} ～ {end}）：",
     "list.watched": "監看帳號：{labels}",
     "list.none_watched": "尚未納管任何帳號",
-    "list.snapshot_invalid": "憑證快照已失效，請重新納管：Claude Code 目前登入的就是這個帳號，執行 {command} add {label}",
     "list.watch_only": "僅監看帳號：{reason}",
     "list.watch_only_remedy": "重新納管：在 Claude Code 登入這個帳號後，執行 {command} add {label}",
     "watch_only.reason.expired": "已過期",

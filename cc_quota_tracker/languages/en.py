@@ -64,11 +64,11 @@ STRINGS = {
                           "{command} add <label>, or right-click the window and choose "
                           "\"Manage the signed-in account…\"",
     "note.named": "{label}: {text}",
+    "note.watch_only": "Watch-only account ({reason}): sign in to this account in Claude Code, then manage it again",  # reason is watch_only.reason.*
     "snapshot.expired": "Credential snapshot expired ({when})",
     "snapshot.expires_in": "Credential snapshot expires in {left} ({when})",
     "snapshot.relogin": "{when}: sign in to this account again in Claude Code, then run {command} add {label}",
     "snapshot.renew": "{when}; renew it",
-    "snapshot.invalid": "Credential snapshot is no longer valid; renew it",
 
     # Banner
     "settings.invalid": "The values of {fields} in the settings file are invalid, so defaults are used for them; "
@@ -102,8 +102,6 @@ STRINGS = {
     "list.breakdown": "Where this week's usage went ({start} – {end}):",
     "list.watched": "Watched accounts: {labels}",
     "list.none_watched": "No accounts managed yet",
-    "list.snapshot_invalid": "Credential snapshot is no longer valid, please manage it again: Claude Code is signed in "
-                             "to this account; run {command} add {label}",
     "list.watch_only": "Watch-only account: {reason}",
     "list.watch_only_remedy": "To manage it again: sign in to this account in Claude Code, then run {command} add {label}",
     "watch_only.reason.expired": "expired",

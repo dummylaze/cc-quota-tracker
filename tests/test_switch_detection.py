@@ -202,7 +202,7 @@ class SameAccountReloginTest(SwitchTestCase):
     def test_render_tells_how_to_manage_again(self):
         self.rotate()
         text = render(self.core.poll())
-        self.assertIn("憑證快照已失效", text)
+        self.assertIn("僅監看帳號：已失效", text)
         self.assertIn(f"{COMMAND} add work", text)
 
 
@@ -228,7 +228,7 @@ class ReloginTest(SwitchTestCase):
     def test_list_shows_invalid_and_how_to_manage_again(self):
         self.relogin_b()
         text = render(self.core.poll())
-        self.assertIn("憑證快照已失效", text)
+        self.assertIn("僅監看帳號：已失效", text)
         self.assertIn(f"{COMMAND} add b", text)
 
     def test_logs_one_switch_for_the_bound_id_and_not_again(self):
