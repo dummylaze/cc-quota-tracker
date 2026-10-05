@@ -94,12 +94,12 @@ class LaggingReadingTest(HomeTestCase):
         self.clock.advance(minutes=-2)
         self.assertTrue(self.active_card().lagging)
 
-    def test_unmanaged_active_account_can_lag(self):
+    def test_unwatched_active_account_can_lag(self):
         self.write_credentials(refresh="rt-new")
         self.write_claude_json(claude_json(usage_cache(account_uuid="acct-new", resets_at=FAR), "acct-new"))
         self.talk(NOW + timedelta(minutes=1))
         card = self.core.poll().cards[0]
-        self.assertEqual((card.role, card.reading_state), (Role.UNMANAGED, ReadingState.HAS_READING))
+        self.assertEqual((card.role, card.reading_state), (Role.UNWATCHED, ReadingState.HAS_READING))
         self.assertTrue(card.lagging)
 
     def test_list_shows_the_lagging_hint(self):
@@ -117,7 +117,7 @@ class LaggingBeforeTheSwitchTest(HomeTestCase):
             self.log_in(refresh=refresh, account_uuid=uuid)
             self.core.add(label)
         self.log_in(refresh="rt-w", account_uuid="acct-w")
-        self.core.poll()  # 第一次運作，使用中帳號是 work
+        self.core.poll()  # 第一次運作，當前憑證帳號是 work
 
     def talk(self, at, session="s1"):
         path = self.paths.claude_dir / "projects" / "proj" / f"{session}.jsonl"
@@ -207,7 +207,7 @@ class LaggingBeforeTheSwitchTest(HomeTestCase):
         self.switch_to("home")
         shown = render(self.core.poll())
         self.assertIn("切換前已落後", shown)
-        self.assertNotIn("可以執行", shown)  # 查詢只能查使用中帳號，待命帳號落後時不提示
+        self.assertNotIn("可以執行", shown)  # 查詢只能查當前憑證帳號，待命帳號落後時不提示
 
     def test_the_list_shows_the_english_text(self):
         self.read_cache()

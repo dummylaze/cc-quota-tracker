@@ -19,7 +19,7 @@ Unofficial; not affiliated with or endorsed by Anthropic. Use at your own risk �
 *The three layouts in compact mode, drawn with example data: card list, ring gauge, one-line strip.*
 
 - **Compact mode**: the active account's session window and weekly window — progress bar and reading age; the reset countdown and credential expiry countdown depend on the layout (the card list shows both, the one-line strip shows the reset countdown, the ring gauge shows neither until expanded).
-- **Expanded mode**: one card per managed account, the active one highlighted; standby accounts show their last observed reading and how old it is.
+- **Expanded mode**: one card per watched account, the active one highlighted; standby accounts show their last observed reading and how old it is.
 - **Query usage** (on request): when the active account's reading has fallen behind, one click asks Claude Code to look up the latest usage. See [Query usage](#query-usage).
 - Three layouts (card list, dense table / one-line strip, ring gauge), light / dark / follow-system theme, adjustable opacity, Traditional Chinese or English interface.
 
@@ -70,7 +70,7 @@ To have the window start when you log into Windows, use *Start at login* in the 
 
 ## Managing accounts
 
-A managed account is one whose login credential you have handed over to this tool as a **credential snapshot**. The snapshots live in the managed directory (`~/.claude-multi/` by default), one file per account; the file name without `.json` is the **account label** shown on screen.
+A watched account is one that has a **credential snapshot** in the managed directory: a copy of its login credential that this tool keeps. The snapshots live in the managed directory (`~/.claude-multi/` by default), one file per account; the file name without `.json` is the **account label** shown on screen.
 
 > The label is the only account name the tool ever displays. It never reads or shows your email address. If you pick a label that looks like an email, the tool warns you, because it will appear on screen (and in screenshots).
 
@@ -89,7 +89,7 @@ This copies the current credential into the managed directory and binds it to th
 Other commands:
 
 ```
-python -m cc_quota_tracker remove <label>   # remove a managed account (its leftover data too)
+python -m cc_quota_tracker remove <label>   # remove a watched account (its leftover data too)
 python -m cc_quota_tracker list             # print the same information as the window, as text
 python -m cc_quota_tracker query            # ask Claude Code for the latest usage (see "Query usage")
 python -m cc_quota_tracker check            # see "For hosts" below
@@ -121,7 +121,7 @@ Some locations cannot restrict permissions at all — FAT32 and exFAT drives, co
 | What you see | What it means |
 |---|---|
 | **Reading pending** (讀數待更新) | The active account has no reading of its own yet. Claude Code keeps only one account's reading at a time, so right after a switch the cached reading still belongs to the previous account, and the tool will not show it under the new one. It appears once Claude Code updates its cache (usually within seconds of logging in; otherwise on the next prompt or when its usage panel is open), or as soon as you press **Update** (see [Query usage](#query-usage)). |
-| **Unmanaged account** (未納管帳號) | The account you are logged into has no credential snapshot here. The card tells you how to manage it. Nothing is wrong. |
+| **Unwatched account** (未監看帳號) | The account you are logged into has no credential snapshot here. The card tells you how to manage it. Nothing is wrong. |
 
 Standby accounts show their **last observed** reading and how long ago that was (e.g. 3 天前). That reading is only accurate if the account has not been used since it was observed — if you used it on another machine, this machine cannot see that. Standby readings are never flagged as out of date just for being old. For the active account, an old reading is not flagged either unless there has been new conversation activity on this machine since the reading ("New activity; usage not updated"). If a reading was already flagged that way when you switched away from the account, its standby card keeps saying **Lagging before the switch** until a new reading for that account appears.
 

@@ -9,7 +9,7 @@ from pathlib import Path
 from unittest import mock
 
 from cc_quota_tracker import claude_provider as provider
-from cc_quota_tracker.managed_directory import (BindingsUnreadable, InvalidLabel, ManagedAccount, ManagedDirectory,
+from cc_quota_tracker.managed_directory import (BindingsUnreadable, InvalidLabel, WatchedAccount, ManagedDirectory,
                                                 NoCredential, Observed, Stored, UnknownLabel)
 from tests.fakehome import HomeTestCase, WindowsAclAssertions, usage_cache
 
@@ -422,7 +422,7 @@ class ListAccountsTest(BindingsTestCase):
         self.put_bindings(**{KEY_RT1: "acct-1"})
         expires = datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc)
         self.assertEqual(self.managed.list_accounts(),
-                         (ManagedAccount("home", KEY_RT2, None, None), ManagedAccount("work", KEY_RT1, "acct-1", expires)))
+                         (WatchedAccount("home", KEY_RT2, None, None), WatchedAccount("work", KEY_RT1, "acct-1", expires)))
 
     def test_files_of_the_tool_itself_are_not_accounts(self):
         self.snapshot("work", "rt-1")
@@ -433,13 +433,13 @@ class ListAccountsTest(BindingsTestCase):
     def test_snapshot_without_a_readable_fingerprint_is_listed_as_unknown(self):
         self.unreadable_snapshot("work")
         self.put_bindings(**{KEY_RT1: "acct-1"})
-        self.assertEqual(self.managed.list_accounts(), (ManagedAccount("work", None, None, None),))
+        self.assertEqual(self.managed.list_accounts(), (WatchedAccount("work", None, None, None),))
 
     def test_locked_bindings_file_lists_accounts_without_a_binding(self):
         self.snapshot("work", "rt-1")
         self.put_bindings(**{KEY_RT1: "acct-1"})
         with HomeTestCase.locked("bindings.json"):
-            self.assertEqual(self.managed.list_accounts(), (ManagedAccount("work", KEY_RT1, None, None),))
+            self.assertEqual(self.managed.list_accounts(), (WatchedAccount("work", KEY_RT1, None, None),))
 
     def test_binding_with_a_missing_or_wrongly_typed_account_id_is_no_binding(self):
         self.snapshot("work", "rt-1")
@@ -554,7 +554,7 @@ class StoreSnapshotTest(BindingsTestCase):
         self.assertEqual(stored, Stored(bound=True, permissions_fixed=False))
         self.assertEqual((self.path / "work.json").read_bytes(), data)
         self.assertEqual(self.stored_bindings(), {KEY_RT1: {"accountId": "acct-1"}})
-        self.assertEqual(self.managed.list_accounts(), (ManagedAccount("work", KEY_RT1, "acct-1", None),))
+        self.assertEqual(self.managed.list_accounts(), (WatchedAccount("work", KEY_RT1, "acct-1", None),))
 
     def test_without_an_account_id_the_existing_binding_of_that_fingerprint_stays(self):
         self.put_bindings(**{KEY_RT1: "acct-1", KEY_RT2: "acct-2"})

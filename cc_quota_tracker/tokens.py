@@ -12,12 +12,12 @@ THEMES = {
         "fg": "#1d1d1f", "sub": "#6b6b70",
         "track": "#e1e1dd",  # 進度條底軌
         "neutral": "#80807d",  # 中性資訊的進度條填色（週窗口已過 %、額外用量）
-        "accent": "#3b6fd8",  # 只代表使用中帳號：外框、使用中標籤；另用於未納管提示的色點
-        "chip_active_fg": "#ffffff",  # 使用中標籤的文字，畫在 accent 上
+        "accent": "#3b6fd8",  # 只代表當前憑證帳號：外框、當前憑證標籤；另用於未監看提示的色點
+        "chip_active_fg": "#ffffff",  # 當前憑證標籤的文字，畫在 accent 上
         "chip_standby": "#ebebe7", "chip_standby_fg": "#6a6a6f",  # 待命標籤的底色與文字
         "normal": "#118246", "warning": "#916c00", "critical": "#cd3c3e",
         "banner": "#fbecc8", "banner_fg": "#5c4300",
-        "active_row": "#f5f7fd",  # 版面 B 展開時使用中帳號那一列的淡色底；列上的文字與圖形對它另外量
+        "active_row": "#f5f7fd",  # 版面 B 展開時當前憑證帳號那一列的淡色底；列上的文字與圖形對它另外量
     },
     # 深色不是淺色的反轉：每一對另外量過，對比不足時只調明度、保持色相
     "dark": {
@@ -47,8 +47,8 @@ FONTS = {
 # 多行文字的行高（行距 ÷ 字級像素）。tk 的 canvas 文字沒有行距選項，版面把多行文字拆成逐行 item 自己排
 LINE_HEIGHT = 1.5
 
-# 巢狀圓角同心：外層圓角＝內層圓角＋兩者之間的內距（panel 對 card 隔著 panel_pad；card 對版面 B 的列底色、版面 C 使用中格的外框隔著 row_inset）
-RADIUS = {"panel": 18, "card": 6, "chip": 9, "row": 2, "cell": 2}  # cell：版面 C 使用中帳號那一格的外框
+# 巢狀圓角同心：外層圓角＝內層圓角＋兩者之間的內距（panel 對 card 隔著 panel_pad；card 對版面 B 的列底色、版面 C 當前憑證格的外框隔著 row_inset）
+RADIUS = {"panel": 18, "card": 6, "chip": 9, "row": 2, "cell": 2}  # cell：版面 C 當前憑證帳號那一格的外框
 
 SPACE = {
     "panel_pad": 12,  # 視窗邊緣到卡片
@@ -58,7 +58,7 @@ SPACE = {
     "card_pad_bottom": 10,
     "shadow_offset": 2,
     "card_gap": 10,  # 展開模式卡片之間
-    "highlight": 2,  # 使用中帳號卡片的外框線寬
+    "highlight": 2,  # 當前憑證帳號卡片的外框線寬
     "banner_pad": 10,
     "chip_gap": 10,  # 帳號標籤與狀態標籤之間
     "chip_pad_x": 7,
@@ -75,12 +75,12 @@ SPACE = {
     "cell_gap": 6,  # 同一段內：窗口名稱、進度條、百分比之間
     "cell_bar_width": 64,  # 單行條與表格裡的小進度條
     "row_pad_y": 8,  # 表格每一列（連同它的提示）上下的內距
-    "row_inset": 4,  # 版面 B 的列底色、版面 C 使用中格的外框，與卡片邊緣的距離
+    "row_inset": 4,  # 版面 B 的列底色、版面 C 當前憑證格的外框，與卡片邊緣的距離
     # 版面 C：環形儀表。一個帳號一格，展開模式每列三格
     "ring_size": 84,  # 外圈的外徑
     "ring_stroke": 8,  # 圈的線寬
     "ring_gap": 3,  # 外圈與內圈之間
-    "ring_cell_width": 104,  # 一格的寬度（使用中帳號的外框就框住這一格）
+    "ring_cell_width": 104,  # 一格的寬度（當前憑證帳號的外框就框住這一格）
     "ring_cell_pad": 8,  # 格內上下左右的內距
     "ring_compact_width": 256,  # 精簡模式格子區的寬度：一格置中，提示在它的內距之內折行
 }

@@ -36,16 +36,16 @@ class AddTest(ManageTestCase):
         self.core.add("work")
         self.assertEqual(self.bindings(), {KEY_RT1: {"accountId": "acct-1"}})
 
-    def test_board_lists_managed_accounts_by_provider_prefixed_label(self):
+    def test_board_lists_watched_accounts_by_provider_prefixed_label(self):
         self.log_in()
         self.core.add("work")
         self.snapshot("home").write_bytes(self.snapshot("work").read_bytes())  # 直接放進目錄的憑證快照
-        self.assertEqual(self.core.poll().managed_accounts, ("claude:home", "claude:work"))
+        self.assertEqual(self.core.poll().watched_accounts, ("claude:home", "claude:work"))
 
-    def test_no_managed_accounts_before_any_add(self):
-        self.assertEqual(self.core.poll().managed_accounts, ())
+    def test_no_watched_accounts_before_any_add(self):
+        self.assertEqual(self.core.poll().watched_accounts, ())
 
-    def test_each_managed_account_keeps_its_own_binding(self):
+    def test_each_watched_account_keeps_its_own_binding(self):
         self.log_in(refresh="rt-1", account_uuid="acct-1")
         self.core.add("work")
         self.log_in(refresh="rt-2", account_uuid="acct-2")
@@ -61,7 +61,7 @@ class AddTest(ManageTestCase):
         current = (self.home / ".claude" / ".credentials.json").read_bytes()
         self.assertEqual(self.snapshot("work").read_bytes(), current)
         self.assertEqual(self.bindings(), {KEY_RT2: {"accountId": "acct-1"}})
-        self.assertEqual(self.core.poll().managed_accounts, ("claude:work",))
+        self.assertEqual(self.core.poll().watched_accounts, ("claude:work",))
 
     def test_add_without_current_credential_writes_nothing(self):
         self.write_claude_json({"oauthAccount": {"accountUuid": "acct-1"}})
@@ -100,7 +100,7 @@ class AddTest(ManageTestCase):
             with self.subTest(label=label), self.assertRaises(InvalidLabel):
                 self.core.add(label)
         self.assertFalse((self.home / "work.json").exists())
-        self.assertEqual(self.core.poll().managed_accounts, ())
+        self.assertEqual(self.core.poll().watched_accounts, ())
 
     def test_polls_and_add_leave_claude_code_files_untouched(self):
         self.log_in()
@@ -136,7 +136,7 @@ class RemoveTest(ManageTestCase):
         self.core.remove("work")
         self.assertFalse(self.snapshot("work").exists())
         self.assertEqual(self.bindings(), {KEY_RT2: {"accountId": "acct-2"}})
-        self.assertEqual(self.core.poll().managed_accounts, ("claude:home",))
+        self.assertEqual(self.core.poll().watched_accounts, ("claude:home",))
 
     def test_remove_unknown_label_is_rejected(self):
         self.log_in()
@@ -161,7 +161,7 @@ class ImportTest(ManageTestCase):
         self.assertEqual(result.account_key, "claude:work")
         self.assertEqual(self.snapshot("work").read_bytes(), source.read_bytes())
         self.assertTrue(source.exists())
-        self.assertEqual(self.core.poll().managed_accounts, ("claude:work",))
+        self.assertEqual(self.core.poll().watched_accounts, ("claude:work",))
 
     def test_does_not_bind_and_says_so(self):
         # 補學由 poll 依三個條件決定；匯入時連 oauthAccount 都不看
@@ -305,7 +305,7 @@ class AtomicWriteTest(ManageTestCase):
         patch, _ = self.replace_failing(3)
         with patch:
             self.core.add("work")
-        self.assertEqual(self.core.poll().managed_accounts, ("claude:work",))
+        self.assertEqual(self.core.poll().watched_accounts, ("claude:work",))
         self.assertEqual(self.leftovers(), [])
 
     def test_persistent_permission_error_fails_and_cleans_up(self):

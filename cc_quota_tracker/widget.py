@@ -400,7 +400,7 @@ class Widget:
         if label is None:
             return
         # 標籤就是檔名，Windows 的檔名不分大小寫
-        taken = {account_label(key).casefold() for key in self._board.managed_accounts} if self._board else set()
+        taken = {account_label(key).casefold() for key in self._board.watched_accounts} if self._board else set()
         if label.casefold() in taken and not messagebox.askyesno(
                 _TITLE, text(lang, "dialog.confirm_replace", label=label), parent=self.root):
             return

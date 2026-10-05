@@ -103,9 +103,9 @@ class LayoutAEnglishTest(LayoutLanguageTestCase):
         shown = self.shown(layout, BOARDS[3], "en")
         self.assertIn("No open window", shown)
         self.assertIn("Reset, next reset time unknown", shown)
-        unmanaged = "\n".join(self.shown(layout, BOARDS[2], "en"))
-        self.assertIn(f"{COMMAND} add <label>", unmanaged)
-        self.assertIn("\"Manage the signed-in account…\"", unmanaged)  # 與右鍵選單的英文名稱一致
+        unwatched = "\n".join(self.shown(layout, BOARDS[2], "en"))
+        self.assertIn(f"{COMMAND} add <label>", unwatched)
+        self.assertIn("\"Manage the signed-in account…\"", unwatched)  # 與右鍵選單的英文名稱一致
 
     def test_expanded_extras_read_in_english(self):
         layout = LayoutA(self.canvas)

@@ -1,5 +1,5 @@
-"""版面 B（密集表格／單行條）。精簡模式是使用中帳號的一行橫條；展開模式是表格，一列一個帳號，提示接在該列下方，
-使用中帳號那一列加淡色底。不與版面 A 共用版面程式碼；提示與橫幅的文案、折行取自 canvas_text，「更新」入口（item、點擊、游標）取自 entry；其餘文案取自語系檔，語系由 render 傳入、存在 _Paint.lang，切換語系只是重畫。
+"""版面 B（密集表格／單行條）。精簡模式是當前憑證帳號的一行橫條；展開模式是表格，一列一個帳號，提示接在該列下方，
+當前憑證帳號那一列加淡色底。不與版面 A 共用版面程式碼；提示與橫幅的文案、折行取自 canvas_text，「更新」入口（item、點擊、游標）取自 entry；其餘文案取自語系檔，語系由 render 傳入、存在 _Paint.lang，切換語系只是重畫。
 
 物件生命週期同版面 A：固定部分的 item 一次建好，之後每輪只改座標、文字、顏色與顯示狀態；數量跟著看板走的部分
 （表格的列、提示、多行文字的行）由 _Pool 補建或刪到剛好，所以 item 數只由看板與模式決定。單行條只在精簡模式存在、
@@ -169,7 +169,7 @@ def _windows(card: Card, board: Board, lang: str):
 
 
 def _label(card: Card, lang: str):
-    return account_label(card.account_key) if card.account_key else text(lang, "account.unmanaged")
+    return account_label(card.account_key) if card.account_key else text(lang, "account.unwatched")
 
 
 def _chip(card: Card, lang: str):
@@ -340,7 +340,7 @@ class _Cell(_Group):
 
 
 class _TableRow(_Group):
-    """表格的一列：帳號標籤與狀態標籤、兩格窗口、讀數年齡、憑證到期倒數，底下接提示；使用中帳號加淡色底。
+    """表格的一列：帳號標籤與狀態標籤、兩格窗口、讀數年齡、憑證到期倒數，底下接提示；當前憑證帳號加淡色底。
     有「更新」入口時，它與落後（或讀數待更新）那條提示同一行靠右，查詢的狀態與失敗原因接在那條提示底下。"""
 
     def __init__(self, p, parent_tags, on_query):
@@ -489,7 +489,7 @@ class LayoutB:
                 self._table = None
             if self._strip is None:
                 self._strip = _Strip(p, (TAG,), self._on_query)
-            card = board.cards[0]  # 核心保證第一張是使用中帳號（或未納管帳號）
+            card = board.cards[0]  # 核心保證第一張是當前憑證帳號（或未監看帳號）
             width = self._strip.width(card, board) + 2 * pad_x
         top = self._banner_box(board, c, pad, pad, width, stalled_text)
         if expanded:

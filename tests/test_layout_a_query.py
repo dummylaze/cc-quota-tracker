@@ -1,5 +1,5 @@
 """縫 ②：版面 A 的「更新」入口與查詢狀態。入口、查詢中、冷卻、失敗原因的 Canvas item 與既有文字的外框不重疊，
-提示維持單行；入口只在落後或讀數待更新的使用中帳號卡片出現，進行中與冷卻中不可點。"""
+提示維持單行；入口只在落後或讀數待更新的當前憑證帳號卡片出現，進行中與冷卻中不可點。"""
 import re
 import tkinter as tk
 import tkinter.font as tkfont
@@ -73,7 +73,7 @@ class EntryTest(QueryLayoutTestCase):
         self.assertIn("Reading pending", shown)
 
     def test_no_entry_when_the_reading_is_neither_lagging_nor_pending(self):
-        for card in (ACTIVE, LAB, Card(None, Role.UNMANAGED, ReadingState.NO_READING)):
+        for card in (ACTIVE, LAB, Card(None, Role.UNWATCHED, ReadingState.NO_READING)):
             self.render(board_of(card))
             self.assertEqual(self.entries(), [], card)
 
@@ -299,7 +299,7 @@ class StandbyLaggingTest(QueryLayoutTestCase):
         for lang in ("zh-TW", "en"):
             shown = self.render(board_of(ACTIVE, standby), lang, expanded=True)
             self.assertEqual(shown.count(STANDBY_LAGGING_TEXTS[lang]), 1, lang)
-            self.assertNotIn(ACTIVE_LAGGING_TEXTS[lang], shown, lang)  # 使用中帳號沒落後，待命卡片也不借它的文字
+            self.assertNotIn(ACTIVE_LAGGING_TEXTS[lang], shown, lang)  # 當前憑證帳號沒落後，待命卡片也不借它的文字
 
     def test_each_role_gets_its_own_text(self):
         shown = self.render(board_of(LAGGING, replace(PERSONAL, lagging=True)), expanded=True)

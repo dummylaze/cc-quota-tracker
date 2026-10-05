@@ -37,7 +37,7 @@ NOW = datetime(2026, 10, 5, 10, 0).astimezone()
 
 
 def fake_board() -> Board:
-    """使用中帳號 work：工作階段用了四成多，週額度已接近上限（紅色）；憑證快照還有 25 天。"""
+    """當前憑證帳號 work：工作階段用了四成多，週額度已接近上限（紅色）；憑證快照還有 25 天。"""
     work = Card(
         "claude:work", Role.ACTIVE, ReadingState.HAS_READING, reading_age=timedelta(minutes=3),
         limits=(Limit("session", 42, Severity.NORMAL, NOW + timedelta(hours=2, minutes=15)),

@@ -19,7 +19,7 @@ STRINGS = {
     # Accounts and roles
     "role.active": "Active",
     "role.standby": "Standby",
-    "account.unmanaged": "Unmanaged account",
+    "account.unwatched": "Unwatched account",
     "account.added": "Managed \"{label}\"",
     "account.removed": "Removed \"{label}\"",
     "account.imported": "Imported \"{label}\"",
@@ -94,14 +94,14 @@ STRINGS = {
     # Text output of list
     "notice": "Note: {text}",
     "list.header": "[{role}] {label}",
-    "list.header_unmanaged": "[Active] Unmanaged account (to manage it: sign in to this account in Claude Code, "
+    "list.header_unwatched": "[Active] Unwatched account (to manage it: sign in to this account in Claude Code, "
                              "then run {command} add <label>)",
     "list.reading_age": "Reading age: {age}",
     "list.observed": "Last observed: {age} (observed value: only accurate if this account hasn't been used since)",
     "list.other_limits": "Other limits:",
     "list.breakdown": "Where this week's usage went ({start} – {end}):",
-    "list.managed": "Managed accounts: {labels}",
-    "list.none_managed": "No accounts managed yet",
+    "list.watched": "Watched accounts: {labels}",
+    "list.none_watched": "No accounts managed yet",
     "list.snapshot_invalid": "Credential snapshot is no longer valid, please manage it again: Claude Code is signed in "
                              "to this account; run {command} add {label}",
     "list.schema_changed": "The usage cache structure has changed and this tool can't read the new structure; "
@@ -137,7 +137,7 @@ STRINGS = {
                            "in Claude Code first, then run this again.",
     "error.not_a_credential_file": "This file isn't a Claude Code credential file (no refreshToken under "
                                    "claudeAiOauth); nothing was imported.",
-    "error.unknown_label": "There is no managed account with the label \"{label}\".",
+    "error.unknown_label": "There is no watched account with the label \"{label}\".",
     "error.bindings_unreadable": "Couldn't read the bindings file ({path}) right now; another program (such as "
                                  "antivirus software) may have it locked. No credential snapshot was changed. "
                                  "Try again in a moment.",
@@ -188,7 +188,7 @@ STRINGS = {
     "cli.usage": "Usage:\n"
                  "  {command} add <label>     manage the account Claude Code is signed in to; "
                  "re-manage if the label exists\n"
-                 "  {command} remove <label>  remove a managed account\n"
+                 "  {command} remove <label>  remove a watched account\n"
                  "  {command} list            print the board\n"
                  "  {command} check           check that Claude Code's usage cache structure is still compatible "
                  "with this tool, and list the directories actually used\n"

@@ -67,7 +67,7 @@ class SwitchLogTest(SwitchTestCase):
         self.manage("home", "rt-h", "acct-h")
         self.core.poll()
 
-    def test_switch_to_a_managed_account_records_its_bound_id(self):
+    def test_switch_to_a_watched_account_records_its_bound_id(self):
         self.clock.advance(minutes=5)
         lines = self.poll_after(lambda: self.log_in(refresh="rt-w", account_uuid="acct-w"))
         self.assertEqual(lines, [{"at": self.clock.now.isoformat(), "accountId": "acct-w",
@@ -83,7 +83,7 @@ class SwitchLogTest(SwitchTestCase):
         self.assertEqual([line["accountId"] for line in lines], ["acct-w"])
         self.assertNotIn("office", json.dumps(self.switch_log()))
 
-    def test_switch_to_an_unmanaged_account_records_the_oauth_id(self):
+    def test_switch_to_an_unwatched_account_records_the_oauth_id(self):
         lines = self.poll_after(lambda: self.log_in(refresh="rt-x", account_uuid="acct-x"))
         self.assertEqual([line["accountId"] for line in lines], ["acct-x"])
 
@@ -183,7 +183,7 @@ class RotationTest(SwitchTestCase):
         lines = self.poll_after(lambda: self.log_in(refresh="rt-w2", account_uuid="acct-x"))
         self.assertEqual([line["accountId"] for line in lines], ["acct-x"])
         cards = self.cards()
-        self.assertEqual(cards[None].role, Role.UNMANAGED)
+        self.assertEqual(cards[None].role, Role.UNWATCHED)
         self.assertFalse(cards["claude:work"].snapshot_invalid)
 
     def test_switch_to_another_snapshot_after_rotation(self):
@@ -193,7 +193,7 @@ class RotationTest(SwitchTestCase):
         self.assertEqual([line["accountId"] for line in lines], ["acct-h"])
         self.assertFalse(self.cards()["claude:work"].snapshot_invalid)
 
-    def test_different_oauth_account_is_a_switch_to_unmanaged(self):
+    def test_different_oauth_account_is_a_switch_to_unwatched(self):
         lines = self.poll_after(lambda: self.log_in(refresh="rt-x", account_uuid="acct-x"))
         self.assertEqual([line["accountId"] for line in lines], ["acct-x"])
 
@@ -263,13 +263,13 @@ class ReloginTest(SwitchTestCase):
         self.write_credentials(refresh="rt-x")
         self.paths.claude_json.unlink()
         cards = self.cards()
-        self.assertEqual(cards[None].role, Role.UNMANAGED)
+        self.assertEqual(cards[None].role, Role.UNWATCHED)
         self.assertFalse(any(c.snapshot_invalid for c in cards.values()))
 
-    def test_unbound_oauth_account_is_still_unmanaged(self):
+    def test_unbound_oauth_account_is_still_unwatched(self):
         self.log_in(refresh="rt-x", account_uuid="acct-x")
         cards = self.cards()
-        self.assertEqual(cards[None].role, Role.UNMANAGED)
+        self.assertEqual(cards[None].role, Role.UNWATCHED)
         self.assertFalse(any(c.snapshot_invalid for c in cards.values()))
 
     def test_managing_again_clears_the_flag_without_a_switch(self):

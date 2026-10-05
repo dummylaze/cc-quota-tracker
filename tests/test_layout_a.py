@@ -30,7 +30,7 @@ BOARDS = [
     board(ACTIVE),
     board(Card("claude:work", Role.ACTIVE, ReadingState.PENDING, snapshot_expires_at=NOW + timedelta(days=3),
                snapshot_expiring=True)),
-    board(Card(None, Role.UNMANAGED, ReadingState.NO_READING)),
+    board(Card(None, Role.UNWATCHED, ReadingState.NO_READING)),
     board(Card("claude:work", Role.ACTIVE, ReadingState.HAS_READING, reading_age=timedelta(hours=2),
                limits=(window("session", None, resets_at=None), window("weekly_all", None, resets_at=None, reset=True)),
                snapshot_invalid=True, snapshot_expires_at=NOW - timedelta(days=1), snapshot_expiring=True)),
@@ -107,7 +107,7 @@ class LayoutACompactTest(unittest.TestCase):
         self.layout.destroy()
         self.assertEqual(self.items(), 0)
 
-    def test_unmanaged_card_explains_how_to_manage(self):
+    def test_unwatched_card_explains_how_to_manage(self):
         self.layout.render(BOARDS[2], "light")
         shown = "\n".join(self.visible_texts())
         self.assertIn(f"{COMMAND} add <帳號標籤>", shown)
@@ -161,7 +161,7 @@ PERSONAL = Card("claude:personal", Role.STANDBY, ReadingState.HAS_READING, readi
 LAB = Card("claude:lab", Role.STANDBY, ReadingState.NO_READING)
 EXPANDED_BOARDS = [
     Board(cards=(FULL, PERSONAL, LAB), as_of=NOW),
-    Board(cards=(Card(None, Role.UNMANAGED, ReadingState.NO_READING), PERSONAL), as_of=NOW),
+    Board(cards=(Card(None, Role.UNWATCHED, ReadingState.NO_READING), PERSONAL), as_of=NOW),
     Board(cards=(ACTIVE, PERSONAL), as_of=NOW, schema_changed=True, last_reading_at=NOW - timedelta(hours=2)),
     Board(cards=(ACTIVE,), as_of=NOW),
 ] + BOARDS
@@ -193,13 +193,13 @@ class LayoutAExpandedTest(unittest.TestCase):
         shown = self.shown()
         for label in ("work", "personal", "lab"):
             self.assertIn(label, shown)
-        self.assertEqual(shown.count("使用中"), 1)
+        self.assertEqual(shown.count("當前憑證"), 1)
         self.assertEqual(shown.count("待命"), 2)
 
     def test_standby_shows_observed_age_and_no_lagging_note(self):
         shown = self.shown()
         self.assertIn("觀測 3 天前", shown)
-        self.assertEqual(sum("有新對話，額度尚未更新" in t for t in shown), 1)  # 只有使用中帳號那一張
+        self.assertEqual(sum("有新對話，額度尚未更新" in t for t in shown), 1)  # 只有當前憑證帳號那一張
 
     def test_active_card_shows_expanded_only_data(self):
         shown = "\n".join(self.shown())
@@ -244,7 +244,7 @@ class LayoutAExpandedTest(unittest.TestCase):
                 and self.canvas.itemcget(i, "fill") == THEMES["light"]["warning"]]
         self.assertTrue(dots)
 
-    def test_unmanaged_card_explains_how_to_manage(self):
+    def test_unwatched_card_explains_how_to_manage(self):
         shown = "\n".join(self.shown(EXPANDED_BOARDS[1]))
         self.assertIn(f"{COMMAND} add <帳號標籤>", shown)
         self.assertIn("「納管目前登入的帳號…」", shown)
@@ -301,10 +301,10 @@ class LayoutAExpandedTest(unittest.TestCase):
             with self.subTest(theme=theme):
                 self.layout.render(EXPANDED_BOARDS[0], theme, expanded=True)
                 accent = THEMES[theme]["accent"]
-                self.assertEqual(len(self.fills(accent)), 1)  # 使用中標籤
+                self.assertEqual(len(self.fills(accent)), 1)  # 當前憑證標籤
                 outlined = [i for i in self.canvas.find_all() if self.canvas.type(i) == "polygon"
                             and self.canvas.itemcget(i, "outline") == accent]
-                self.assertEqual(len(outlined), 1)  # 使用中帳號的卡片外框
+                self.assertEqual(len(outlined), 1)  # 當前憑證帳號的卡片外框
 
     def test_standby_chip_uses_its_own_colors(self):
         self.layout.render(EXPANDED_BOARDS[0], "dark", expanded=True)
@@ -315,8 +315,8 @@ class LayoutAExpandedTest(unittest.TestCase):
         self.assertEqual({self.canvas.itemcget(i, "fill") for i in chip_texts}, {c["chip_standby_fg"]})
 
     def test_wrapped_text_has_a_line_height_of_at_least_one_and_a_half(self):
-        # 未納管的說明（small）與橫幅（body）都會折成多行
-        board = Board(cards=(Card(None, Role.UNMANAGED, ReadingState.NO_READING),), as_of=NOW,
+        # 未監看的說明（small）與橫幅（body）都會折成多行
+        board = Board(cards=(Card(None, Role.UNWATCHED, ReadingState.NO_READING),), as_of=NOW,
                       schema_changed=True, invalid_settings=("mode", "opacity"))
         self.layout.render(board, "light", expanded=True)
         wrapped = [lines for lines in visible_lines(self.canvas) if len(lines) > 1]

@@ -33,12 +33,12 @@ def render(board: Board, lang: str = ZH_TW) -> str:
         lines.insert(0, text(lang, "notice", text=text(lang, "settings.invalid", fields=fields)))
     if board.settings_unreadable:
         lines.insert(0, text(lang, "notice", text=text(lang, "settings.unreadable")))
-    # 查詢只能查使用中帳號：待命帳號切換前已落後，不是能靠 query 處理的
+    # 查詢只能查當前憑證帳號：待命帳號切換前已落後，不是能靠 query 處理的
     if any(c.role is not Role.STANDBY and (c.lagging or c.reading_state is ReadingState.PENDING) for c in board.cards):
         lines.append(text(lang, "list.query_hint", command=COMMAND))
-    labels = [account_label(key) for key in board.managed_accounts]
-    lines.append(text(lang, "list.managed", labels=text(lang, "sep.item").join(labels)) if labels
-                 else text(lang, "list.none_managed"))
+    labels = [account_label(key) for key in board.watched_accounts]
+    lines.append(text(lang, "list.watched", labels=text(lang, "sep.item").join(labels)) if labels
+                 else text(lang, "list.none_watched"))
     return "\n".join(lines)
 
 
@@ -63,8 +63,8 @@ def _render_card(card: Card, board: Board, lang: str) -> str:
 
 
 def _header(card: Card, lang: str) -> str:
-    if card.role is Role.UNMANAGED:
-        return text(lang, "list.header_unmanaged", command=COMMAND)
+    if card.role is Role.UNWATCHED:
+        return text(lang, "list.header_unwatched", command=COMMAND)
     return text(lang, "list.header", role=text(lang, _ROLES[card.role]), label=account_label(card.account_key))
 
 

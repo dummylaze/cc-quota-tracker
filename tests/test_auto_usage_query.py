@@ -16,7 +16,7 @@ INTERVAL = timedelta(minutes=15)
 
 
 class AutoQueryTestCase(AsyncQueryTestCase):
-    """使用中帳號是未納管帳號、額度快取的觀測時間是 NOW、時鐘停在 NOW；自動查詢預設開啟，間隔 15 分鐘。"""
+    """當前憑證帳號是未監看帳號、額度快取的觀測時間是 NOW、時鐘停在 NOW；自動查詢預設開啟，間隔 15 分鐘。"""
 
     def setUp(self):
         super().setUp()

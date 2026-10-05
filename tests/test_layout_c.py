@@ -48,7 +48,7 @@ class LayoutCTestCase(unittest.TestCase):
         return (x1 + x2) / 2, (y1 + y2) / 2
 
     def accent_frames(self, theme="light"):
-        """使用中帳號那一格的外框：只有輪廓、沒有填色，輪廓是 accent。"""
+        """當前憑證帳號那一格的外框：只有輪廓、沒有填色，輪廓是 accent。"""
         return [i for i in self.canvas.find_all() if self.visible(i) and self.canvas.type(i) == "polygon"
                 and self.canvas.itemcget(i, "outline") == THEMES[theme]["accent"]]
 
@@ -119,7 +119,7 @@ class LayoutCCompactTest(LayoutCTestCase):
     def test_shows_only_the_active_account(self):
         shown = self.shown(Board(cards=(FULL, PERSONAL), as_of=NOW))
         self.assertIn("work", shown)
-        self.assertIn("使用中", shown)
+        self.assertIn("當前憑證", shown)
         self.assertIn("讀數 3 分鐘前", shown)
         self.assertNotIn("personal", shown)
 
@@ -138,9 +138,9 @@ class LayoutCCompactTest(LayoutCTestCase):
         self.assertFalse([t for t in shown if "重置：" in t])
         self.assertIn("工作階段 42%", shown)
 
-    def test_unmanaged_account_explains_how_to_manage(self):
+    def test_unwatched_account_explains_how_to_manage(self):
         shown = "\n".join(self.shown(BOARDS[2]))
-        self.assertIn("未納管帳號", shown)
+        self.assertIn("未監看帳號", shown)
         self.assertIn("「納管目前登入的帳號…」", shown)
 
     def test_banner_is_shown(self):
@@ -204,11 +204,11 @@ class LayoutCExpandedTest(LayoutCTestCase):
                 personal_x = self.canvas.coords(self.text_item("personal"))[0]
                 self.assertTrue(x1 < work_x < x2)
                 self.assertGreater(personal_x, x2)
-                self.assertEqual(len(self.fills(THEMES[theme]["accent"])), 1)  # 使用中標籤
+                self.assertEqual(len(self.fills(THEMES[theme]["accent"])), 1)  # 當前憑證標籤
 
     def test_chips_tell_active_from_standby(self):
         shown = self.shown(EXPANDED_BOARDS[0], expanded=True)
-        self.assertEqual(shown.count("使用中"), 1)
+        self.assertEqual(shown.count("當前憑證"), 1)
         self.assertEqual(shown.count("待命"), 2)
 
     def test_notes_name_their_account_and_sit_below_the_cells(self):
@@ -221,9 +221,9 @@ class LayoutCExpandedTest(LayoutCTestCase):
                          and self.canvas.itemcget(i, "text").startswith(text[:5]))
             self.assertGreater(self.canvas.coords(first)[1], ring_bottom, text)
 
-    def test_unmanaged_account_is_highlighted_and_explains_how_to_manage(self):
+    def test_unwatched_account_is_highlighted_and_explains_how_to_manage(self):
         shown = "\n".join(self.shown(EXPANDED_BOARDS[1], expanded=True))
-        self.assertIn("未納管帳號", shown)
+        self.assertIn("未監看帳號", shown)
         self.assertIn("「納管目前登入的帳號…」", shown)
         self.assertEqual(len(self.accent_frames()), 1)
 

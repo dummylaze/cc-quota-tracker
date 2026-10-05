@@ -17,9 +17,9 @@ STRINGS = {
     "sep.clause": "，",
 
     # 帳號與狀態
-    "role.active": "使用中",
+    "role.active": "當前憑證",
     "role.standby": "待命",
-    "account.unmanaged": "未納管帳號",
+    "account.unwatched": "未監看帳號",
     "account.added": "已納管「{label}」",
     "account.removed": "已移除「{label}」",
     "account.imported": "已匯入「{label}」",
@@ -84,13 +84,13 @@ STRINGS = {
     # list 的文字輸出
     "notice": "注意：{text}",
     "list.header": "[{role}] {label}",
-    "list.header_unmanaged": "[使用中] 未納管帳號（納管方法：在 Claude Code 登入這個帳號後執行 {command} add <帳號標籤>）",
+    "list.header_unwatched": "[當前憑證] 未監看帳號（納管方法：在 Claude Code 登入這個帳號後執行 {command} add <帳號標籤>）",
     "list.reading_age": "讀數年齡：{age}",
     "list.observed": "最後觀測：{age}（觀測值：觀測之後這個帳號沒再被用過才準確）",
     "list.other_limits": "其他限額：",
     "list.breakdown": "本週用量去向（{start} ～ {end}）：",
-    "list.managed": "納管帳號：{labels}",
-    "list.none_managed": "尚未納管任何帳號",
+    "list.watched": "監看帳號：{labels}",
+    "list.none_watched": "尚未納管任何帳號",
     "list.snapshot_invalid": "憑證快照已失效，請重新納管：Claude Code 目前登入的就是這個帳號，執行 {command} add {label}",
     "list.schema_changed": "額度快取結構已變更，本工具讀不懂新的結構；以下是最後一次成功的讀數（{time}）",
     "list.schema_changed_none": "額度快取結構已變更，本工具讀不懂新的結構；目前沒有成功的讀數",
@@ -103,18 +103,18 @@ STRINGS = {
                                      "已修正為只有目前使用者能存取。",
     "add_warning.permissions_untightened": "警告：納管目錄的權限無法收緊。把它搬到 NTFS 磁碟（一般的 C:、D: 槽）即可解除。",
     "add_warning.not_bound.cli": "警告：讀不到 Claude Code 目前登入帳號的識別碼，這份憑證快照暫時沒有綁定帳號；"
-                                 "該帳號成為使用中帳號之前只會顯示「讀數待更新」。可以稍後再執行一次 add。",
+                                 "該帳號成為當前憑證帳號之前只會顯示「讀數待更新」。可以稍後再執行一次 add。",
     "add_warning.not_bound.menu": "讀不到 Claude Code 目前登入帳號的識別碼，這份憑證快照暫時沒有綁定帳號；"
-                                  "該帳號成為使用中帳號之前只會顯示「讀數待更新」。"
+                                  "該帳號成為當前憑證帳號之前只會顯示「讀數待更新」。"
                                   "可以稍後再從右鍵選單「納管目前登入的帳號…」做一次。",
     # 匯入的憑證檔本來就不帶帳號識別碼，沒有綁定是常態，不是讀取失敗
-    "add_warning.not_bound.import": "這份憑證快照還沒有綁定帳號：在 Claude Code 登入這個帳號、成為使用中帳號之後，"
+    "add_warning.not_bound.import": "這份憑證快照還沒有綁定帳號：在 Claude Code 登入這個帳號、成為當前憑證帳號之後，"
                                     "本工具會自動補上；在那之前只會顯示「讀數待更新」。",
     "error.invalid_label": "帳號標籤「{label}」不能當檔名：不可空白、不可以點開頭或結尾，"
                            "也不能含 < > : \" / \\ | ? * 或裝置名稱（如 CON、NUL）",
     "error.no_credential": "讀不到目前登入的憑證。請先在 Claude Code 登入要納管的帳號，再執行一次。",
     "error.not_a_credential_file": "這個檔案不是 Claude Code 的憑證檔（讀不出 claudeAiOauth 的 refreshToken），沒有匯入。",
-    "error.unknown_label": "沒有帳號標籤為「{label}」的納管帳號。",
+    "error.unknown_label": "沒有帳號標籤為「{label}」的監看帳號。",
     "error.bindings_unreadable": "綁定檔（{path}）暫時讀不到，可能被其他程式（例如防毒軟體）鎖住。"
                                  "憑證快照沒有變更，請稍後再試一次。",
 
@@ -158,7 +158,7 @@ STRINGS = {
     # 命令列
     "cli.usage": "用法：\n"
                  "  {command} add <帳號標籤>     納管 Claude Code 目前登入的帳號；標籤已存在就重新納管\n"
-                 "  {command} remove <帳號標籤>  移除納管帳號\n"
+                 "  {command} remove <帳號標籤>  移除監看帳號\n"
                  "  {command} list               列出看板\n"
                  "  {command} check              檢查 Claude Code 的額度快取結構是否仍與本工具相容，並列出實際使用的目錄\n"
                  "  {command} query              查詢一次最新額度並等它結束；成功結束代碼 0，失敗 1\n"

@@ -18,19 +18,19 @@ PAIRS = [
     *((s, "track", GRAPHIC, "進度條填色") for s in SEVERITIES),
     ("neutral", "track", GRAPHIC, "中性進度條填色：週窗口已過 %、額外用量"),
     ("track", "card", VISIBLE, "空的進度條底軌"),
-    ("accent", "card", GRAPHIC, "使用中帳號的外框、未納管提示的色點"),
-    ("accent", "panel", GRAPHIC, "使用中帳號的外框（外半邊落在底板上）"),
-    ("chip_active_fg", "accent", TEXT, "使用中標籤文字"),
+    ("accent", "card", GRAPHIC, "當前憑證帳號的外框、未監看提示的色點"),
+    ("accent", "panel", GRAPHIC, "當前憑證帳號的外框（外半邊落在底板上）"),
+    ("chip_active_fg", "accent", TEXT, "當前憑證標籤文字"),
     ("chip_standby_fg", "chip_standby", TEXT, "待命標籤文字"),
     ("banner_fg", "banner", TEXT, "橫幅文字"),
-    # 版面 B 使用中帳號那一列：文字與圖形實際畫在淡色底上
-    ("fg", "active_row", TEXT, "使用中列的帳號標籤、提示文字"),
-    ("sub", "active_row", TEXT, "使用中列的讀數年齡、附註"),
-    *((s, "active_row", TEXT, "使用中列的百分比數值、嚴重度提示文字與色點") for s in SEVERITIES),
-    ("accent", "active_row", GRAPHIC, "使用中列的使用中標籤、未納管提示的色點"),
+    # 版面 B 當前憑證帳號那一列：文字與圖形實際畫在淡色底上
+    ("fg", "active_row", TEXT, "當前憑證列的帳號標籤、提示文字"),
+    ("sub", "active_row", TEXT, "當前憑證列的讀數年齡、附註"),
+    *((s, "active_row", TEXT, "當前憑證列的百分比數值、嚴重度提示文字與色點") for s in SEVERITIES),
+    ("accent", "active_row", GRAPHIC, "當前憑證列的當前憑證標籤、未監看提示的色點"),
 ]
 # 使用者決定的例外（票 17）：淡色底本身對卡片、以及空底軌對淡色底，都低於「看得見」的 Lc 15。
-# 淡色底要淡才不壓過內容；使用中列另有使用中標籤，不只靠底色辨認
+# 淡色底要淡才不壓過內容；當前憑證列另有當前憑證標籤，不只靠底色辨認
 
 
 def _channel(hex2):
@@ -113,8 +113,8 @@ class RadiusTest(unittest.TestCase):
     def test_nested_corners_are_concentric(self):
         # 外層圓角＝內層圓角＋兩者之間的內距
         self.assertEqual(RADIUS["panel"], RADIUS["card"] + SPACE["panel_pad"])
-        self.assertEqual(RADIUS["card"], RADIUS["row"] + SPACE["row_inset"])  # 版面 B 使用中列的底色
-        self.assertEqual(RADIUS["card"], RADIUS["cell"] + SPACE["row_inset"])  # 版面 C 使用中格的外框
+        self.assertEqual(RADIUS["card"], RADIUS["row"] + SPACE["row_inset"])  # 版面 B 當前憑證列的底色
+        self.assertEqual(RADIUS["card"], RADIUS["cell"] + SPACE["row_inset"])  # 版面 C 當前憑證格的外框
 
 
 if __name__ == "__main__":

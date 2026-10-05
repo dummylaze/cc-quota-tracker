@@ -1,5 +1,5 @@
 """版面 C（環形儀表）。一個帳號一格：外圈是週窗口、內圈是工作階段窗口，中央顯示工作階段百分比，底下是帳號標籤、
-狀態標籤、讀數年齡與兩個窗口的文字說明。精簡模式只有使用中帳號那一格；展開模式每列三格，使用中帳號那一格加外框，
+狀態標籤、讀數年齡與兩個窗口的文字說明。精簡模式只有當前憑證帳號那一格；展開模式每列三格，當前憑證帳號那一格加外框，
 提示接在該列的格子下方、冠上帳號標籤。外框離卡片邊 row_inset，圓角與卡片同心。不與其他版面共用版面程式碼；提示與橫幅的文案、折行取自 canvas_text，「更新」入口（item、點擊、游標）取自 entry；其餘文案取自語系檔，語系由 render 傳入、存在 _Paint.lang，切換語系只是重畫。
 
 物件生命週期同版面 A、B：一格裡固定部分的 item 一次建好，之後每輪只改座標、文字、顏色與顯示狀態；數量跟著看板走的部分
@@ -163,7 +163,7 @@ def _windows(card: Card, board: Board, lang: str):
 
 
 def _label(card: Card, lang: str):
-    return account_label(card.account_key) if card.account_key else text(lang, "account.unmanaged")
+    return account_label(card.account_key) if card.account_key else text(lang, "account.unwatched")
 
 
 def _chip(card: Card, lang: str):
@@ -206,7 +206,7 @@ class _Ring(_Group):
 
 
 class _Cell(_Group):
-    """一個帳號一格：環、帳號標籤、狀態標籤、讀數年齡、兩個窗口的說明（展開模式多一行重置倒數）；使用中帳號加外框。
+    """一個帳號一格：環、帳號標籤、狀態標籤、讀數年齡、兩個窗口的說明（展開模式多一行重置倒數）；當前憑證帳號加外框。
     提示由 render_notes 畫在該列下方；精簡模式只畫提示的數量。「更新」入口與落後（或讀數待更新）那條提示同一行靠右，
     精簡模式沒有那條提示時靠在提示數量那一行；查詢的狀態與失敗原因接在它底下。"""
 
@@ -258,7 +258,7 @@ class _Cell(_Group):
         return y + pad
 
     def outline(self, card: Card, c, x, top, width, bottom, framed: bool):
-        """使用中帳號（含未納管）的外框，框住這一格；同一列的格子等高。待命帳號沒有；只有一格的精簡模式也不畫。"""
+        """當前憑證帳號（含未監看）的外框，框住這一格；同一列的格子等高。待命帳號沒有；只有一格的精簡模式也不畫。"""
         p = self.p
         if not framed or card.role is Role.STANDBY:
             p.hide(self.frame)
@@ -270,8 +270,8 @@ class _Cell(_Group):
         精簡模式有讀數時只畫一行「● 3 則提示」，色點取最嚴重那條的顏色，完整文字展開才看得到。回傳下緣。"""
         p, status = self.p, board.usage_query
         entry = query_entry(card, status)
-        if not expanded and card.role is not Role.UNMANAGED and card.reading_state is ReadingState.HAS_READING:
-            # 沒有讀數或未納管時，提示就是這張卡片的內容（怎麼納管、為什麼還沒有讀數），照常全文顯示
+        if not expanded and card.role is not Role.UNWATCHED and card.reading_state is ReadingState.HAS_READING:
+            # 沒有讀數或未監看時，提示就是這張卡片的內容（怎麼納管、為什麼還沒有讀數），照常全文顯示
             shown = notes(card, board, p.lang, expiry_info=False)
             summary = [(text(p.lang, "notes.count", count=len(shown)), count_dot(shown), "fg")] if shown else []
             host = 0 if summary and entry else None
@@ -323,7 +323,7 @@ class LayoutC:
         content = _COLUMNS * cell_w + (_COLUMNS - 1) * gap if expanded else p.px("ring_compact_width")
         width = content + 2 * inset
         top = self._banner_box(board, c, pad, pad, width, stalled_text)
-        cards = board.cards if expanded else board.cards[:1]  # 核心保證第一張是使用中帳號（或未納管帳號）
+        cards = board.cards if expanded else board.cards[:1]  # 核心保證第一張是當前憑證帳號（或未監看帳號）
         cells = self._cells.fit(len(cards))
         left = pad + inset
         note_left, note_right = left + p.px("ring_cell_pad"), left + content - p.px("ring_cell_pad")  # 對齊格子的內容

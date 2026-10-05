@@ -361,37 +361,37 @@ class LanguageTest(WidgetTestCase):
 
     def test_follows_the_system_by_default_and_rechecks_every_round(self):
         self.assertEqual(self.widget.menu_state().language, "system")
-        self.assertIn("未納管帳號", self.texts())
+        self.assertIn("未監看帳號", self.texts())
         self.assertEqual(self.widget.menu_labels()[0], "版面")
         self.system_language = "en-US"  # 使用者換了作業系統的介面語言
         self.widget.refresh()
-        self.assertIn("Unmanaged account", self.texts())
+        self.assertIn("Unwatched account", self.texts())
         self.assertEqual(self.widget.menu_labels()[0], "Layout")
         self.system_language = "zh-TW"
         self.widget.refresh()
-        self.assertIn("未納管帳號", self.texts())
+        self.assertIn("未監看帳號", self.texts())
 
     def test_an_unsupported_system_language_falls_back_to_english(self):
         for tag in ("ja-JP", "zh-CN", "fr-FR", None):
             self.system_language = tag
             self.widget.refresh()
-            self.assertIn("Unmanaged account", self.texts(), tag)
+            self.assertIn("Unwatched account", self.texts(), tag)
             self.assertEqual(self.widget.menu_labels()[0], "Layout", tag)
 
     def test_a_chosen_language_ignores_the_system(self):
         self.system_language = "ja-JP"
         self.widget.set_preference("language", "zh-TW")
         self.widget.refresh()
-        self.assertIn("未納管帳號", self.texts())
+        self.assertIn("未監看帳號", self.texts())
         self.system_language = "zh-TW"
         self.widget.set_preference("language", "en")
         self.widget.refresh()
-        self.assertIn("Unmanaged account", self.texts())
+        self.assertIn("Unwatched account", self.texts())
         self.assertEqual(self.settings()["language"], "en")
 
     def test_gui_change_applies_at_once_and_is_remembered(self):
         self.widget.set_preference("language", "en")
-        self.assertIn("Unmanaged account", self.texts())  # 不必等下一輪
+        self.assertIn("Unwatched account", self.texts())  # 不必等下一輪
         self.assertEqual(self.counting.polls, 1)
         self.assertEqual(self.settings()["language"], "en")
         self.assertEqual(self.widget.menu_state().language, "en")
@@ -399,7 +399,7 @@ class LanguageTest(WidgetTestCase):
     def test_hand_edit_applies_on_next_round(self):
         self.write_settings(language="en")
         self.widget.refresh()
-        self.assertIn("Unmanaged account", self.texts())
+        self.assertIn("Unwatched account", self.texts())
         self.assertEqual(self.widget.menu_labels()[0], "Layout")
 
     def test_menu_offers_follow_system_and_the_two_languages_each_in_its_own_name(self):
@@ -440,14 +440,14 @@ class LanguageTest(WidgetTestCase):
             for mode in ("expanded", "compact"):
                 self.widget.set_preference("layout", layout)
                 self.widget.set_preference("mode", mode)
-                self.assertIn("Unmanaged account", self.texts(), (layout, mode))
+                self.assertIn("Unwatched account", self.texts(), (layout, mode))
 
     def test_invalid_language_in_the_settings_file_is_named_and_the_system_language_is_used(self):
         self.write_settings(language="klingon")
         self.widget.refresh()
         self.assertEqual(self.widget.menu_state().language, "system")
         self.assertIn("language", "".join(self.texts()))
-        self.assertIn("未納管帳號", self.texts())
+        self.assertIn("未監看帳號", self.texts())
 
     def test_dialogs_speak_the_chosen_language(self):
         self.widget.set_preference("language", "en")

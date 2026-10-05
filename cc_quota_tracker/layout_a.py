@@ -1,4 +1,4 @@
-"""版面 A（卡片列表）。精簡模式只畫使用中帳號那一張卡片；展開模式每個帳號一張卡片，使用中帳號多出展開專用資料。
+"""版面 A（卡片列表）。精簡模式只畫當前憑證帳號那一張卡片；展開模式每個帳號一張卡片，當前憑證帳號多出展開專用資料。
 提示與橫幅的文案、折行取自 canvas_text；其餘文案取自語系檔，語系由 render 傳入、存在 _Paint.lang。切換語系只是
 以新的語系重畫：文字改在既有的 item 上，不重建。
 
@@ -22,7 +22,7 @@ from .tokens import FONTS, LINE_HEIGHT, RADIUS, SPACE, THEMES
 TAG = "layout-a"
 EXPANDED_TAG = "layout-a-expanded"  # 展開專用的 item
 _WINDOWS = (("session", "window.session"), ("weekly_all", "window.weekly_all"))  # 兩種模式都固定顯示這兩個窗口；值是語系鍵
-_NOTE_SLOTS = 5  # 一張卡片的提示最多幾條：讀數說明或未納管、落後、鎖定、憑證快照、查詢的狀態與失敗原因，實際同時最多 4 條
+_NOTE_SLOTS = 5  # 一張卡片的提示最多幾條：讀數說明或未監看、落後、鎖定、憑證快照、查詢的狀態與失敗原因，實際同時最多 4 條
 _ids = itertools.count()
 
 
@@ -197,7 +197,7 @@ class _Note(_Group):
 
 
 class _Extras(_Group):
-    """使用中帳號的展開專用資料：範圍週限額、週窗口起訖進度、用量去向、額外用量、花費、其他限額（摺疊區）。"""
+    """當前憑證帳號的展開專用資料：範圍週限額、週窗口起訖進度、用量去向、額外用量、花費、其他限額（摺疊區）。"""
 
     def __init__(self, p, parent_tags, on_toggle_others):
         super().__init__(p, (*parent_tags, EXPANDED_TAG))
@@ -261,7 +261,7 @@ class _Extras(_Group):
 
 
 class _CardView(_Group):
-    """一張帳號卡片。展開專用的部分只有展開模式的使用中帳號（或未納管帳號）才建立。"""
+    """一張帳號卡片。展開專用的部分只有展開模式的當前憑證帳號（或未監看帳號）才建立。"""
 
     def __init__(self, p, on_toggle_others, on_query):
         super().__init__(p, (TAG,))
@@ -329,7 +329,7 @@ class _CardView(_Group):
 
     def _header(self, card: Card, c, left, right, y):
         p, f = self.p, self.p.fonts
-        label = account_label(card.account_key) if card.account_key else text(p.lang, "account.unmanaged")
+        label = account_label(card.account_key) if card.account_key else text(p.lang, "account.unwatched")
         height = f["title"].metrics("linespace")
         mid = y + height / 2
         p.show(self.title, left, mid, text=label, fill=c["fg"])
@@ -379,7 +379,7 @@ class LayoutA:
         p.lang = lang
         pad, width = p.px("panel_pad"), p.px("card_width")
         y = self._banner_box(board, c, pad, pad, width, stalled_text)
-        cards = board.cards if expanded else board.cards[:1]  # 核心保證第一張是使用中帳號（或未納管帳號）
+        cards = board.cards if expanded else board.cards[:1]  # 核心保證第一張是當前憑證帳號（或未監看帳號）
         for i, (view, card) in enumerate(zip(self._cards.fit(len(cards)), cards)):
             y = view.render(card, board, c, pad, y + (p.px("card_gap") if i else 0), expanded, self._others_open)
         total_w, total_h = width + 2 * pad, y + pad

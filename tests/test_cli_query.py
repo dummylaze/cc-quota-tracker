@@ -133,7 +133,7 @@ class ListQueryHintTest(CliTestCase):
             with self.subTest(language):
                 self.assertEqual(self.listed(language).count(hint), 1)
 
-    def test_hint_comes_after_the_cards_and_before_the_managed_accounts_line(self):
+    def test_hint_comes_after_the_cards_and_before_the_watched_accounts_line(self):
         self.lagging()
         lines = self.listed("zh-TW").splitlines()
         self.assertEqual(lines[-2:], [self.HINT["zh-TW"], "尚未納管任何帳號"])

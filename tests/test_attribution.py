@@ -13,7 +13,7 @@ FAR = NOW + timedelta(days=30)  # 重置時間夠遠：時鐘往後推幾天，�
 
 class AttributionTestCase(HomeTestCase):
     def manage(self, label, refresh, account_uuid):
-        """在 Claude Code 登入某帳號並納管它；納管後它就是使用中帳號。"""
+        """在 Claude Code 登入某帳號並納管它；納管後它就是當前憑證帳號。"""
         self.log_in(refresh=refresh, account_uuid=account_uuid)
         self.core.add(label)
 
@@ -38,15 +38,15 @@ class ActiveAccountTest(AttributionTestCase):
         self.assertEqual([(c.account_key, c.role) for c in board.cards],
                          [("claude:work", Role.ACTIVE), ("claude:home", Role.STANDBY)])
 
-    def test_fingerprint_matching_no_snapshot_is_an_unmanaged_account(self):
+    def test_fingerprint_matching_no_snapshot_is_an_unwatched_account(self):
         self.manage("work", "rt-w", "acct-w")
         self.switch_to("rt-x", oauth="acct-x", cache_owner="acct-x")
         board = self.core.poll()
         self.assertEqual([(c.account_key, c.role) for c in board.cards],
-                         [(None, Role.UNMANAGED), ("claude:work", Role.STANDBY)])
+                         [(None, Role.UNWATCHED), ("claude:work", Role.STANDBY)])
 
-    def test_without_current_credential_the_active_account_is_unmanaged(self):
-        self.assertEqual([c.role for c in self.core.poll().cards], [Role.UNMANAGED])
+    def test_without_current_credential_the_active_account_is_unwatched(self):
+        self.assertEqual([c.role for c in self.core.poll().cards], [Role.UNWATCHED])
 
 
 class AttributionTest(AttributionTestCase):
@@ -90,13 +90,13 @@ class AttributionTest(AttributionTestCase):
         self.manage("work", "rt-w", "acct-w")
         self.assertEqual(self.cards()["claude:work"].reading_state, ReadingState.NO_READING)
 
-    def test_unmanaged_account_gets_the_reading_of_the_logged_in_id(self):
+    def test_unwatched_account_gets_the_reading_of_the_logged_in_id(self):
         self.switch_to("rt-x", oauth="acct-x", cache_owner="acct-x", session=21)
         card = self.core.poll().cards[0]
-        self.assertEqual((card.role, card.reading_state), (Role.UNMANAGED, ReadingState.HAS_READING))
+        self.assertEqual((card.role, card.reading_state), (Role.UNWATCHED, ReadingState.HAS_READING))
         self.assertEqual(card.limits[0].percent, 21)
 
-    def test_unmanaged_account_is_pending_while_cache_holds_another_account(self):
+    def test_unwatched_account_is_pending_while_cache_holds_another_account(self):
         self.manage("work", "rt-w", "acct-w")
         self.switch_to("rt-x", oauth="acct-x", cache_owner="acct-w")
         cards = self.cards()
@@ -163,7 +163,7 @@ class RenderTest(AttributionTestCase):
         self.assertIn("讀數待更新", text)
         self.assertIn("Claude Code 更新額度快取後就會出現", text)
 
-    def test_unmanaged_card_shows_how_to_manage(self):
+    def test_unwatched_card_shows_how_to_manage(self):
         self.switch_to("rt-x", oauth="acct-x", cache_owner="acct-x")
         self.assertIn(f"{COMMAND} add", render(self.core.poll()))
 

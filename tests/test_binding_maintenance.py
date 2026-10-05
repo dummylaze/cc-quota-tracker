@@ -64,10 +64,10 @@ class LearnBindingTest(BindingTestCase):
     def test_not_learned_when_the_snapshot_is_not_the_active_account(self):
         self.log_in(refresh="rt-1", account_uuid="acct-1")
         self.drop_in("work")
-        self.log_in(refresh="rt-2", account_uuid="acct-2")  # 使用中的是另一個帳號
+        self.log_in(refresh="rt-2", account_uuid="acct-2")  # 當前憑證的是另一個帳號
         self.write_cache(oauth="acct-2", account_uuid="acct-2")
         board = self.core.poll()
-        self.assertEqual([c.role for c in board.cards], [Role.UNMANAGED, Role.STANDBY])
+        self.assertEqual([c.role for c in board.cards], [Role.UNWATCHED, Role.STANDBY])
         self.assertEqual(board.cards[1].reading_state, ReadingState.NO_READING)
         self.assertFalse((self.home / ".claude-multi" / ".state" / "bindings.json").exists())
 

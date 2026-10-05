@@ -25,7 +25,7 @@ def notes(card: Card, board: Board, lang: str, expiry_info: bool = True, short_p
     short_pending 為 True 時，讀數待更新那一條改用短句：旁邊有「更新」入口的版面，提示要維持單行。"""
     result = []
     standby = card.role is Role.STANDBY
-    if card.role is Role.UNMANAGED:
+    if card.role is Role.UNWATCHED:
         result.append((text(lang, "note.how_to_manage", command=COMMAND), "accent", "fg"))
     if card.reading_state is ReadingState.PENDING:
         result.append((text(lang, "reading.pending_short" if short_pending else "reading.pending"), "sub", "sub"))
@@ -33,7 +33,7 @@ def notes(card: Card, board: Board, lang: str, expiry_info: bool = True, short_p
         result.append((text(lang, "reading.none" if standby else "reading.none_soon"), "sub", "sub"))
     elif standby:
         result.append((text(lang, "note.observed"), "sub", "sub"))
-    if card.lagging:  # 文字依卡片的角色：待命帳號的落後是切換前就有的，使用中帳號的是切換後又有新對話
+    if card.lagging:  # 文字依卡片的角色：待命帳號的落後是切換前就有的，當前憑證帳號的是切換後又有新對話
         result.append((text(lang, "reading.lagging_before_switch" if standby else "reading.lagging"), "warning", "fg"))
     if card.locked_reason:
         result.append((text(lang, "reading.locked", reason=card.locked_reason), "critical", "critical"))
@@ -45,7 +45,7 @@ def notes(card: Card, board: Board, lang: str, expiry_info: bool = True, short_p
 
 
 def query_entry(card: Card, status: QueryStatus) -> Optional[Tuple[str, bool]]:
-    """卡片上的「更新」入口：(語系鍵, 可不可點)。只有落後或讀數待更新的使用中（或未納管）帳號才有；
+    """卡片上的「更新」入口：(語系鍵, 可不可點)。只有落後或讀數待更新的當前憑證（或未監看）帳號才有；
     進行中改顯示「查詢中」，冷卻中標籤不變，兩者都不可點。沒有入口是 None。"""
     if card.role is Role.STANDBY or not (card.lagging or card.reading_state is ReadingState.PENDING):
         return None

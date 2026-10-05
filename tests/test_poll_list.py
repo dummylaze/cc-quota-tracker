@@ -16,7 +16,7 @@ class PollTest(HomeTestCase):
 
     def test_no_cache_file_is_no_reading(self):
         card = self.core.poll().cards[0]
-        self.assertEqual(card.role, Role.UNMANAGED)  # 沒有當前憑證：對不上任何憑證快照
+        self.assertEqual(card.role, Role.UNWATCHED)  # 沒有當前憑證：對不上任何憑證快照
         self.assertEqual(card.reading_state, ReadingState.NO_READING)
         self.assertEqual(card.limits, ())
 

@@ -84,10 +84,10 @@ class CredentialExpiryTest(ExpiryTestCase):
         card = self.cards()["claude:work"]
         self.assertEqual((card.snapshot_expires_at, card.snapshot_expiring), (None, False))
 
-    def test_unmanaged_card_has_no_expiry(self):
+    def test_unwatched_card_has_no_expiry(self):
         self.log_in(refresh="rt-x", account_uuid="acct-x")
         card = self.core.poll().cards[0]
-        self.assertEqual(card.role, Role.UNMANAGED)
+        self.assertEqual(card.role, Role.UNWATCHED)
         self.assertEqual((card.snapshot_expires_at, card.snapshot_expiring), (None, False))
 
 

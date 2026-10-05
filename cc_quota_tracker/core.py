@@ -44,7 +44,7 @@ class AddWarning(Enum):
 
 @dataclass(frozen=True)
 class _Account:
-    """納管帳號：帳號鍵、憑證快照的憑證指紋、綁定的帳號識別碼（沒有綁定為 None）、refreshToken 的到期時間。"""
+    """監看帳號：帳號鍵、憑證快照的憑證指紋、綁定的帳號識別碼（沒有綁定為 None）、refreshToken 的到期時間。"""
     key: str
     fingerprint: Optional[str]
     account_id: Optional[str]
@@ -74,7 +74,7 @@ class Core:
         self._countdown_format = CountdownFormat.TWO_UNITS
         self._provider_settings = provider.ProviderSettings()  # 設定檔的 providers.claude
         self._preferences, self._invalid_settings = Preferences(), ()
-        self._oauth_account_id: Optional[str] = None  # 目前登入帳號的識別碼（oauthAccount），未納管帳號靠它歸屬讀數
+        self._oauth_account_id: Optional[str] = None  # 目前登入帳號的識別碼（oauthAccount），未監看帳號靠它歸屬讀數
         self._clock = clock
         self._mtime: Optional[int] = None
         self._reading: Optional[provider.UsageReading] = None
@@ -102,7 +102,7 @@ class Core:
         return Board(cards=cards,
                      schema_changed=self._mismatch_rounds >= SCHEMA_CHANGE_ROUNDS,
                      last_reading_at=reading.observed_at if reading else None,
-                     managed_accounts=tuple(a.key for a in accounts),
+                     watched_accounts=tuple(a.key for a in accounts),
                      wrong_location_suspected=self._source_missing and self._paths.claude_source is PathSource.DEFAULT,
                      restart_required=self._path_fields != self._paths.path_fields,
                      settings_unreadable=self._settings_unreadable,
@@ -132,7 +132,7 @@ class Core:
             self._query, self._query_is_auto = query, auto
 
     def _maybe_auto_query(self, active: Card) -> None:
-        """自動查詢，全部成立才查：已開啟、使用中帳號的卡片落後或讀數待更新、沒有查詢在進行、沒有暫停，
+        """自動查詢，全部成立才查：已開啟、當前憑證帳號的卡片落後或讀數待更新、沒有查詢在進行、沒有暫停，
         且距離「工具上一次查詢的開始」與「目前讀數的觀測時間」兩者中較晚的那個已滿一個間隔
         （後者讓使用者自己打的 /usage 也算一次）。閒置時讀數不落後，所以自然不查。"""
         settings, reading = self._provider_settings, self._reading
@@ -260,7 +260,7 @@ class Core:
 
     def _snapshot_to_bind(self, accounts: Tuple[_Account, ...]) -> Optional[_Account]:
         """要補學綁定的憑證快照，沒有就是 None。這份快照本身還沒有綁定，而且三個條件同時成立才補學，缺一就不猜：
-        它是使用中帳號、額度快取的識別碼等於 oauthAccount 的識別碼、該識別碼還沒綁給其他帳號。"""
+        它是當前憑證帳號、額度快取的識別碼等於 oauthAccount 的識別碼、該識別碼還沒綁給其他帳號。"""
         reading, account_id = self._reading, self._oauth_account_id
         if reading is None or account_id is None or reading.account_id != account_id:
             return None
@@ -272,13 +272,13 @@ class Core:
         return next((a for a in accounts if a.fingerprint == current and a.account_id is None), None)
 
     def _remember(self, accounts: Tuple[_Account, ...]) -> None:
-        """額度快取的讀數歸屬到某個納管帳號時存進工具狀態：它換成待命帳號、甚至重新啟動後仍看得到。
+        """額度快取的讀數歸屬到某個監看帳號時存進工具狀態：它換成待命帳號、甚至重新啟動後仍看得到。
         只留還有綁定的帳號；有變化才寫檔。"""
         if self._reading is not None:
             self._managed.remember_standby_reading(self._reading, {a.account_id for a in accounts if a.account_id})
 
     def _observe(self, accounts: Tuple[_Account, ...]) -> Tuple[Optional[_Account], bool]:
-        """每輪的切換偵測。回傳使用中的納管帳號（未納管為 None），以及它的憑證快照是否已失效。
+        """每輪的切換偵測。回傳當前憑證的監看帳號（未監看為 None），以及它的憑證快照是否已失效。
         當前指紋對不上任何憑證快照時，看 oauthAccount 的識別碼綁給哪份憑證快照：有就是那個帳號、快照已失效。
         上一輪的憑證指紋與失效標記存在工具狀態，重新啟動後接著比對；第一次運作也算一次切換。
         讀不到當前憑證（寫到一半、登出）時不動：不記錄，也不覆蓋上一輪的憑證指紋。"""
@@ -290,7 +290,7 @@ class Core:
         previous, invalid_snapshot = state.fingerprint, state.invalid_snapshot
         switched, account_id, left_account = False, None, None
         if current is not None and current != previous:
-            previous_account = by_fp.get(previous) or by_fp.get(invalid_snapshot)  # 前一個使用中的納管帳號
+            previous_account = by_fp.get(previous) or by_fp.get(invalid_snapshot)  # 前一個當前憑證的監看帳號
             if current in by_fp:
                 switched, account_id, left_account = True, by_fp[current].account_id, previous_account
             elif previous_account and previous_account.account_id \
@@ -303,13 +303,13 @@ class Core:
             if flagged is None:  # 憑證快照已移除或重新納管
                 invalid_snapshot = None
             elif self._oauth_account_id not in (None, flagged.account_id):
-                # Claude Code 先寫憑證、後寫 oauthAccount：上一輪看起來像輪替，其實是切到未納管帳號
+                # Claude Code 先寫憑證、後寫 oauthAccount：上一輪看起來像輪替，其實是切到未監看帳號
                 switched, account_id, left_account = True, self._oauth_account_id, flagged
         if switched or current in by_fp:
             invalid_snapshot = None
         if current is not None and current not in by_fp:
             stale = self._stale_snapshot(accounts)
-            if stale is not None:  # 判定只看識別碼綁給誰，不看前一個使用中帳號；是不是切換已在上面判完
+            if stale is not None:  # 判定只看識別碼綁給誰，不看前一個當前憑證帳號；是不是切換已在上面判完
                 invalid_snapshot = stale.fingerprint
         try:
             if switched:
@@ -409,12 +409,12 @@ class Core:
         return self._result
 
     def _cards(self, accounts: Tuple[_Account, ...], active: Optional[_Account], invalid: bool) -> Tuple[Card, ...]:
-        """使用中帳號在最前面，其餘納管帳號是待命帳號，依帳號鍵排序。
-        active 為 None：當前憑證對不上任何憑證快照，使用中帳號是未納管帳號。"""
+        """當前憑證帳號在最前面，其餘監看帳號是待命帳號，依帳號鍵排序。
+        active 為 None：當前憑證對不上任何憑證快照，當前憑證帳號是未監看帳號。"""
         if active:
             first = replace(self._active_card(active.key, Role.ACTIVE, active.account_id), snapshot_invalid=invalid)
         else:
-            first = self._active_card(None, Role.UNMANAGED, self._oauth_account_id)
+            first = self._active_card(None, Role.UNWATCHED, self._oauth_account_id)
         return (self._with_expiry(first, active),
                 *(self._with_expiry(self._standby_card(a), a) for a in accounts if a is not active))
 

@@ -25,7 +25,7 @@ class CliTest(CliTestCase):
         code, out, _ = self.run_cli("add", "work")
         self.assertEqual(code, 0)
         self.assertIn("work", out)
-        self.assertIn("納管帳號：work", self.run_cli("list")[1])
+        self.assertIn("監看帳號：work", self.run_cli("list")[1])
         code, out, _ = self.run_cli("remove", "work")
         self.assertEqual(code, 0)
         self.assertIn("work", out)
@@ -93,7 +93,7 @@ class CliTest(CliTestCase):
         self.write_settings(managedDir=str(managed))
         self.assertEqual(self.run_cli("add", "work")[0], 0)
         self.assertTrue((managed / "work.json").is_file())
-        self.assertIn("納管帳號：work", self.run_cli("list")[1])
+        self.assertIn("監看帳號：work", self.run_cli("list")[1])
 
     def test_unreadable_settings_file_is_reported(self):
         self.log_in()
@@ -173,7 +173,7 @@ class CliLanguageTest(CliTestCase):
         out = self.run_cli("list")[1]
         self.assertIn("Session window  12%  Resets: in 3d 0h", out)
         self.assertIn("Weekly window  75%", out)
-        self.assertIn("[Active] Unmanaged account", out)
+        self.assertIn("[Active] Unwatched account", out)
         self.assertNotRegex(out, r"[⺀-鿿]")
 
     def test_add_and_remove_report_in_english(self):
@@ -183,7 +183,7 @@ class CliLanguageTest(CliTestCase):
         self.assertEqual(code, 0)
         self.assertIn("Managed \"someone@example.com\"", out)
         self.assertIn("looks like an email address", err)
-        self.assertIn("Managed accounts: someone@example.com", self.run_cli("list")[1])
+        self.assertIn("Watched accounts: someone@example.com", self.run_cli("list")[1])
         self.assertIn("Removed \"someone@example.com\"", self.run_cli("remove", "someone@example.com")[1])
 
     def test_errors_are_in_english(self):
@@ -191,7 +191,7 @@ class CliLanguageTest(CliTestCase):
         self.assertIn("Couldn't read the current sign-in credential", self.run_cli("add", "work")[2])
         self.log_in()
         self.assertIn("can't be used as a file name", self.run_cli("add", "../work")[2])
-        self.assertIn("There is no managed account with the label \"work\"", self.run_cli("remove", "work")[2])
+        self.assertIn("There is no watched account with the label \"work\"", self.run_cli("remove", "work")[2])
         self.run_cli("add", "work")
         with self.locked("bindings.json"):
             self.assertIn("may have it locked", self.run_cli("add", "home")[2])

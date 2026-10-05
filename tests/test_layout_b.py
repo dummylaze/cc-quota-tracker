@@ -49,7 +49,7 @@ class LayoutBCompactTest(LayoutBTestCase):
         shown = self.shown(Board(cards=(FULL, PERSONAL), as_of=NOW))
         for text in ("work", "工作階段", "42%", "週", "88%", "3 分鐘前", "3 則提示"):
             self.assertIn(text, shown)
-        self.assertNotIn("personal", shown)  # 只有使用中帳號
+        self.assertNotIn("personal", shown)  # 只有當前憑證帳號
         # 一行：所有文字的垂直中心都在同一條線上
         centers = {round(sum(self.canvas.bbox(self.text_item(t))[1::2]) / 2) for t in ("work", "42%", "3 分鐘前")}
         self.assertLessEqual(max(centers) - min(centers), 1)
@@ -130,7 +130,7 @@ class LayoutBExpandedTest(LayoutBTestCase):
             self.assertIn(header, shown)
         for label in ("work", "personal", "lab"):
             self.assertIn(label, shown)
-        self.assertEqual(shown.count("使用中"), 1)
+        self.assertEqual(shown.count("當前憑證"), 1)
         self.assertEqual(shown.count("待命"), 2)
         self.assertIn("3 天前", shown)
 
@@ -178,9 +178,9 @@ class LayoutBExpandedTest(LayoutBTestCase):
                 self.assertTrue(top < self.canvas.coords(self.text_item("work"))[1] < bottom)
                 self.assertGreater(self.canvas.coords(self.text_item("personal"))[1], bottom)
 
-    def test_unmanaged_active_row_is_tinted_and_explains_how_to_manage(self):
+    def test_unwatched_active_row_is_tinted_and_explains_how_to_manage(self):
         shown = "\n".join(self.shown(EXPANDED_BOARDS[1], expanded=True))
-        self.assertIn("未納管帳號", shown)
+        self.assertIn("未監看帳號", shown)
         self.assertIn("「納管目前登入的帳號…」", shown)
         self.assertEqual(len(self.fills(THEMES["light"]["active_row"])), 1)
 
@@ -215,7 +215,7 @@ class LayoutBExpandedTest(LayoutBTestCase):
         for theme in ("light", "dark"):
             with self.subTest(theme=theme):
                 self.shown(Board(cards=(ACTIVE, PERSONAL, LAB), as_of=NOW), expanded=True, theme=theme)
-                self.assertEqual(len(self.fills(THEMES[theme]["accent"])), 1)  # 使用中標籤
+                self.assertEqual(len(self.fills(THEMES[theme]["accent"])), 1)  # 當前憑證標籤
 
     def test_destroy_after_expanded_removes_every_item(self):
         self.shown(EXPANDED_BOARDS[0], expanded=True)

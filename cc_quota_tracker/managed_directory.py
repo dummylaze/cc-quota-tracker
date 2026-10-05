@@ -22,7 +22,7 @@
   讀不到當成沒關、下次再讀；寫不成不丟例外，記憶體裡照樣生效，下一輪重試寫入。
 
 已知限制：GUI 與命令列是兩個程序，同時寫同一個檔案（例如綁定檔）時沒有跨程序的鎖；兩者在同一輪內交錯時，
-後寫的會蓋掉先寫的。被蓋掉的綁定若屬於使用中帳號，之後的 poll 會補學回來。
+後寫的會蓋掉先寫的。被蓋掉的綁定若屬於當前憑證帳號，之後的 poll 會補學回來。
 """
 import json
 import re
@@ -63,8 +63,8 @@ class BindingsUnreadable(Exception):
         self.path = path
 
 
-class ManagedAccount(NamedTuple):
-    """納管帳號：帳號標籤、憑證快照的憑證指紋（讀不出來為 None，即「未知」）、綁定的帳號識別碼（沒有為 None）、
+class WatchedAccount(NamedTuple):
+    """監看帳號：帳號標籤、憑證快照的憑證指紋（讀不出來為 None，即「未知」）、綁定的帳號識別碼（沒有為 None）、
     憑證快照的到期時間。"""
     label: str
     fingerprint: Optional[str]
@@ -211,8 +211,8 @@ class ManagedDirectory:
         atomic.append(self._switch_log, (line + "\n").encode("utf-8"),
                       before_replace=lambda tmp: self._tighten(tmp, new=True))
 
-    def list_accounts(self) -> Tuple[ManagedAccount, ...]:
-        """所有納管帳號，依帳號標籤排序。綁定檔讀不到時當成都沒有綁定；憑證指紋讀不出來的是「未知」。"""
+    def list_accounts(self) -> Tuple[WatchedAccount, ...]:
+        """所有監看帳號，依帳號標籤排序。綁定檔讀不到時當成都沒有綁定；憑證指紋讀不出來的是「未知」。"""
         bindings = self._read_state(self._bindings_file) or {}
         accounts = []
         for label in self._snapshot_labels():
@@ -220,7 +220,7 @@ class ManagedDirectory:
             fingerprint, credential = snapshot.fingerprint(), snapshot.read()
             bound = bindings.get(fingerprint) if fingerprint else None
             account_id = _text(bound.get("accountId")) if isinstance(bound, dict) else None
-            accounts.append(ManagedAccount(label, fingerprint, account_id,
+            accounts.append(WatchedAccount(label, fingerprint, account_id,
                                            credential.refresh_token_expires_at if credential else None))
         return tuple(accounts)
 

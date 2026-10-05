@@ -8,7 +8,7 @@ from typing import Optional, Tuple
 class Role(Enum):
     ACTIVE = "active"
     STANDBY = "standby"
-    UNMANAGED = "unmanaged"
+    UNWATCHED = "unwatched"
 
 
 class ReadingState(Enum):
@@ -93,7 +93,7 @@ class Card:
     role: Role
     reading_state: ReadingState
     reading_age: Optional[timedelta] = None
-    # 落後讀數：觀測之後本機又有新對話。使用中帳號是當下判斷的；待命帳號是切換時就已落後（存在工具狀態，讀數換了才清除）
+    # 落後讀數：觀測之後本機又有新對話。當前憑證帳號是當下判斷的；待命帳號是切換時就已落後（存在工具狀態，讀數換了才清除）
     lagging: bool = False
     limits: Tuple[Limit, ...] = ()
     scoped_limits: Tuple[Limit, ...] = ()
@@ -103,7 +103,7 @@ class Card:
     extra_usage: Optional[ExtraUsage] = None
     spend: Optional[Spend] = None
     snapshot_invalid: bool = False  # 憑證被輪替：這張卡片的憑證快照已失效，需要重新納管
-    # 憑證快照的 refreshToken 到期時間；未納管帳號或快照沒寫到期時間（暫當無效資料）為 None
+    # 憑證快照的 refreshToken 到期時間；未監看帳號或快照沒寫到期時間（暫當無效資料）為 None
     snapshot_expires_at: Optional[datetime] = None
     snapshot_expiring: bool = False  # 剩不到 7 天（含已過期）：要在該帳號下重新登入，再對同一標籤重新 add
 
@@ -157,7 +157,7 @@ class QueryStatus:
 @dataclass(frozen=True)
 class Board:
     """schema_changed：額度快取結構變更，卡片沿用最後一次成功的讀數；last_reading_at 是它的觀測時間。
-    managed_accounts：所有納管帳號的帳號鍵（「供應商:帳號標籤」），依帳號鍵排序。
+    watched_accounts：所有監看帳號的帳號鍵（「供應商:帳號標籤」），依帳號鍵排序。
     wrong_location_suspected：Claude Code 目錄沒有指定、home 預設位置也沒有額度快取檔，可能讀錯位置。
     restart_required：執行中設定檔的路徑欄位改了；路徑只在啟動時解析，重新啟動才生效。
     settings_unreadable：設定檔不是合法的 JSON 物件；本工具不覆寫它，等使用者修好。
@@ -167,7 +167,7 @@ class Board:
     cards: Tuple[Card, ...]
     schema_changed: bool = False
     last_reading_at: Optional[datetime] = None
-    managed_accounts: Tuple[str, ...] = ()
+    watched_accounts: Tuple[str, ...] = ()
     wrong_location_suspected: bool = False
     restart_required: bool = False
     settings_unreadable: bool = False
