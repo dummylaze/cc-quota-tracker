@@ -150,16 +150,16 @@ Only managed accounts can be switched to (see [Managed and watch-only accounts](
    - When there is no account to switch to, the submenu holds one greyed row, *(No account to switch to)*.
    - While a usage query is running (manual or automatic) the whole submenu is greyed out until it finishes.
 2. After you pick one, a **confirmation dialog** shows which label you are switching to, the expiry countdown of its snapshot, and what the switch will do:
-   - if the current account is a watched account, its credential is synced back to its snapshot first;
-   - if the current account is an unwatched account, its credential is only saved as the pre-switch credential, and only the latest copy is kept.
+   - if the active account is a watched account, its credential is synced back to its snapshot first;
+   - if the active account is an unwatched account, its credential is only saved as the pre-switch credential, and only the latest copy is kept.
 
-   When the current account's snapshot is invalid there is one more line: "The current account's snapshot is invalid; use "Restore previous switch", or sign in again in Claude Code and then re-manage it." The dialog shows no usage numbers and has no countdown delay; confirming starts the switch at once.
+   When the active account's snapshot is invalid there is one more line: "The active account's snapshot is invalid; use "Restore previous switch", or sign in again in Claude Code and then re-manage it." The dialog shows no usage numbers and has no countdown delay; confirming starts the switch at once.
 3. After you confirm, a translucent layer covers the whole window until the switch has finished or clearly failed. While it is up the right-click menu does not open, you can still drag the window, and **a switch cannot be cancelled once started**. In expanded mode the layer shows the current step: syncing the current credential, querying usage for the old account (skipped when the old account's reading is not lagging or it is not bound), writing the target's credential, querying usage for the new account. Compact mode shows no steps.
 
 **Outcomes**
 
 - **Success**: no message. The first row changing to the new account and the reading updating is the feedback.
-- **Refused**: the reason is shown, no file was written, and the current credential and account info are unchanged. A switch is refused when: the label does not exist; the target is a watch-only account (including an expired one); the target is already the active account; the current account's credential could not be synced back to its snapshot before switching away; the current credential or Claude Code's settings file could not be read; the current credential or the pre-switch credential could not be written.
+- **Refused**: the reason is shown, no file was written, and the current credential and account info are unchanged. A switch is refused when: the label does not exist; the target is a watch-only account (including an expired one); the target is already the active account; the active account's credential could not be synced back to its snapshot before switching away; the current credential or Claude Code's settings file could not be read; the current credential or the pre-switch credential could not be written.
 - **Written, but verification failed**: the switch was written, but the usage query for the new account failed, so it could not be confirmed. A prompt asks "Restore the previous switch?"; *Yes* goes straight back to the original account (no further confirmation), *No* stays on the new one. (When a restore itself fails verification, the window only explains and does not ask whether to restore.)
 - **The query for the old account failed**: no message; the switch goes ahead.
 - **Account info not written**: the current credential was written but Claude Code's account info could not be, so the two disagree. The window shows an error; sign in again in Claude Code.

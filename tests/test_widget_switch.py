@@ -183,21 +183,21 @@ class ConfirmDialogTest(WidgetSwitchTestCase):
         paragraphs = message.split("\n\n")
         self.assertEqual(paragraphs[0], "切換到「home」？")
         self.assertRegex(paragraphs[1], r"^憑證快照 20天0小時後到期（\d\d-\d\d \d\d:\d\d）$")
-        self.assertEqual(paragraphs[2], "目前帳號「work」是監看帳號：切走之前，會先同步憑證至快照。")
+        self.assertEqual(paragraphs[2], "當前憑證帳號「work」是監看帳號：切走之前，會先同步憑證至快照。")
         self.assertEqual(len(paragraphs), 3)
 
     def test_an_unwatched_current_account_gets_the_pre_switch_credential_consequence(self):
         self.log_in_at("rt-x", "acct-x", NOW + timedelta(days=5))
         self.widget.refresh()
         paragraphs = self.message().split("\n\n")
-        self.assertEqual(paragraphs[2], "目前帳號是未監看帳號：只會存成切換前憑證，且只留最新一份。")
+        self.assertEqual(paragraphs[2], "當前憑證帳號是未監看帳號：只會存成切換前憑證，且只留最新一份。")
         self.assertEqual(len(paragraphs), 3)
 
     def test_an_invalid_snapshot_of_the_current_account_adds_one_line(self):
         self.log_in_at("rt-w2", "acct-w", WORK + timedelta(days=1))  # 同一個帳號重新登入：快照跟新登入不是同一次
         self.widget.refresh()
         paragraphs = self.message().split("\n\n")
-        self.assertEqual(paragraphs[-1], "目前帳號快照已失效；用「還原上一次切換」，或在 Claude Code 重新登入後再重新納管。")
+        self.assertEqual(paragraphs[-1], "當前憑證帳號的快照已失效；用「還原上一次切換」，或在 Claude Code 重新登入後再重新納管。")
         self.assertEqual(len(paragraphs), 4)
 
     def test_the_dialog_shows_no_usage_numbers(self):
@@ -212,7 +212,7 @@ class ConfirmDialogTest(WidgetSwitchTestCase):
         paragraphs = ask.call_args.args[1].split("\n\n")
         self.assertEqual(paragraphs[0], "Switch to \"home\"?")
         self.assertRegex(paragraphs[1], r"^Credential snapshot expires in 20d 0h \(")
-        self.assertEqual(paragraphs[2], "The current account \"work\" is a watched account: its credential is synced "
+        self.assertEqual(paragraphs[2], "The active account \"work\" is a watched account: its credential is synced "
                                         "to its snapshot before switching.")
 
     def test_there_is_a_single_dialog_and_no_delay(self):
@@ -380,7 +380,7 @@ class ResultTest(WidgetSwitchTestCase):
         self.choose("home", "Switch account")
         self.finish()
         self.assertEqual(errors.call_args.args[1],
-                         "Couldn't sync the current account's credential back to its snapshot, so nothing was "
+                         "Couldn't sync the active account's credential back to its snapshot, so nothing was "
                          "switched. Try again later.")
 
     def test_a_write_that_stopped_halfway_is_reported_too(self):
@@ -544,7 +544,7 @@ class OverlayTest(WidgetSwitchTestCase):
 
     def test_expanded_mode_shows_each_step_as_it_is_reached(self):
         gate = self.begin(*SwitchStep)
-        for shown in ("同步目前帳號的憑證…", "查詢舊帳號的額度…", "寫入「home」的憑證…", "查詢新帳號的額度…"):
+        for shown in ("同步當前憑證…", "查詢舊帳號的額度…", "寫入「home」的憑證…", "查詢新帳號的額度…"):
             self.pump(lambda: self.overlay_texts() == [shown])
             self.assertIn(shown, visible_texts(self.widget.canvas))
             gate.release()
@@ -558,7 +558,7 @@ class OverlayTest(WidgetSwitchTestCase):
             self.pump(lambda: self.overlay_texts() and self.overlay_texts() != shown[-1:])
             shown.append(self.overlay_texts()[0])
             gate.release()
-        self.assertEqual(shown, ["同步目前帳號的憑證…", "寫入「home」的憑證…"])
+        self.assertEqual(shown, ["同步當前憑證…", "寫入「home」的憑證…"])
         self.finish()
 
     def test_compact_mode_covers_the_window_but_shows_no_step(self):
@@ -578,7 +578,7 @@ class OverlayTest(WidgetSwitchTestCase):
         self.assertEqual(self.overlay_texts(), [])
         self.assertTrue(self.overlay())
         self.widget.toggle_mode()
-        self.assertEqual(self.overlay_texts(), ["同步目前帳號的憑證…"])
+        self.assertEqual(self.overlay_texts(), ["同步當前憑證…"])
         cv = self.widget.canvas
         self.assertIn(OVERLAY, cv.gettags(cv.find_all()[-1]))  # 重畫版面之後，圖層仍在最上面
         gate.release()

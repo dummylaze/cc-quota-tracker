@@ -82,7 +82,7 @@ class RestoreRunTest(WidgetSwitchTestCase):
         self.switch_away()
         paragraphs = self.message().split("\n\n")
         self.assertEqual(paragraphs[0], RESTORE_CONFIRM)
-        self.assertEqual(paragraphs[1], "會用切換前的憑證與帳號資訊換回去；目前的憑證會存成新的切換前憑證，所以還能再還原回來。")
+        self.assertEqual(paragraphs[1], "會用切換前的憑證與帳號資訊換回去；當前憑證會存成新的切換前憑證，所以還能再還原回來。")
         self.assertRegex(paragraphs[2], r"^切換前憑證 \d+天\d+小時後到期（\d\d-\d\d \d\d:\d\d）$")
         self.assertEqual(len(paragraphs), 3)
 

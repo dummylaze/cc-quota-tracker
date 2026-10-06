@@ -94,13 +94,13 @@ class CliSwitchTest(CliSwitchBase):
         with mock.patch.object(atomic, "write_atomic", write):
             code, _, err = self.run_cli("switch", "home", "--yes")
         self.assertEqual(code, 1)
-        self.assertEqual(err.strip(), "目前帳號的憑證沒能同步回它的快照，沒有切換；請稍後再試。")
+        self.assertEqual(err.strip(), "當前憑證帳號的憑證沒能同步回它的快照，沒有切換；請稍後再試。")
 
     def test_unreadable_settings_file_refuses(self):
         self.paths.claude_json.write_text("{not json", encoding="utf-8")
         code, _, err = self.run_cli("switch", "home", "--yes")
         self.assertEqual(code, 1)
-        self.assertEqual(err.strip(), "讀不到目前的憑證或 Claude Code 的帳號資訊，沒有切換；請稍後再試。")
+        self.assertEqual(err.strip(), "讀不到當前憑證或 Claude Code 的帳號資訊，沒有切換；請稍後再試。")
 
     def test_half_written_switch_exits_three(self):
         real = atomic.write_atomic

@@ -180,11 +180,11 @@ STRINGS = {
     "language.system": "Follow system",
     "dialog.switch_title": "Switch account",
     "dialog.switch_confirm": "Switch to \"{label}\"?",
-    "dialog.switch_watched": "The current account \"{label}\" is a watched account: its credential is synced to its "
+    "dialog.switch_watched": "The active account \"{label}\" is a watched account: its credential is synced to its "
                              "snapshot before switching.",
-    "dialog.switch_unwatched": "The current account is an unwatched account: its credential is only saved as the "
+    "dialog.switch_unwatched": "The active account is an unwatched account: its credential is only saved as the "
                                "pre-switch credential, and only the latest copy is kept.",
-    "dialog.switch_invalid": "The current account's snapshot is invalid; use \"Restore previous switch\", or sign in "
+    "dialog.switch_invalid": "The active account's snapshot is invalid; use \"Restore previous switch\", or sign in "
                              "again in Claude Code and then re-manage it.",
     "dialog.switch_failed": "The switch hit an error and did not complete: {error}",
     "dialog.restore_confirm": "Restore the previous switch?",
@@ -250,7 +250,7 @@ STRINGS = {
     "switch.refused.watch_only": "\"{label}\" is a watch-only account ({reason}) and can't be switched to: sign in to "
                                  "this account in Claude Code, then manage it again",
     "switch.refused.already_active": "\"{label}\" is already the active account.",
-    "switch.refused.sync_failed": "Couldn't sync the current account's credential back to its snapshot, so nothing "
+    "switch.refused.sync_failed": "Couldn't sync the active account's credential back to its snapshot, so nothing "
                                   "was switched. Try again later.",
     "switch.refused.unreadable": "Couldn't read the current credential or Claude Code's account info, so nothing was "
                                  "switched. Try again later.",
