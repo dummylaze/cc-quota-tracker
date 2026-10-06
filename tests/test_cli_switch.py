@@ -195,7 +195,7 @@ class CliSwitchTest(SwitchTestCase):
         self.script_queries({n: {"usage": "silent"} for n in range(5)})
         code, out, err = self.run_cli("switch", "--previous", "--yes")
         self.assertEqual((code, out), (3, ""))
-        self.assertEqual(err.strip(), "已還原上一次切換，但還原後的帳號查詢額度失敗，未能還原有生效："
+        self.assertEqual(err.strip(), "已還原上一次切換，但還原後的帳號查詢額度失敗，未能確認還原有生效："
                                       "Claude Code 已結束，但額度快取沒有更新。")
         self.assertEqual(json.loads(self.paths.claude_json.read_text(encoding="utf-8"))["oauthAccount"]["accountUuid"],
                          "acct-w")
