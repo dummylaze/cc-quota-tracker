@@ -56,11 +56,13 @@ _SWITCH_REFUSALS = {
     SwitchRefusal.SYNC_FAILED: "switch.refused.sync_failed",
     SwitchRefusal.UNREADABLE: "switch.refused.unreadable",
     SwitchRefusal.UNWRITABLE: "switch.refused.unwritable",
+    SwitchRefusal.NO_PREVIOUS: "switch.refused.no_previous",
+    SwitchRefusal.PREVIOUS_EXPIRED: "switch.refused.previous_expired",
 }
 
 
-def switch_refusal(result: SwitchResult, label: str, lang: str) -> str:
-    """切換被拒絕的原因（沒寫任何檔）：視窗與命令列共用同一組字樣。"""
+def switch_refusal(result: SwitchResult, label: Optional[str], lang: str) -> str:
+    """切換被拒絕的原因（沒寫任何檔）：視窗與命令列共用同一組字樣。還原沒有目標標籤，label 是 None。"""
     assert result.refusal is not None  # 拒絕一定帶原因
     if result.refusal is SwitchRefusal.UNKNOWN_LABEL:
         return text(lang, "error.unknown_label", label=label)

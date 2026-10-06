@@ -215,9 +215,20 @@ STRINGS = {
                  "  {command} gui             open the floating window; run with pythonw to avoid a console window\n"
                  "  {command} switch <label> --yes\n"
                  "                            switch to this managed account; --yes switches without asking again.\n"
+                 "  {command} switch --previous --yes\n"
+                 "                            restore the previous switch: the current credential and account info "
+                 "go back to how they were before it; restoring again returns to the account you just left.\n"
                  "                            Exit code 0 on success, 1 if refused (nothing written), 3 if written but "
                  "the usage check failed or only partly written, 2 without --yes",
     "switch.done": "Switched to \"{label}\"",
+    "switch.restored": "Restored the previous switch",
+    "switch.refused.no_previous": "There is no pre-switch credential to restore, so nothing was switched.",
+    "switch.refused.previous_expired": "The pre-switch credential has expired and can't be restored, so nothing was "
+                                       "switched: sign in to that account again in Claude Code.",
+    "switch.restore_write_failed": "Wrote the pre-switch credential, but couldn't update Claude Code's account info, "
+                                   "so the two don't match: sign in again in Claude Code.",
+    "switch.restore_verify_failed": "Restored the previous switch, but the usage query for the restored account "
+                                    "failed, so the restore couldn't be confirmed: {reason}",
     "switch.step.sync": "Syncing the current credential…",
     "switch.step.query_old": "Querying usage for the old account…",
     "switch.step.write": "Writing the credential of \"{label}\"…",
@@ -234,7 +245,8 @@ STRINGS = {
     "switch.write_failed": "Wrote the credential of \"{label}\", but couldn't update Claude Code's account info, so "
                            "the two don't match: sign in again in Claude Code.",
     "switch.verify_failed": "Switched to \"{label}\", but the usage query for it failed, so the switch couldn't be "
-                            "confirmed: {reason}",
+                            "confirmed: {reason}\n"
+                            "To go back to the account you were using: {command} switch --previous --yes",
     "query.success": "Usage updated. Latest observed time: {time}",
     "query.failed": "Usage query failed: {reason}\nYou can run /usage in Claude Code instead.",
     "query.reason.command_not_found": "Couldn't find the claude executable. Make sure it is on PATH, or set the full "

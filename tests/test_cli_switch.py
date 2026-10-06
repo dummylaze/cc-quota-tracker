@@ -103,7 +103,8 @@ class CliSwitchTest(SwitchTestCase):
         self.script_queries({0: {"usage": "silent"}})
         code, out, err = self.run_cli("switch", "home", "--yes")
         self.assertEqual((code, out), (3, ""))
-        self.assertEqual(err.strip(), "已切換到「home」，但替它查詢額度失敗，沒能確認切換有生效：Claude Code 已結束，但額度快取沒有更新。")
+        self.assertEqual(err.strip(), "已切換到「home」，但替它查詢額度失敗，沒能確認切換有生效：Claude Code 已結束，但額度快取沒有更新。\n"
+                                      "要回到切換前的帳號：python -m cc_quota_tracker switch --previous --yes")
         self.assertEqual(self.current().read_bytes(), self.snapshot("home").read_bytes())
 
     def test_failed_verification_in_english(self):
@@ -111,7 +112,9 @@ class CliSwitchTest(SwitchTestCase):
         code, _, err = self.run_cli("switch", "home", "--yes", system_language="en-US")
         self.assertEqual(code, 3)
         self.assertEqual(err.strip(), 'Switched to "home", but the usage query for it failed, so the switch '
-                                      "couldn't be confirmed: Claude Code reported an error: Not logged in")
+                                      "couldn't be confirmed: Claude Code reported an error: Not logged in\n"
+                                      "To go back to the account you were using: "
+                                      "python -m cc_quota_tracker switch --previous --yes")
 
     def test_old_account_query_failure_is_not_mentioned(self):
         """切換前替舊帳號的查詢失敗：切換照常、訊息與成功時一樣、結束代碼 0。"""
@@ -129,6 +132,7 @@ class CliSwitchTest(SwitchTestCase):
         self.assertEqual(self.run_cli("switch")[0], 2)
         self.assertEqual(self.run_cli("switch", "home", "--yes", "extra")[0], 2)
         self.assertEqual(self.run_cli("switch", "--yes", "--yes")[0], 2)
+        self.assertEqual(self.run_cli("switch", "--previous", "home", "--yes")[0], 2)
 
     def test_help_mentions_switch_and_yes(self):
         cases = (("zh-TW", "switch <帳號標籤>", "已寫入但驗證失敗"), ("en-US", "switch <label>", "3 if written but"))
@@ -137,6 +141,7 @@ class CliSwitchTest(SwitchTestCase):
                 code, out, _ = self.run_cli("--help", system_language=lang)
                 self.assertEqual(code, 0)
                 self.assertIn(label, out)
+                self.assertIn("switch --previous --yes", out)
                 self.assertIn("--yes", out)
                 self.assertIn(exit_three, out)  # 結束代碼 3 也包含「已寫入但驗證失敗」
 
@@ -147,3 +152,50 @@ class CliSwitchTest(SwitchTestCase):
         self.run_cli("list")
         lines = log.read_text(encoding="utf-8").splitlines()[before:]
         self.assertEqual([json.loads(line)["accountId"] for line in lines], ["acct-h"])
+
+    def test_restore_succeeds(self):
+        before = self.untouched()
+        self.run_cli("switch", "home", "--yes")
+        code, out, err = self.run_cli("switch", "--previous", "--yes")
+        self.assertEqual((code, out.strip(), err), (0, "已還原上一次切換", ""))
+        self.assertEqual(self.untouched()[0], before[0])
+        self.assertEqual(json.loads(self.paths.claude_json.read_text(encoding="utf-8"))["oauthAccount"]["accountUuid"],
+                         "acct-w")
+
+    def test_restore_with_yes_first_and_in_english(self):
+        self.run_cli("switch", "home", "--yes")
+        code, out, _ = self.run_cli("switch", "--yes", "--previous", system_language="en-US")
+        self.assertEqual((code, out.strip()), (0, "Restored the previous switch"))
+
+    def test_restore_without_yes_prints_usage_and_writes_nothing(self):
+        self.run_cli("switch", "home", "--yes")
+        before = self.untouched()
+        code, out, err = self.run_cli("switch", "--previous")
+        self.assertEqual((code, out), (2, ""))
+        self.assertIn("switch --previous --yes", err)
+        self.assertEqual(self.untouched(), before)
+
+    def test_nothing_to_restore_exits_one_and_writes_nothing(self):
+        before = self.untouched()
+        code, out, err = self.run_cli("switch", "--previous", "--yes")
+        self.assertEqual((code, out, err.strip()), (1, "", "沒有可還原的切換前憑證，沒有切換。"))
+        self.assertEqual(self.untouched(), before)
+
+    def test_expired_pre_switch_credential_exits_one_and_writes_nothing(self):
+        self.run_cli("switch", "home", "--yes")
+        self.clock.now = WORK + timedelta(seconds=1)
+        before = self.untouched()
+        code, _, err = self.run_cli("switch", "--previous", "--yes")
+        self.assertEqual(code, 1)
+        self.assertIn("切換前憑證已過期", err)
+        self.assertEqual(self.untouched(), before)
+
+    def test_restore_with_failed_verification_exits_three_but_stays_written(self):
+        self.run_cli("switch", "home", "--yes")
+        self.script_queries({n: {"usage": "silent"} for n in range(5)})
+        code, out, err = self.run_cli("switch", "--previous", "--yes")
+        self.assertEqual((code, out), (3, ""))
+        self.assertEqual(err.strip(), "已還原上一次切換，但替還原後的帳號查詢額度失敗，沒能確認還原有生效："
+                                      "Claude Code 已結束，但額度快取沒有更新。")
+        self.assertEqual(json.loads(self.paths.claude_json.read_text(encoding="utf-8"))["oauthAccount"]["accountUuid"],
+                         "acct-w")

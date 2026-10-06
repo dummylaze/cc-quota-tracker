@@ -424,6 +424,17 @@ class ManagedDirectory:
                                                   "accountInfo": account_info})
         return replaced
 
+    def pre_switch_target(self) -> Optional[Tuple[bytes, dict]]:
+        """還原要寫的內容：切換前憑證的原文與帳號資訊。沒有、讀不懂、或當時的帳號資訊是空的回傳 None
+        （只還原憑證會讓帳號資訊錯配）；讀不到丟 OSError。"""
+        state = self._read_state(self._pre_switch_file)
+        if state is None:
+            raise OSError("pre-switch credential unreadable")
+        credentials, info = state.get("credentials"), state.get("accountInfo")
+        if not isinstance(credentials, str) or not isinstance(info, dict) or not info:
+            return None
+        return credentials.encode("utf-8"), info
+
     def restore_pre_switch(self, replaced: Optional[bytes]) -> None:
         """放回 save_pre_switch 蓋掉的那份；原本沒有就刪掉。放不回去不丟例外：還原點這次就丟了。"""
         try:

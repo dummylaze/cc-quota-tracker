@@ -3,7 +3,7 @@ import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import NamedTuple, Optional
 
 from . import COMMAND, claude_provider, i18n
 from .board import QueryFailure, SwitchOutcome, UsageQueryResult
@@ -42,8 +42,8 @@ def main(argv=None) -> int:
     if (command, len(params)) in {("--help", 0), ("-h", 0)}:  # 使用者主動要用法：stdout、成功
         print(text(configured_language(None), "cli.usage", command=COMMAND))
         return 0
-    switch_label = _switch_label(params) if command == "switch" else None
-    if switch_label is None and (command, len(params)) not in {("add", 1), ("remove", 1), ("list", 0), ("query", 0),
+    switch_request = _switch_request(params) if command == "switch" else None
+    if switch_request is None and (command, len(params)) not in {("add", 1), ("remove", 1), ("list", 0), ("query", 0),
                                                                ("check", 0), ("gui", 0)}:
         print(text(configured_language(None), "cli.usage", command=COMMAND), file=sys.stderr)  # 還沒解析路徑，讀不到設定檔
         return 2
@@ -71,8 +71,8 @@ def main(argv=None) -> int:
         print(text(lang, "notice", text=text(lang, "settings.unreadable")), file=sys.stderr)
     if command == "query":
         return query(core, lang)
-    if switch_label is not None:
-        return switch(core, switch_label, lang)
+    if switch_request is not None:
+        return switch(core, switch_request, lang)
     label = params[0]
     try:
         if command == "add":
@@ -125,29 +125,39 @@ def _query_reason(result: UsageQueryResult, lang: str) -> str:
     return text(lang, _QUERY_REASONS[result.failure])
 
 
-def _switch_label(params) -> Optional[str]:
-    """`switch <帳號標籤> --yes`（順序不拘）的帳號標籤；不是這個形狀就是 None（用法錯誤）。
+class _SwitchRequest(NamedTuple):
+    label: Optional[str]  # 要切換到的帳號標籤；還原上一次切換是 None
+
+
+def _switch_request(params) -> Optional[_SwitchRequest]:
+    """`switch <帳號標籤> --yes` 或 `switch --previous --yes`（順序不拘）；不是這兩個形狀就是 None（用法錯誤）。
     沒帶 --yes 也是 None：終端機裡的互動確認還沒有，不確認就不切換。"""
     if len(params) != 2 or "--yes" not in params:
         return None
-    label = params[1] if params[0] == "--yes" else params[0]
-    return None if label == "--yes" else label
+    other = params[1] if params[0] == "--yes" else params[0]
+    if other == "--yes":
+        return None
+    return _SwitchRequest(None if other == "--previous" else other)
 
 
-def switch(core: Core, label: str, lang: str) -> int:
-    """切換到帳號標籤 label：成功結束代碼 0；拒絕（沒寫任何檔）印原因、1；已寫入但驗證失敗或寫了一半 3。
-    切換前替舊帳號的查詢失敗不另外提示。"""
-    result = core.switch(label)
+def switch(core: Core, request: _SwitchRequest, lang: str) -> int:
+    """切換到帳號標籤，或還原上一次切換：成功結束代碼 0；拒絕（沒寫任何檔）印原因、1；
+    已寫入但驗證失敗或寫了一半 3。切換前替舊帳號的查詢失敗不另外提示。"""
+    label = request.label
+    previous = label is None
+    result = core.switch(label) if label is not None else core.restore_previous()
     if result.outcome is SwitchOutcome.SWITCHED:
-        print(text(lang, "switch.done", label=label))
+        print(text(lang, "switch.restored") if previous else text(lang, "switch.done", label=label))
         return 0
     if result.outcome is SwitchOutcome.VERIFY_FAILED:
         assert result.verify_failure is not None
-        print(text(lang, "switch.verify_failed", label=label, reason=_query_reason(result.verify_failure, lang)),
-              file=sys.stderr)
+        reason = _query_reason(result.verify_failure, lang)
+        print(text(lang, "switch.restore_verify_failed", reason=reason) if previous
+              else text(lang, "switch.verify_failed", label=label, reason=reason, command=COMMAND), file=sys.stderr)
         return 3
     if result.outcome is SwitchOutcome.WRITE_FAILED:
-        print(text(lang, "switch.write_failed", label=label), file=sys.stderr)
+        print(text(lang, "switch.restore_write_failed") if previous else text(lang, "switch.write_failed", label=label),
+              file=sys.stderr)
         return 3
     print(switch_refusal(result, label, lang), file=sys.stderr)
     return 1

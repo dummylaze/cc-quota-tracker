@@ -179,6 +179,8 @@ class SwitchRefusal(Enum):
     SYNC_FAILED = "sync_failed"  # 當前憑證帳號是監看帳號，切走前的憑證同步沒寫成
     UNREADABLE = "unreadable"  # 讀不到當前憑證或 Claude Code 設定檔（被鎖住、讀不懂、沒登入）
     UNWRITABLE = "unwritable"  # 切換前憑證或當前憑證寫不進去，當前憑證維持原樣
+    NO_PREVIOUS = "no_previous"  # 還原：沒有可還原的切換前憑證（沒切換過、讀不懂、缺帳號資訊）
+    PREVIOUS_EXPIRED = "previous_expired"  # 還原：切換前憑證的 refreshToken 已經過期
 
 
 @dataclass(frozen=True)

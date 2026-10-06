@@ -272,13 +272,26 @@ class Core:
         寫入之前的任何一步不成就拒絕，當前憑證與 Claude Code 設定檔都不動（查詢只讓 Claude Code 寫它自己的額度快取）。
         不檢查刷新鎖檔，也不跟其他程序互鎖。這是同步呼叫：兩次查詢最久各等 usage_query.TIMEOUT，GUI 要放在背景執行。
         on_step：每個步驟開始之前呼叫一次（SwitchStep）；目標檢查就被拒絕時一次都不呼叫。呼叫發生在切換所在的執行緒。"""
+        return self._run_switch(lambda board: self._switch_refusal(label, board),
+                                lambda: self._managed.switch_target(label), on_step)
+
+    def restore_previous(self, on_step: Optional[Callable[[SwitchStep], None]] = None) -> SwitchResult:
+        """還原上一次切換：把切換前憑證寫回當前憑證，帳號資訊一起回到切換前。還原本身也是一次切換——同樣先同步、
+        保存當下的憑證成為新的切換前憑證、記切換紀錄、替還原後的帳號查詢額度——所以再還原一次會回到剛才的帳號。
+        沒有可還原的切換前憑證、或它已過期就拒絕，當前憑證與 Claude Code 設定檔都不動。其餘同 switch。"""
+        return self._run_switch(self._restore_refusal, self._managed.pre_switch_target, on_step)
+
+    def _run_switch(self, check: Callable[[Board], Optional[SwitchResult]],
+                    load_target: Callable[[], Optional[Tuple[bytes, dict]]],
+                    on_step: Optional[Callable[[SwitchStep], None]]) -> SwitchResult:
+        """切換與還原共用的流程；差別只在怎麼檢查目標（check）與寫進去的憑證與帳號資訊從哪來（load_target）。"""
         step = on_step or (lambda _: None)
         board = self._poll(auto_query=False)
-        refused = self._switch_refusal(label, board)
+        refused = check(board)
         if refused is not None:
             return refused
         step(SwitchStep.SYNC)
-        prepared = self._prepare_switch(label)
+        prepared = self._prepare_switch(load_target)
         if isinstance(prepared, SwitchRefusal):
             return SwitchResult(SwitchOutcome.REFUSED, prepared)
         old_query_failed = False
@@ -289,7 +302,7 @@ class Core:
             self._refresh()
             self._remember(self._accounts())
             # 查詢是 Claude Code 在用當前憑證跑的，它可能順便刷新了憑證：同步與切換前憑證都要拿刷新之後的版本
-            prepared = self._prepare_switch(label)
+            prepared = self._prepare_switch(load_target)
             if isinstance(prepared, SwitchRefusal):
                 return SwitchResult(SwitchOutcome.REFUSED, prepared, old_account_query_failed=old_query_failed)
         step(SwitchStep.WRITE)
@@ -315,14 +328,30 @@ class Core:
                                 card.writeback_failures)
         return None
 
-    def _prepare_switch(self, label: str) -> Union[_SwitchInputs, SwitchRefusal]:
-        """寫入之前要讀的東西與不能寫的條件：讀得到當前憑證、Claude Code 設定檔與目標的憑證快照，切走前的同步成功。
+    def _restore_refusal(self, board: Board) -> Optional[SwitchResult]:
+        """檢查切換前憑證；能還原回傳 None。到期的判法同憑證快照：沒寫到期時間不算過期。"""
+        try:
+            target = self._managed.pre_switch_target()
+        except OSError:
+            return SwitchResult(SwitchOutcome.REFUSED, SwitchRefusal.UNREADABLE)
+        store = BytesCredentialStore(target[0]) if target else None
+        if store is None or store.fingerprint() is None:
+            return SwitchResult(SwitchOutcome.REFUSED, SwitchRefusal.NO_PREVIOUS)
+        credential = store.read()
+        expires = credential.refresh_token_expires_at if credential else None
+        if expires is not None and expires <= self._clock():
+            return SwitchResult(SwitchOutcome.REFUSED, SwitchRefusal.PREVIOUS_EXPIRED)
+        return None
+
+    def _prepare_switch(self, load_target: Callable[[], Optional[Tuple[bytes, dict]]]
+                        ) -> Union[_SwitchInputs, SwitchRefusal]:
+        """寫入之前要讀的東西與不能寫的條件：讀得到當前憑證、Claude Code 設定檔與目標的憑證與帳號資訊，切走前的同步成功。
         以位元組讀再解碼：read_text 會把 CRLF 換成 LF，寫回時就不是逐字保留。"""
         try:
             current = self._credentials.read_bytes()
             settings = self._source.read_bytes().decode("utf-8")
             provider.with_account_info(settings, {})  # 先確認改得了這個鍵；寫入時會重讀
-            target = self._managed.switch_target(label)
+            target = load_target()
         except (OSError, ValueError):
             return SwitchRefusal.UNREADABLE
         if target is None or BytesCredentialStore(current).fingerprint() is None:
