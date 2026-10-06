@@ -223,13 +223,16 @@ STRINGS = {
                  "  {command} query           ask Claude Code for the latest usage once and wait for it; "
                  "exit code 0 on success, 1 on failure\n"
                  "  {command} gui             open the floating window; run with pythonw to avoid a console window\n"
-                 "  {command} switch <label> --yes\n"
-                 "                            switch to this managed account; --yes switches without asking again.\n"
-                 "  {command} switch --previous --yes\n"
+                 "  {command} switch <label> [--yes]\n"
+                 "                            switch to this managed account; in a terminal without --yes it shows what "
+                 "will happen and asks before switching, --yes switches without asking.\n"
+                 "  {command} switch --previous [--yes]\n"
                  "                            restore the previous switch: the current credential and account info "
                  "go back to how they were before it; restoring again returns to the account you just left.\n"
-                 "                            Exit code 0 on success, 1 if refused (nothing written), 3 if written but "
-                 "the usage check failed or only partly written, 2 without --yes",
+                 "                            Exit code 0 on success, 1 if refused or declined (nothing written), 3 if "
+                 "written but the usage check failed or only partly written, 2 if not in a terminal and without --yes",
+    "switch.prompt": "Continue? [y/N] ",
+    "switch.cancelled": "Cancelled; nothing was switched.",
     "switch.done": "Switched to \"{label}\"",
     "switch.restored": "Restored the previous switch",
     "switch.refused.no_previous": "There is no pre-switch credential to restore, so nothing was switched.",

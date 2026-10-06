@@ -1,4 +1,4 @@
-"""命令列 `switch <帳號標籤> --yes`：依切換的結果印出訊息、回傳結束代碼。互動確認由後續的票補上。"""
+"""命令列 `switch <帳號標籤> --yes`：依切換的結果印出訊息、回傳結束代碼。互動確認見 test_cli_switch_confirm。"""
 import io
 import json
 import os
@@ -14,15 +14,28 @@ from tests.test_credential_sync import HOME, WORK
 from tests.test_switch import SwitchTestCase
 
 
-class CliSwitchTest(SwitchTestCase):
+class NotATerminal(io.StringIO):
+    def isatty(self):
+        return False
+
+
+class Terminal(io.StringIO):
+    """終端機：isatty 是真的；使用者的回答放在 StringIO 的內容裡，一行一個。"""
+    def isatty(self):
+        return True
+
+
+class CliSwitchBase(SwitchTestCase):
     def setUp(self):
         super().setUp()
         # 命令列讀真實的環境變數：假 claude 是批次檔，要有 COMSPEC 才開得起來
         self.env.update(SYSTEMROOT=os.environ.get("SYSTEMROOT", ""), COMSPEC=os.environ.get("COMSPEC", ""))
 
-    def run_cli(self, *args, system_language="zh-TW"):
+    def run_cli(self, *args, system_language="zh-TW", stdin=None):
+        """stdin 預設不是終端機；要模擬終端機就傳 Terminal("y\n")。"""
         out, err = io.StringIO(), io.StringIO()
         with self.cli_environment(system_language), redirect_stdout(out), redirect_stderr(err), \
+                mock.patch("sys.stdin", stdin if stdin is not None else NotATerminal()), \
                 mock.patch("cc_quota_tracker.__main__.datetime") as clock:
             clock.now.side_effect = lambda tz: self.clock.now  # 假 home 的憑證快照依測試時鐘到期
             code = main(list(args))
@@ -31,6 +44,8 @@ class CliSwitchTest(SwitchTestCase):
     def untouched(self):
         return self.current().read_bytes(), self.paths.claude_json.read_bytes()
 
+
+class CliSwitchTest(CliSwitchBase):
     def test_switch_with_yes_succeeds(self):
         code, out, err = self.run_cli("switch", "home", "--yes")
         self.assertEqual((code, out.strip(), err), (0, "已切換到「home」", ""))
@@ -141,7 +156,7 @@ class CliSwitchTest(SwitchTestCase):
                 code, out, _ = self.run_cli("--help", system_language=lang)
                 self.assertEqual(code, 0)
                 self.assertIn(label, out)
-                self.assertIn("switch --previous --yes", out)
+                self.assertIn("switch --previous [--yes]", out)
                 self.assertIn("--yes", out)
                 self.assertIn(exit_three, out)  # 結束代碼 3 也包含「已寫入但驗證失敗」
 
@@ -172,7 +187,7 @@ class CliSwitchTest(SwitchTestCase):
         before = self.untouched()
         code, out, err = self.run_cli("switch", "--previous")
         self.assertEqual((code, out), (2, ""))
-        self.assertIn("switch --previous --yes", err)
+        self.assertIn("switch --previous [--yes]", err)
         self.assertEqual(self.untouched(), before)
 
     def test_nothing_to_restore_exits_one_and_writes_nothing(self):

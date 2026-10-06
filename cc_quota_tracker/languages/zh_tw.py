@@ -186,11 +186,14 @@ STRINGS = {
                  "  {command} check              檢查 Claude Code 的額度快取結構是否仍與本工具相容，並列出實際使用的目錄\n"
                  "  {command} query              查詢一次最新額度並等它結束；成功結束代碼 0，失敗 1\n"
                  "  {command} gui                開啟懸浮視窗；改用 pythonw 執行就不會出現主控台視窗\n"
-                 "  {command} switch <帳號標籤> --yes\n"
-                 "                               切換到這個納管帳號；--yes 表示不再確認、直接切換。\n"
-                 "  {command} switch --previous --yes\n"
+                 "  {command} switch <帳號標籤> [--yes]\n"
+                 "                               切換到這個納管帳號；在終端機裡沒帶 --yes 會先顯示確認內容並詢問，--yes 表示不再確認、直接切換。\n"
+                 "  {command} switch --previous [--yes]\n"
                  "                               還原上一次切換：當前憑證與帳號資訊一起回到切換前；再還原一次會回到剛才的帳號。\n"
-                 "                               成功結束代碼 0，拒絕（沒寫任何檔）1，已寫入但驗證失敗或只寫了一半 3，沒帶 --yes 2",
+                 "                               成功結束代碼 0，拒絕或回答否定（沒寫任何檔）1，已寫入但驗證失敗或只寫了一半 3，"
+                 "不在終端機裡又沒帶 --yes 2",
+    "switch.prompt": "繼續？[y/N] ",
+    "switch.cancelled": "已取消，沒有切換。",
     "switch.done": "已切換到「{label}」",
     "switch.restored": "已還原上一次切換",
     "switch.refused.no_previous": "沒有可還原的切換前憑證，沒有切換。",

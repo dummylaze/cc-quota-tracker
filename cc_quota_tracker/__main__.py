@@ -6,10 +6,10 @@ from pathlib import Path
 from typing import NamedTuple, Optional
 
 from . import COMMAND, claude_provider, i18n
-from .board import SwitchOutcome
+from .board import Board, SwitchOutcome
 from .claude_provider import FieldStatus, NoReading, SchemaCheck
 from .core import BindingsUnreadable, Core, InvalidLabel, NoCredential, UnknownLabel
-from .fmt import date_time, query_reason, switch_refusal
+from .fmt import date_time, query_reason, restore_confirmation, switch_confirmation, switch_refusal
 from .i18n import text
 from .managed_directory import ManagedDirectory, PermissionState
 from .render_text import add_warning, render
@@ -43,6 +43,8 @@ def main(argv=None) -> int:
         print(text(configured_language(None), "cli.usage", command=COMMAND))
         return 0
     switch_request = _switch_request(params) if command == "switch" else None
+    if switch_request is not None and not (switch_request.yes or _stdin_is_terminal()):
+        switch_request = None  # 沒帶 --yes 又不是在終端機裡：沒有人可以確認，不切換
     if switch_request is None and (command, len(params)) not in {("add", 1), ("remove", 1), ("list", 0), ("query", 0),
                                                                ("check", 0), ("gui", 0)}:
         print(text(configured_language(None), "cli.usage", command=COMMAND), file=sys.stderr)  # 還沒解析路徑，讀不到設定檔
@@ -111,25 +113,46 @@ def query(core: Core, lang: str) -> int:
 
 class _SwitchRequest(NamedTuple):
     label: Optional[str]  # 要切換到的帳號標籤；還原上一次切換是 None
+    yes: bool  # 帶了 --yes：不詢問、直接切換
 
 
 def _switch_request(params) -> Optional[_SwitchRequest]:
-    """`switch <帳號標籤> --yes` 或 `switch --previous --yes`（順序不拘）；不是這兩個形狀就是 None（用法錯誤）。
-    沒帶 --yes 也是 None：終端機裡的互動確認還沒有，不確認就不切換。"""
-    if len(params) != 2 or "--yes" not in params:
+    """`switch <帳號標籤>` 或 `switch --previous`，各可加一個 --yes（順序不拘）；不是這兩個形狀就是 None（用法錯誤）。"""
+    rest = [p for p in params if p != "--yes"]
+    if len(rest) != 1 or len(params) - len(rest) > 1:
         return None
-    other = params[1] if params[0] == "--yes" else params[0]
-    if other == "--yes":
-        return None
-    return _SwitchRequest(None if other == "--previous" else other)
+    return _SwitchRequest(None if rest[0] == "--previous" else rest[0], len(rest) != len(params))
+
+
+def _stdin_is_terminal() -> bool:
+    return sys.stdin is not None and sys.stdin.isatty()  # pythonw 沒有標準輸入
+
+
+def _confirmed(board: Board, label: Optional[str], lang: str) -> bool:
+    """顯示與 GUI 確認對話框相同的內容再問；只有回答 y／yes（不分大小寫）算確認，空白、EOF、其他一律否定。"""
+    print((restore_confirmation(board, lang) if label is None else switch_confirmation(board, label, lang))
+          + "\n\n" + text(lang, "switch.prompt"), end="", flush=True)
+    try:
+        return sys.stdin.readline().strip().lower() in {"y", "yes"}
+    except KeyboardInterrupt:  # 在提示上按 Ctrl-C：當成否定，不丟 traceback
+        print()
+        return False
 
 
 def switch(core: Core, request: _SwitchRequest, lang: str) -> int:
-    """切換到帳號標籤，或還原上一次切換：成功結束代碼 0；拒絕（沒寫任何檔）印原因、1；
-    已寫入但驗證失敗或寫了一半 3。切換前替舊帳號的查詢失敗不另外提示。"""
+    """切換到帳號標籤，或還原上一次切換：成功結束代碼 0；拒絕或回答否定（沒寫任何檔）1；
+    已寫入但驗證失敗或寫了一半 3。切換前替舊帳號的查詢失敗不另外提示。
+    沒帶 --yes 時（呼叫端已確認在終端機裡）先預判：會被拒絕的請求不問，直接印原因。"""
     label = request.label
     previous = label is None
-    result = core.switch(label) if label is not None else core.restore_previous()
+    result = None
+    if not request.yes:
+        board, result = core.preflight_switch(label)
+        if result is None and not _confirmed(board, label, lang):
+            print(text(lang, "switch.cancelled"), file=sys.stderr)
+            return 1
+    if result is None:
+        result = core.switch(label) if label is not None else core.restore_previous()
     if result.outcome is SwitchOutcome.SWITCHED:
         print(text(lang, "switch.restored") if previous else text(lang, "switch.done", label=label))
         return 0

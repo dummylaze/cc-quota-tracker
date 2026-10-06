@@ -283,6 +283,14 @@ class Core:
         沒有可還原的切換前憑證、或它已過期就拒絕，當前憑證與 Claude Code 設定檔都不動。其餘同 switch。"""
         return self._run_switch(self._restore_refusal, self._managed.pre_switch_target, on_step)
 
+    def preflight_switch(self, label: Optional[str]) -> Tuple[Board, Optional[SwitchResult]]:
+        """切換（label 是 None 就是還原上一次切換）之前的預判：跑一輪不自動查詢的 poll，回傳那一輪的看板，以及目標檢查
+        會不會拒絕（會就是拒絕的結果值，不會是 None）。不查詢、不做任何切換的寫入（當前憑證、Claude Code 設定檔、切換前憑證
+        都不動）；poll 本來就會做的維護（綁定檔清理等）照舊，所以不是純讀取。命令列拿它在詢問之前就擋掉問了也只會被拒絕的
+        請求，並取得確認內容用的看板。真正切換時核心會再判斷一次，以那一次為準。"""
+        board = self._poll(auto_query=False)
+        return board, self._restore_refusal(board) if label is None else self._switch_refusal(label, board)
+
     def _run_switch(self, check: Callable[[Board], Optional[SwitchResult]],
                     load_target: Callable[[], Optional[Tuple[bytes, dict]]],
                     on_step: Optional[Callable[[SwitchStep], None]]) -> SwitchResult:
