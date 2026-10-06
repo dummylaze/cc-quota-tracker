@@ -189,7 +189,7 @@ STRINGS = {
     "switch.refused.no_previous": "沒有可還原的切換前憑證，沒有切換。",
     "switch.refused.previous_expired": "切換前憑證已過期，沒辦法還原，沒有切換：請在 Claude Code 重新登入那個帳號。",
     "switch.restore_write_failed": "已寫入切換前的憑證，但沒能改寫 Claude Code 的帳號資訊，兩者目前不一致：請在 Claude Code 重新登入。",
-    "switch.restore_verify_failed": "已還原上一次切換，但替還原後的帳號查詢額度失敗，沒能確認還原有生效：{reason}",
+    "switch.restore_verify_failed": "已還原上一次切換，但還原後的帳號查詢額度失敗，未能還原有生效：{reason}",
     "switch.step.sync": "同步目前帳號的憑證…",
     "switch.step.query_old": "查詢舊帳號的額度…",
     "switch.step.write": "寫入「{label}」的憑證…",
