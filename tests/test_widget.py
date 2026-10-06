@@ -550,6 +550,64 @@ class ManageAccountsTest(WidgetTestCase):
         self.assertLockedBindingsError(box)
 
 
+class ImportReplaceConfirmTest(WidgetTestCase):
+    """匯入憑證檔時，標籤與既有監看帳號同名（不分大小寫）要先確認；回答否就什麼都不寫。"""
+
+    def setUp(self):
+        super().setUp()
+        self.log_in()
+        self.core.add("work")
+        self.widget.refresh()  # 看板要先認得 work，守衛才有「已存在的標籤」可比對
+        self.managed = self.home / ".claude-multi"
+        self.snapshot = self.managed / "work.json"
+        self.bindings = self.managed / ".state" / "bindings.json"
+        self.source = self.home / "incoming.json"
+        self.source.write_bytes(self.write_credentials(refresh="rt-2").read_bytes())
+        self.log_in()  # 當前憑證還原成 rt-1：來源檔是另一份登入的憑證
+
+    def import_as(self, label, answer=True):
+        with mock.patch("cc_quota_tracker.widget.messagebox") as box, \
+                mock.patch("cc_quota_tracker.widget.simpledialog") as ask, \
+                mock.patch("cc_quota_tracker.widget.filedialog") as files:
+            files.askopenfilename.return_value = str(self.source)
+            ask.askstring.return_value = label
+            box.askyesno.return_value = answer
+            self.widget.import_credential_file()
+        return box
+
+    def test_a_label_that_is_already_watched_asks_before_importing(self):
+        box = self.import_as("work")
+        box.askyesno.assert_called_once()
+        self.assertIn("work", box.askyesno.call_args.args[1])
+
+    def test_answering_no_leaves_the_snapshot_and_bindings_untouched_and_shows_no_success(self):
+        snapshot, bindings = self.snapshot.read_bytes(), self.bindings.read_bytes()
+        box = self.import_as("work", answer=False)
+        self.assertEqual(self.snapshot.read_bytes(), snapshot)
+        self.assertEqual(self.bindings.read_bytes(), bindings)
+        box.showinfo.assert_not_called()
+        box.showerror.assert_not_called()
+
+    def test_answering_yes_replaces_the_snapshot_and_shows_the_success_message(self):
+        box = self.import_as("work", answer=True)
+        self.assertEqual(self.snapshot.read_bytes(), self.source.read_bytes())
+        self.assertIn("work", box.showinfo.call_args.args[1])
+        box.showerror.assert_not_called()
+
+    def test_a_label_differing_only_in_case_asks_too(self):
+        snapshot = self.snapshot.read_bytes()
+        box = self.import_as("Work", answer=False)
+        box.askyesno.assert_called_once()
+        self.assertIn("Work", box.askyesno.call_args.args[1])
+        self.assertEqual(self.snapshot.read_bytes(), snapshot)
+
+    def test_a_new_label_imports_without_asking(self):
+        box = self.import_as("home")
+        box.askyesno.assert_not_called()
+        self.assertEqual((self.managed / "home.json").read_bytes(), self.source.read_bytes())
+        box.showinfo.assert_called_once()
+
+
 class ThemeTest(WidgetTestCase):
     def fills(self):
         return {self.widget.canvas.itemcget(i, "fill") for i in self.widget.canvas.find_all()}
