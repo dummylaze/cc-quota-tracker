@@ -197,7 +197,7 @@ class ConfirmDialogTest(WidgetSwitchTestCase):
         self.log_in_at("rt-w2", "acct-w", WORK + timedelta(days=1))  # 同一個帳號重新登入：快照跟新登入不是同一次
         self.widget.refresh()
         paragraphs = self.message().split("\n\n")
-        self.assertEqual(paragraphs[-1], "目前帳號快照已失效；用「還原上一次切換」，或在 Claude Code 登入後再重新納管。")
+        self.assertEqual(paragraphs[-1], "目前帳號快照已失效；用「還原上一次切換」，或在 Claude Code 重新登入後再重新納管。")
         self.assertEqual(len(paragraphs), 4)
 
     def test_the_dialog_shows_no_usage_numbers(self):

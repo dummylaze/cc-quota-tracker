@@ -34,7 +34,7 @@ class CliConfirmTest(CliSwitchBase):
         self.log_in_at("rt-w2", "acct-w", WORK + timedelta(days=1))  # 同一個帳號重新登入：快照跟新登入不是同一次
         out = self.ask("switch", "home")[1]
         paragraphs = out.split("\n\n")
-        self.assertEqual(paragraphs[3], "目前帳號快照已失效；用「還原上一次切換」，或在 Claude Code 登入後再重新納管。")
+        self.assertEqual(paragraphs[3], "目前帳號快照已失效；用「還原上一次切換」，或在 Claude Code 重新登入後再重新納管。")
         self.assertEqual(paragraphs[4], PROMPT + "已切換到「home」\n")
         self.assertEqual(len(paragraphs), 5)
 

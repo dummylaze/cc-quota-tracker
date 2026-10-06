@@ -159,7 +159,7 @@ STRINGS = {
     "dialog.switch_confirm": "切換到「{label}」？",
     "dialog.switch_watched": "目前帳號「{label}」是監看帳號：切走之前，會先同步憑證至快照。",
     "dialog.switch_unwatched": "目前帳號是未監看帳號：只會存成切換前憑證，且只留最新一份。",
-    "dialog.switch_invalid": "目前帳號快照已失效；用「還原上一次切換」，或在 Claude Code 登入後再重新納管。",
+    "dialog.switch_invalid": "目前帳號快照已失效；用「還原上一次切換」，或在 Claude Code 重新登入後再重新納管。",
     "dialog.switch_failed": "切換時發生錯誤，沒有切換成功：{error}",
     "dialog.restore_confirm": "還原上一次切換？",
     "dialog.restore_consequence": "會用切換前的憑證與帳號資訊換回去；目前的憑證會存成新的切換前憑證，所以還能再還原回來。",
