@@ -7,7 +7,9 @@ import sys
 import tempfile
 import unittest
 import uuid
+from contextlib import ExitStack
 from pathlib import Path
+from unittest import mock
 
 if sys.platform == "win32":
     import winreg
@@ -80,6 +82,61 @@ class RegistryAutostartTest(unittest.TestCase):
         self.autostart.enable()
         self.assertTrue(self.autostart.is_enabled())
         self.assertEqual(self.values(), {"cc-quota-tracker": "pythonw.exe -m demo"})
+
+
+@unittest.skipUnless(sys.platform == "win32", "開機自動啟動只支援 Windows 登錄")
+class DeploymentCommandTest(unittest.TestCase):
+    """預設的啟動命令依部署形式而定：原始碼版是 pythonw 加專案路徑，打包版是視窗 exe（ADR-0012）。"""
+
+    EXE_DIR = r"C:\Program Files\cc quota tracker"
+
+    def setUp(self):
+        self.key_path = rf"Software\cc-quota-tracker-test\{uuid.uuid4().hex}"
+        self.addCleanup(self.drop_key)
+
+    def drop_key(self):
+        try:
+            winreg.DeleteKey(winreg.HKEY_CURRENT_USER, self.key_path)
+        except OSError:
+            pass
+
+    def stored(self):
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, self.key_path) as key:
+            return winreg.QueryValueEx(key, "cc-quota-tracker")[0]
+
+    def frozen(self, executable):
+        """假裝在打包狀態下由 executable 這支 exe 執行。"""
+        stack = ExitStack()
+        stack.enter_context(mock.patch.object(sys, "frozen", True, create=True))
+        stack.enter_context(mock.patch.object(sys, "executable", executable))
+        return stack
+
+    def test_frozen_writes_the_quoted_full_path_of_the_window_exe(self):
+        with self.frozen(rf"{self.EXE_DIR}\cc-quota-tracker.exe"):
+            RegistryAutostart(key_path=self.key_path).enable()
+        self.assertEqual(self.stored(), rf'"{self.EXE_DIR}\cc-quota-tracker.exe"')
+
+    def test_frozen_from_the_cli_exe_still_registers_the_window_exe(self):
+        with self.frozen(rf"{self.EXE_DIR}\cc-quota-tracker-cli.exe"):
+            RegistryAutostart(key_path=self.key_path).enable()
+        self.assertEqual(self.stored(), rf'"{self.EXE_DIR}\cc-quota-tracker.exe"')
+
+    def test_not_frozen_keeps_the_pythonw_command_for_this_project(self):
+        RegistryAutostart(key_path=self.key_path).enable()
+        self.assertEqual(self.stored(), launch_command(pythonw_for(Path(sys.executable))))
+        self.assertNotIn("cc-quota-tracker.exe", self.stored())
+
+    def test_each_deployment_sees_the_other_ones_command_as_off_without_migrating_it(self):
+        source = RegistryAutostart(key_path=self.key_path)
+        source.enable()
+        source_command = self.stored()
+        with self.frozen(rf"{self.EXE_DIR}\cc-quota-tracker.exe"):
+            packaged = RegistryAutostart(key_path=self.key_path)
+            self.assertFalse(packaged.is_enabled())
+            self.assertEqual(self.stored(), source_command)  # 沒有被改寫
+            packaged.enable()
+            self.assertTrue(packaged.is_enabled())
+        self.assertFalse(source.is_enabled())
 
 
 @unittest.skipUnless(sys.platform == "win32", "開機自動啟動只支援 Windows 登錄")

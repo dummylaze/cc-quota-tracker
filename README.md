@@ -4,7 +4,7 @@ English | [正體中文](README.zh-TW.md)
 
 A small always-on-top desktop window (Windows) that shows how much quota each of your Claude accounts has left, all at once. Claude Code only shows the account you are logged into; this tool keeps the last reading of every other account you have set up, so you can see which one has room this week.
 
-Deployed from source: needs Python 3.9 or later, no installer.
+Download the zip, unzip it and double-click — no Python and no installer needed. (To run it from source instead, see [For developers](#for-developers-running-from-source); that needs Python 3.9 or later.)
 
 Unofficial; not affiliated with or endorsed by Anthropic. Use at your own risk — see [Disclaimer](#disclaimer).
 
@@ -28,9 +28,9 @@ Unofficial; not affiliated with or endorsed by Anthropic. Use at your own risk �
 
 ## Requirements
 
-- Windows 10 or later
-- Python 3.9 or later with `tkinter` (the standard python.org installer includes it). Standard library only — nothing to `pip install`.
+- Windows 10 or later, 64-bit
 - Claude Code, logged in at least once
+- Nothing else for the zip: it carries its own Python. Only running from source needs Python 3.9 or later; see [For developers](#for-developers-running-from-source).
 
 ## Intended setup and known limitations
 
@@ -45,29 +45,25 @@ Known limitations:
 
 ## Setup in three steps
 
-1. **Put the code somewhere.** Clone this repository (or just copy the folder) to anywhere you like, then open a terminal in it. All commands below are run from that folder.
+1. **Download and unzip.** From the [Releases page](https://github.com/dummylaze/cc-quota-tracker/releases) download `cc-quota-tracker-<version>-win64.zip` and unzip it anywhere you like. It unpacks to one folder, `cc-quota-tracker`, holding two programs: `cc-quota-tracker.exe` is the window (no console window opens) and `cc-quota-tracker-cli.exe` is the command-line version. Keep the folder where it is, since *Start at login* remembers its location. The first time you open it Windows shows a warning; see [SmartScreen warning on first launch](#smartscreen-warning-on-first-launch).
+2. **Manage your accounts.** For each account: log in with Claude Code, then run this in a terminal opened in that folder (in File Explorer, type `cmd` in the address bar):
 
    ```
-   git clone https://github.com/dummylaze/cc-quota-tracker.git
-   cd cc-quota-tracker
+   cc-quota-tracker-cli add <label>
    ```
 
-2. **Manage your accounts.** For each account: log in with Claude Code, then run
-
-   ```
-   python -m cc_quota_tracker add <label>
-   ```
-
-   See [Managing accounts](#managing-accounts).
-3. **Start it.**
-
-   ```
-   pythonw -m cc_quota_tracker gui
-   ```
-
-   `pythonw` starts it without a console window. (`python -m cc_quota_tracker gui` works too, but keeps a console open.)
+   See [Managing accounts](#managing-accounts). Every command line in this README is written `cc-quota-tracker-cli <command>`; in PowerShell write `.\cc-quota-tracker-cli`, or put the folder on your `PATH` to run it from anywhere.
+3. **Start it.** Double-click `cc-quota-tracker.exe`.
 
 To have the window start when you log into Windows, use *Start at login* in the right-click menu (see [Window and menu](#window-and-menu)).
+
+### SmartScreen warning on first launch
+
+The exe is **not code-signed**: a signing certificate costs money every year, which is out of proportion for a tool this size. So the first time you open it, Windows SmartScreen shows "Windows protected your PC". Click **More info → Run anyway**. In place of a signature, every Release carries the SHA-256 of its zip, and the zip is built by a GitHub Actions workflow from the public source, with a public log, so you can check that the file is the one that workflow built (see the next section).
+
+### If your antivirus flags the exe
+
+Unsigned programs built with PyInstaller are sometimes flagged by antivirus software by mistake. Compare the SHA-256 of the zip you downloaded (`Get-FileHash <zip file> -Algorithm SHA256` in PowerShell) with the one on the Release page; if they match, it is the file the workflow built. If your antivirus still blocks it, run from source instead; see [For developers](#for-developers-running-from-source).
 
 ## Managing accounts
 
@@ -84,7 +80,7 @@ There are three ways in:
 Log in to the account in Claude Code first, then:
 
 ```
-python -m cc_quota_tracker add <label>
+cc-quota-tracker-cli add <label>
 ```
 
 This copies the current credential into the managed directory together with Claude Code's account info, and binds it to the account currently logged in, so the account is recognised immediately and can be switched to later. Running `add` again with an existing label overwrites it — this is how you manage again a credential snapshot that has expired or become invalid, or an account managed by an earlier version.
@@ -92,14 +88,15 @@ This copies the current credential into the managed directory together with Clau
 Other commands:
 
 ```
-python -m cc_quota_tracker remove <label>   # remove a watched account (its leftover data too)
-python -m cc_quota_tracker list             # print the same information as the window, as text; a watch-only account gets its reason and the remedy command
-python -m cc_quota_tracker query            # ask Claude Code for the latest usage (see "Query usage")
-python -m cc_quota_tracker switch <label>   # switch to this managed account (see "Switching accounts")
-python -m cc_quota_tracker switch --previous   # restore the previous switch (see "Switching accounts")
-python -m cc_quota_tracker check            # see "For hosts" below
-python -m cc_quota_tracker gui              # open the window
-python -m cc_quota_tracker --help           # print all commands
+cc-quota-tracker-cli remove <label>      # remove a watched account (its leftover data too)
+cc-quota-tracker-cli list                # print the same information as the window, as text; a watch-only account gets its reason and the remedy command
+cc-quota-tracker-cli query               # ask Claude Code for the latest usage (see "Query usage")
+cc-quota-tracker-cli switch <label>      # switch to this managed account (see "Switching accounts")
+cc-quota-tracker-cli switch --previous   # restore the previous switch (see "Switching accounts")
+cc-quota-tracker-cli check               # see "For hosts" below
+cc-quota-tracker-cli gui                 # open the window, with a console attached; double-click cc-quota-tracker.exe for no console
+cc-quota-tracker-cli --version           # print the version
+cc-quota-tracker-cli --help              # print all commands
 ```
 
 ### 2. Right-click menu
@@ -178,8 +175,8 @@ Before every switch the tool saves the current credential together with the acco
 ### Switching from the command line
 
 ```
-python -m cc_quota_tracker switch <label>
-python -m cc_quota_tracker switch --previous
+cc-quota-tracker-cli switch <label>
+cc-quota-tracker-cli switch --previous
 ```
 
 Both accept `--yes` (before or after the label).
@@ -197,7 +194,7 @@ Exit codes:
 | `2` | Usage error, or no `--yes` and not in a terminal (cannot confirm); nothing was written |
 | `3` | Written, but verification failed (the usage query for the new account failed), or only half written (the current credential was written, the account info was not) |
 
-When `switch <label>` fails verification, the message includes the command to go back: `switch --previous --yes`; when `switch --previous` itself fails verification it only says the restore could not be confirmed, without a command (restoring again would just loop back to the account you left). `python -m cc_quota_tracker --help` lists both forms and `--yes` too.
+When `switch <label>` fails verification, the message includes the command to go back: `switch --previous --yes`; when `switch --previous` itself fails verification it only says the restore could not be confirmed, without a command (restoring again would just loop back to the account you left). `cc-quota-tracker-cli --help` lists both forms and `--yes` too.
 
 **Note:** if you switch from the command line while the board is open, both keep working; the tool does not check Claude Code's refresh lock file, and there is no lock between the window and the command line, so when both act at once the later write wins.
 
@@ -214,12 +211,18 @@ When `switch <label>` fails verification, the message includes the command to go
 - **When the write-back fails**: the account is temporarily watch-only and its card says "Couldn't write back the credential snapshot, retrying automatically n/3". It retries once per poll; on success it becomes a managed account again by itself and you need do nothing. After three failures it stops retrying and the card asks you to manage the account again. The retry count survives a restart; the next time Claude Code refreshes, the count starts over, giving the new credential a fresh chance. A failed write-back opens no dialog and does not affect the rest of the board.
 - **"No longer valid"** now lights only when no evidence of the same login can be found — for example you logged in again to the same account, and the new login is not the one the snapshot came from. It means "this snapshot can no longer be used", not "Claude Code rotated the credential"; differences caused by a refresh are filled in by the sync and are not invalidity. Once set, the mark stays until you manage the account again, even if you switch to another account; managing it again clears it and the account is a managed account again.
 
+## Upgrading the program
+
+Close the window, then unzip the new version over the same folder, replacing the files. Your settings, accounts and credential snapshots are not in the program folder (they live in the settings file and the managed directory), so they carry over. The tool does not check for updates, because that would be a network request, which it does not make; watch the [Releases page](https://github.com/dummylaze/cc-quota-tracker/releases) yourself. If an upgrade changes what you have to do with your accounts, it is described in the next section.
+
+**Moving from the source deployment to the exe:** close the old window first, then open `cc-quota-tracker.exe` and turn *Start at login* on again. *Start at login* holds a single value, and the old one starts Python from the source folder; the exe shows it as off and does not migrate it, and turning it on in the exe replaces it.
+
 ## Upgrading from an earlier version
 
 Credential snapshots managed by an earlier version carry no account info, so after the upgrade those accounts are **watch-only accounts** with the reason "no account info". Their readings and expiry countdowns still show; they just cannot be switched to. **For each account you want to switch to, do this once:**
 
 1. Log in to that account in Claude Code.
-2. Manage it again: right-click the window → *Manage the signed-in account…* with the same label, or run `python -m cc_quota_tracker add <label>`.
+2. Manage it again: right-click the window → *Manage the signed-in account…* with the same label, or run `cc-quota-tracker-cli add <label>`.
 
 Managing it again overwrites the snapshot and saves the account info; from then on it is a managed account. Accounts you do not plan to switch to can stay watch-only; nothing needs doing. Your other data — settings file, account bindings, switch log — carries over as is. What the screen used to call an "unmanaged account" is now an **unwatched account**: an account the tool is not watching at all.
 
@@ -240,7 +243,7 @@ Every number comes from Claude Code's usage cache, and Claude Code only updates 
 
 - **The *Update* button** on the active account's card, next to the "New activity; usage not updated" or "Reading pending" note, in all three layouts. It appears only then. While the query runs it reads "Updating…", and for 30 seconds after a manual query (successful or not) it cannot be clicked, so you cannot hammer it. The right-click menu item shares that cooldown.
 - **Right-click → Query usage**, any time except while a query is running or cooling down — for example when the reading is not flagged but you know you used the account somewhere else.
-- **Command line**: `python -m cc_quota_tracker query` runs one query and waits for it. On success it prints the new observation time and exits with 0; on failure it prints the reason and exits with 1, so a script can tell. It has no cooldown (it is a separate process from the window). When a reading is lagging or pending, `list` also prints a line pointing to `query` and to `/usage`.
+- **Command line**: `cc-quota-tracker-cli query` runs one query and waits for it. On success it prints the new observation time and exits with 0; on failure it prints the reason and exits with 1, so a script can tell. It has no cooldown (it is a separate process from the window). When a reading is lagging or pending, `list` also prints a line pointing to `query` and to `/usage`.
 - **Auto-query**, off by default. Turn it on with right-click → *Auto-query usage* (kept after a restart). While on, the tool queries only when the active account's reading is lagging or pending, and never twice within one interval (`providers.claude.autoUsageQueryMinutes`, default 15 minutes, minimum 5). The interval counts from the later of the tool's last query and the reading's observation time, so a `/usage` you ran yourself counts as one. When you walk away and no new conversation appears, the reading stops being lagging, so auto-query makes at most one more query and then stops by itself; if a long task, a background sub-agent or a schedule is still running, it keeps going at the interval, because quota really is being used. After 3 failed auto-queries in a row it pauses, and the card shows "Auto-query paused" with the last reason; one successful manual update resumes it. After a single failure it waits a full interval before trying again. The pause state is kept in memory only, so restarting the tool starts it afresh.
 
 **What it does.** The tool starts `claude` as a child process in print mode and sends the same request that Claude Code's own usage panel sends. The child always runs with `--settings '{"disableAllHooks":true}'`, so none of your Claude Code hooks (sounds, backups, reminders) fire. It runs no model, creates no conversation record and changes none of Claude Code's settings files. It usually takes a few seconds; the tool gives up after 20 seconds. It counts as successful only if the cache's observation time moved forward. If you relocated the Claude Code directory (see [Where the tool looks for files](#where-the-tool-looks-for-files)), the child is pointed at the same directory, so what it updates is the cache the tool is reading. No console window opens and focus is not taken.
@@ -273,14 +276,14 @@ Drag anywhere to move; double-click to switch between compact and expanded. Righ
 - **Language**: follow system (default), 正體中文, English. Follow system uses the Windows display language and falls back to English when it is neither Traditional Chinese nor English. Switching takes effect at once; the command line (`list`, `add`, `check`, …) follows the same setting. Values Claude reports itself (a lock reason, the name of a limit this tool doesn't recognise) are shown as reported, not translated
 - **Theme**: follow system (default), light, dark
 - **Opacity**: 100% (default), 85%, 70%
-- **Start at login** (default off): writes one value to your user's `Run` registry key and removes it when turned off. It does not need administrator rights and touches nothing else. The checkbox always reflects the actual registry value. The registered command points at the Python and the folder it was turned on from; if you move the folder or change Python, the checkbox shows off until you turn it on again.
-- **Add / Import / Open folder / Quit**: *Open folder* has two entries, *Managed directory* and *Settings directory*
+- **Start at login** (default off): writes one value to your user's `Run` registry key and removes it when turned off. It does not need administrator rights and touches nothing else. The checkbox always reflects the actual registry value. The registered command is the full path of `cc-quota-tracker.exe` (when running from source: the Python and the folder it was turned on from). If you move the folder (from source: or change Python), the checkbox shows off until you turn it on again. The value holds one command, so the exe and a source deployment do not share it: whichever one turns it on writes its own, and the other sees it as off and does not migrate it.
+- **Add / Import / Open folder / Quit**: *Open folder* has two entries, *Managed directory* and *Settings directory*. Below *Quit*, a greyed-out last row shows the version you are running.
 
 The window remembers its position; if that position is no longer on any screen (for example an unplugged monitor) it moves back to the primary screen.
 
 ## Error log
 
-Started with `pythonw`, the tool has no console, so an error leaves no trace on screen. Whenever a round does not complete, the error (time and full traceback) is appended to `%APPDATA%\cc-quota-tracker\errors.log`, next to `settings.json` and deliberately not in the managed directory, since the managed directory may be what is failing. To open it, right-click → *Open folder* → *Settings directory*.
+Started from `cc-quota-tracker.exe` (or from source with `pythonw`), the tool has no console, so an error leaves no trace on screen. Whenever a round does not complete, the error (time and full traceback) is appended to `%APPDATA%\cc-quota-tracker\errors.log`, next to `settings.json` and deliberately not in the managed directory, since the managed directory may be what is failing. To open it, right-click → *Open folder* → *Settings directory*.
 
 An entry is written when a round fails after a completed one, or when the error changes while rounds keep failing; the same error repeating is written once. Past 1 MB the file is renamed to `errors.log.1` (replacing the previous one) and a new `errors.log` starts, so at most about 2 MB are kept. If the log itself cannot be written, the tool carries on without it and without any dialog.
 
@@ -342,16 +345,31 @@ The tool tolerates the expected kinds of trouble: a file caught mid-write (it ke
 To check compatibility at any time:
 
 ```
-python -m cc_quota_tracker check
+cc-quota-tracker-cli check
 ```
 
 It verifies that every field path the tool relies on still exists with the expected type, lists new unknown fields under `utilization`, and prints the Claude Code directory and managed directory actually in use, saying whether each came from the settings file, the environment variable, or the default. It prints field names and types only, never values.
 
 The tool also appends a log of every account switch — whether it made the switch itself or observed one made by another tool or `/login` (time and account identifier only, kept in the managed directory with restricted permissions and never shown on screen) — and the time it last ran, so that future reporting can attribute usage to the right account.
 
+## For developers: running from source
+
+Running from source needs Python 3.9 or later with `tkinter` (the standard python.org installer includes it). The tool itself uses the standard library only — nothing to `pip install`. Clone the repository and run everything from that folder:
+
+```
+git clone https://github.com/dummylaze/cc-quota-tracker.git
+cd cc-quota-tracker
+python -m cc_quota_tracker --help
+pythonw -m cc_quota_tracker gui
+```
+
+`pythonw` starts the window without a console. Everywhere else in this README, write `python -m cc_quota_tracker` where it says `cc-quota-tracker-cli`; the hints the tool prints name the command that fits the deployment you are running. Run the tests with `python -m unittest`.
+
+The exe is built with PyInstaller, which is needed only for building and is pinned with hashes in `packaging/requirements-build.txt` (`pip install --require-hashes -r packaging/requirements-build.txt`, then `python -m PyInstaller packaging/cc-quota-tracker.spec`). The version number lives in one place, `__version__` in `cc_quota_tracker/__init__.py`. Pushing a tag `v<version>` that matches it runs the workflow in `.github/workflows/release.yml`, which tests, builds and publishes the zip with its SHA-256; if any step fails, nothing is published.
+
 ## Out of scope for this version
 
-Encrypting credential snapshots, a restore history deeper than one step, token reports, other providers, macOS / Linux, packaging as an exe, network requests made by the tool itself (Query usage goes through Claude Code), querying standby accounts, and any automation triggered by quota level.
+Encrypting credential snapshots, a restore history deeper than one step, token reports, other providers, macOS / Linux, network requests made by the tool itself (Query usage goes through Claude Code), querying standby accounts, and any automation triggered by quota level.
 
 ## Disclaimer
 

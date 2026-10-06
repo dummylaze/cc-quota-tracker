@@ -8,6 +8,7 @@ from pathlib import Path
 RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"  # 在 HKEY_CURRENT_USER 底下：只影響目前使用者，不需要系統管理員
 VALUE_NAME = "cc-quota-tracker"
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+GUI_EXE = "cc-quota-tracker.exe"  # 打包版的視窗 exe 檔名；與 packaging/cc-quota-tracker.spec 一致，改名要另外處理已登錄的舊值
 
 
 def pythonw_for(python: Path) -> Path:
@@ -24,10 +25,23 @@ def launch_command(python: Path, root: Path = PROJECT_ROOT) -> str:
     return subprocess.list2cmdline([str(python), "-c", code])
 
 
+def packaged_command(executable: Path) -> str:
+    """打包版的啟動命令：與 executable 同資料夾的視窗 exe（不開主控台）的完整路徑，一律加引號。
+    從命令列 exe 呼叫 gui 時 executable 是命令列 exe，所以不能直接用它自己。"""
+    return f'"{Path(executable).with_name(GUI_EXE)}"'
+
+
+def default_command() -> str:
+    """目前這份程式自己的啟動命令：打包版是視窗 exe，原始碼版是 pythonw 加專案路徑。"""
+    if getattr(sys, "frozen", False):
+        return packaged_command(Path(sys.executable))
+    return launch_command(pythonw_for(Path(sys.executable)))
+
+
 class RegistryAutostart:
     def __init__(self, name: str = VALUE_NAME, command: str = None, key_path: str = RUN_KEY):
         self._name = name
-        self._command = command or launch_command(pythonw_for(Path(sys.executable)))
+        self._command = command or default_command()
         self._key_path = key_path
 
     def is_enabled(self) -> bool:

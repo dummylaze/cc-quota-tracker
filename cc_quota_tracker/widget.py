@@ -15,7 +15,7 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, simpledialog
 from typing import Callable, Optional, Tuple, Union
 
-from . import i18n
+from . import __version__, i18n
 from .board import Board, Preferences, SwitchOutcome, SwitchResult, SwitchStep
 from .canvas_text import stalled_banner
 from .core import BindingsUnreadable, InvalidLabel, NoCredential
@@ -210,6 +210,8 @@ class Widget:
         self._dismiss_shown = False
         menu.add_separator()
         self._add_entry(menu, "command", "menu.quit", command=self.close)
+        menu.add_separator()
+        menu.add_command(label=f"{_TITLE} {__version__}", state="disabled")  # 不分語系，也不隨語系改字
 
     def _relabel_menu(self):
         for menu, index, key in self._menu_labels:

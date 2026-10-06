@@ -3,7 +3,7 @@ import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from datetime import datetime, timedelta, timezone
 
-from cc_quota_tracker import COMMAND
+from cc_quota_tracker import COMMAND, __version__, command_for
 from cc_quota_tracker.__main__ import main
 from tests.fakehome import HomeTestCase, claude_json, usage_cache
 
@@ -147,6 +147,37 @@ class CliTest(CliTestCase):
                 self.assertEqual(code, 2)
                 self.assertEqual(out, "")
                 self.assertIn(f"{COMMAND} add", err)
+
+
+class VersionTest(CliTestCase):
+    def test_version_flag_prints_name_and_version_to_stdout_and_succeeds(self):
+        code, out, err = self.run_cli("--version")
+        self.assertEqual((code, out, err), (0, f"cc-quota-tracker {__version__}\n", ""))
+
+    def test_version_is_a_semantic_version_and_does_not_depend_on_the_language(self):
+        self.assertRegex(__version__, r"^\d+\.\d+\.\d+$")
+        self.assertEqual(self.run_cli("--version", system_language="zh-TW")[1],
+                         self.run_cli("--version", system_language="en-US")[1])
+
+    def test_version_does_not_resolve_paths(self):
+        self.write_settings(claudeConfigDir="relative", managedDir=str(self.home / "unplugged"))
+        self.assertEqual(self.run_cli("--version")[::2], (0, ""))
+
+    def test_version_flag_with_other_arguments_is_bad_usage(self):
+        for args in [("--version", "x"), ("list", "--version"), ("--version", "--help")]:
+            with self.subTest(args=args):
+                code, out, err = self.run_cli(*args)
+                self.assertEqual((code, out), (2, ""))
+                self.assertIn(f"{COMMAND} add", err)
+
+    def test_usage_lists_the_version_flag_in_both_languages(self):
+        for tag in ("zh-TW", "en-US"):
+            with self.subTest(language=tag):
+                self.assertIn(f"{COMMAND} --version", self.run_cli("--help", system_language=tag)[1])
+
+    def test_command_in_hints_is_the_cli_exe_when_frozen(self):
+        self.assertEqual(command_for(frozen=False), "python -m cc_quota_tracker")
+        self.assertEqual(command_for(frozen=True), "cc-quota-tracker-cli")
 
 
 class CliLanguageTest(CliTestCase):

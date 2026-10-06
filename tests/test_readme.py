@@ -107,13 +107,41 @@ class ReadmeOpeningTest(unittest.TestCase):
         self.assertLess(en.index("Unofficial;"), en.index("## Requirements"))
         self.assertLess(zh.index("非官方工具"), zh.index("## 環境需求"))
 
-    def test_opening_states_deploy_from_source_and_the_old_requirements_line_is_gone(self):
+    def test_opening_offers_the_zip_first_and_keeps_python_3_9_for_running_from_source(self):
         for path, requirements in ((README["en"], "## Requirements"), (README["zh"], "## 環境需求")):
             text = read(path)
             head = text[:text.index(requirements)]
             self.assertIn("3.9", head, path.name)
+            self.assertIn("zip", head, path.name)
             self.assertNotIn("not packaged as an exe", text)
             self.assertNotIn("不打包成 exe", text)
+
+    def test_packaging_as_an_exe_is_no_longer_out_of_scope(self):
+        for path, heading in ((README["en"], "## Out of scope for this version"), (README["zh"], "## 目前版本的範圍外")):
+            text = read(path)
+            section = text[text.index(heading):text.index("\n## ", text.index(heading) + 1)]
+            self.assertNotRegex(section, r"(?i)exe", path.name)
+
+    def test_commands_are_written_for_the_exe_except_in_the_developers_section(self):
+        for path, developers in ((README["en"], "## For developers"), (README["zh"], "## 給開發者")):
+            text = read(path)
+            start = text.index(developers)
+            outside = text[:start] + text[text.index("\n## ", start + 1):]
+            self.assertNotIn("python -m cc_quota_tracker", outside, path.name)
+            self.assertIn("cc-quota-tracker-cli --version", outside, path.name)
+            self.assertIn("cc-quota-tracker.exe", outside, path.name)
+
+    def test_setup_explains_smartscreen_and_antivirus_with_the_sha256_comparison(self):
+        for path, setup, upgrade in ((README["en"], "## Setup in three steps", "## Upgrading the program"),
+                                     (README["zh"], "## 部署三步", "## 升級程式")):
+            text = read(path)
+            section = text[text.index(setup):text.index("\n## ", text.index(setup) + 1)]
+            self.assertIn("SmartScreen", section, path.name)
+            self.assertIn("SHA-256", section, path.name)
+            self.assertEqual(len(re.findall(r"(?m)^### ", section)), 2, path.name)  # SmartScreen、防毒誤判各一節
+            self.assertIn("(#for-developers-running-from-source)" if path == README["en"]
+                          else "(#給開發者以原始碼執行)", section, path.name)  # 防毒擋下時的退路
+            self.assertIn(upgrade, text, path.name)
 
     def test_disclaimer_and_license_are_the_last_two_sections_in_that_order(self):
         self.assertEqual([t for _, t in headings(read(README["en"]))][-2:], ["Disclaimer", "License"])
@@ -139,11 +167,13 @@ class ReadmeOpeningTest(unittest.TestCase):
         zh_part = zh[zh.index("已知限制"):zh.index("## 部署三步")]
         self.assertIn("(#給架設者本工具依賴什麼)", zh_part)
 
-    def test_setup_gives_the_clone_command_and_the_command_list_mentions_help(self):
-        for path in README.values():
+    def test_developers_section_gives_the_clone_command_and_the_command_list_mentions_help(self):
+        for path, developers in ((README["en"], "## For developers"), (README["zh"], "## 給開發者")):
             text = read(path)
-            self.assertIn("git clone https://github.com/dummylaze/cc-quota-tracker.git", text)
-            self.assertIn("python -m cc_quota_tracker --help", text)
+            section = text[text.index(developers):text.index("\n## ", text.index(developers) + 1)]
+            self.assertIn("git clone https://github.com/dummylaze/cc-quota-tracker.git", section, path.name)
+            self.assertIn("python -m cc_quota_tracker --help", section, path.name)
+            self.assertIn("cc-quota-tracker-cli --help", text, path.name)
 
 
 class LicenseTest(unittest.TestCase):

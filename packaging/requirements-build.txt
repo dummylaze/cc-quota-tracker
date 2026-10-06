@@ -1,0 +1,21 @@
+# 只有打包 exe 時用到的建置相依；執行期與測試不需要任何 pip 套件（ADR-0004、ADR-0012）。
+# 安裝：pip install --require-hashes -r packaging/requirements-build.txt
+# 版本與 SHA-256 取自 PyPI 官方；升級時整份重新產生，不要手改單一套件。importlib-metadata 與 zipp 只有 Python 3.9 需要；setuptools 釘 80.9.0 是因為更新的版本要求 Python 3.10 以上。
+altgraph==0.17.5 \
+    --hash=sha256:f3a22400bce1b0c701683820ac4f3b159cd301acab067c51c653e06961600597
+importlib-metadata==8.7.1 ; python_version < "3.10" \
+    --hash=sha256:5a1f80bf1daa489495071efbb095d75a634cf28a8bc299581244063b53176151
+packaging==26.3 \
+    --hash=sha256:d7193f7c8e4e93f444fde0262bf90af30e16fa0ad0ad44cb553c87339b23cd1c
+pefile==2024.8.26 \
+    --hash=sha256:76f8b485dcd3b1bb8166f1128d395fa3d87af26360c2358fb75b80019b957c6f
+pyinstaller==6.22.3 \
+    --hash=sha256:500bd58c7bf7e584a8435adccbd763a0b918d5c12b08d74ff50fd79b2915458b
+pyinstaller-hooks-contrib==2026.8 \
+    --hash=sha256:6d21d65323ea4467753afc21f52d7d0e69416ae8101dd88269bf273ad48db084
+pywin32-ctypes==0.2.3 \
+    --hash=sha256:8a1513379d709975552d202d942d9837758905c8d01eb82b8bcc30918929e7b8
+setuptools==80.9.0 \
+    --hash=sha256:062d34222ad13e0cc312a4c02d73f059e86a4acbfbdea8f8f76b28c99f306922
+zipp==3.23.1 ; python_version < "3.10" \
+    --hash=sha256:0b3596c50a5c700c9cb40ba8d86d9f2cc4807e9bedb06bcdf7fac85633e444dc

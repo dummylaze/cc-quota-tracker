@@ -1,0 +1,62 @@
+# 推 v* tag 時建置並發佈 Windows 版（ADR-0012）。步驟依序執行，任何一步失敗就停在那裡，發佈是最後一步。
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write  # 只為了最後一步建立 Release
+
+jobs:
+  release:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash  # bash -e：任何一行失敗就整步失敗
+    steps:
+      - name: Check out the tagged commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false  # 建置與 pip 安裝的步驟不需要帶著寫入權杖；發佈步驟自己用 GH_TOKEN
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        with:
+          python-version: '3.12'
+
+      - name: Run the full test suite
+        run: python -m unittest
+
+      - name: Check the tag matches the package version
+        id: release
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          version="$(python packaging/release_checks.py tag "$TAG")"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Install the build dependencies
+        run: python -m pip install --require-hashes -r packaging/requirements-build.txt
+
+      - name: Build both executables
+        run: python -m PyInstaller packaging/cc-quota-tracker.spec --noconfirm
+
+      - name: Smoke-test the command-line exe
+        run: python packaging/release_checks.py smoke dist/cc-quota-tracker/cc-quota-tracker-cli.exe --version
+
+      - name: Package the folder as a zip with its SHA-256
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+        run: python packaging/package_release.py dist/cc-quota-tracker "$VERSION" release
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          zip="release/cc-quota-tracker-${VERSION}-win64.zip"
+          gh release create "$TAG" "$zip" "$zip.sha256" --title "cc-quota-tracker $VERSION" \
+            --notes "SHA-256 of the zip: $(cut -d' ' -f1 "$zip.sha256")"

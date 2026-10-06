@@ -6,6 +6,7 @@ import tkinter.font as tkfont
 import unittest
 from unittest import mock
 
+from cc_quota_tracker import __version__
 from cc_quota_tracker.board import Preferences
 from cc_quota_tracker.tokens import THEMES
 from cc_quota_tracker.widget import DEFAULT_POSITION, Widget
@@ -171,7 +172,42 @@ class PreferenceTest(WidgetTestCase):
 
     def test_menu_offers_settings_and_actions(self):
         self.assertEqual(self.widget.menu_labels(),
-                         ["版面", "置頂", "模式", "語系", "主題", "透明度", "開機自動啟動", "切換帳號", "查詢額度", "自動查詢額度", "納管目前登入的帳號…", "匯入憑證檔…", "開啟資料夾", "結束"])
+                         ["版面", "置頂", "模式", "語系", "主題", "透明度", "開機自動啟動", "切換帳號", "查詢額度", "自動查詢額度", "納管目前登入的帳號…", "匯入憑證檔…", "開啟資料夾", "結束",
+                          f"cc-quota-tracker {__version__}"])
+
+
+class VersionEntryTest(WidgetTestCase):
+    """右鍵選單最底部（「結束」之下，前面隔一條分隔線）的版本項目：灰色、不能點、不分語系。"""
+
+    def last_entry(self):
+        menu = self.widget._menu
+        return menu.index("end")
+
+    def test_is_the_last_entry_below_a_separator_and_cannot_be_clicked(self):
+        menu, last = self.widget._menu, self.last_entry()
+        self.assertEqual(menu.entrycget(last, "label"), f"cc-quota-tracker {__version__}")
+        self.assertEqual(menu.entrycget(last, "state"), "disabled")
+        self.assertEqual(menu.type(last - 1), "separator")
+        self.assertEqual(menu.entrycget(last - 2, "label"), "結束")
+
+    def test_text_does_not_change_with_the_language(self):
+        self.widget.set_preference("language", "en")
+        self.assertEqual(self.widget.menu_labels()[-1], f"cc-quota-tracker {__version__}")
+        self.assertEqual(self.widget.menu_labels()[-2], "Quit")
+        self.widget.set_preference("language", "zh-TW")
+        self.assertEqual(self.widget.menu_labels()[-1], f"cc-quota-tracker {__version__}")
+
+    def test_stays_the_last_entry_and_disabled_while_the_dismiss_entry_comes_and_goes(self):
+        from tests.test_untightened import untightenable
+        with untightenable():
+            self.widget.refresh()
+        menu, last = self.widget._menu, self.last_entry()
+        self.assertEqual(menu.entrycget(last, "label"), f"cc-quota-tracker {__version__}")
+        self.assertEqual(menu.entrycget(last, "state"), "disabled")
+        self.widget.dismiss_untightened_warning()
+        last = self.last_entry()
+        self.assertEqual(menu.entrycget(last, "label"), f"cc-quota-tracker {__version__}")
+        self.assertEqual(menu.entrycget(last, "state"), "disabled")
 
 
 class AutostartTest(WidgetTestCase):
@@ -413,7 +449,8 @@ class LanguageTest(WidgetTestCase):
         self.widget.set_preference("language", "en")
         self.assertEqual(self.widget.menu_labels(),
                          ["Layout", "Always on top", "Mode", "Language", "Theme", "Opacity", "Start at login",
-                          "Switch account", "Query usage", "Auto-query usage", "Manage the signed-in account…", "Import credential file…", "Open folder", "Quit"])
+                          "Switch account", "Query usage", "Auto-query usage", "Manage the signed-in account…", "Import credential file…", "Open folder", "Quit",
+                          f"cc-quota-tracker {__version__}"])
         self.assertEqual(self.submenu_labels(0), ["Card list", "Dense table / one-line strip", "Ring gauge"])
         self.assertEqual(self.submenu_labels(2), ["Compact", "Expanded"])
         self.assertEqual(self.submenu_labels(4), ["Follow system", "Light", "Dark"])
@@ -724,11 +761,11 @@ class DismissUntightenedTest(WidgetTestCase):
         with self.untightenable():
             self.widget.refresh()
             self.widget.set_preference("language", "en")
-            self.assertEqual(self.widget.menu_labels()[-3:],
+            self.assertEqual(self.widget.menu_labels()[-4:-1],
                              ["Open folder", "Stop warning about unrestricted permissions", "Quit"])
             self.widget.dismiss_untightened_warning()
         self.widget.set_preference("language", "zh-TW")
-        self.assertEqual(self.widget.menu_labels()[-2:], ["開啟資料夾", "結束"])
+        self.assertEqual(self.widget.menu_labels()[-3:-1], ["開啟資料夾", "結束"])
 
 
 if __name__ == "__main__":

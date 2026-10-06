@@ -4,7 +4,7 @@
 
 一個 Windows 桌面懸浮小視窗，一眼看到你每個 Claude 帳號各自還剩多少額度。Claude Code 只顯示目前登入的帳號；本工具會替你納管的每個帳號保留最後一次的讀數，讓你知道這週哪個帳號還有餘裕。
 
-以原始碼部署：需要 Python 3.9 以上，沒有安裝檔。
+下載 zip、解壓縮、雙擊就能用——不需要裝 Python，也沒有安裝程式。（想改用原始碼執行，見[〈給開發者：以原始碼執行〉](#給開發者以原始碼執行)；那需要 Python 3.9 以上。）
 
 非官方工具，與 Anthropic 無關。使用風險自負，見[免責聲明](#免責聲明)。
 
@@ -28,9 +28,9 @@
 
 ## 環境需求
 
-- Windows 10 以上
-- Python 3.9 以上，且含 `tkinter`（python.org 的標準安裝程式就有）。只用標準庫，不需要 `pip install` 任何東西。
+- Windows 10 以上，64 位元
 - Claude Code，且至少登入過一次
+- 用 zip 的話不需要其他東西：它自帶 Python。只有以原始碼執行才需要 Python 3.9 以上，見[〈給開發者：以原始碼執行〉](#給開發者以原始碼執行)。
 
 ## 適用情境與已知限制
 
@@ -45,29 +45,25 @@
 
 ## 部署三步
 
-1. **放好程式。** 把這個 repo clone（或直接複製資料夾）到任一位置，再在那個資料夾裡開終端機。下面所有命令都在那個資料夾裡執行。
+1. **下載並解壓縮。** 到 [Releases 頁面](https://github.com/dummylaze/cc-quota-tracker/releases)下載 `cc-quota-tracker-<版本>-win64.zip`，解壓縮到任一位置。解開後是一個 `cc-quota-tracker` 資料夾，裡面有兩個程式：`cc-quota-tracker.exe` 是視窗（不會開出主控台視窗），`cc-quota-tracker-cli.exe` 是命令列版。資料夾請放著不要再搬，因為「開機自動啟動」會記住它的位置。第一次開啟時 Windows 會跳出警告，見[〈第一次開啟：SmartScreen 警告〉](#第一次開啟smartscreen-警告)。
+2. **納管帳號。** 每個帳號都先在 Claude Code 登入，再在那個資料夾裡開終端機（在檔案總管的網址列輸入 `cmd`），執行
 
    ```
-   git clone https://github.com/dummylaze/cc-quota-tracker.git
-   cd cc-quota-tracker
+   cc-quota-tracker-cli add <帳號標籤>
    ```
 
-2. **納管帳號。** 每個帳號都先在 Claude Code 登入，再執行
-
-   ```
-   python -m cc_quota_tracker add <帳號標籤>
-   ```
-
-   詳見〈納管帳號〉。
-3. **啟動。**
-
-   ```
-   pythonw -m cc_quota_tracker gui
-   ```
-
-   用 `pythonw` 啟動就不會出現主控台視窗。（用 `python -m cc_quota_tracker gui` 也可以，但會多開一個主控台。）
+   詳見〈納管帳號〉。本文件所有命令列都寫成 `cc-quota-tracker-cli <命令>`；在 PowerShell 裡要寫 `.\cc-quota-tracker-cli`，或把這個資料夾加進 `PATH`，就能在任何位置執行。
+3. **啟動。** 雙擊 `cc-quota-tracker.exe`。
 
 想在登入 Windows 時自動出現視窗，用右鍵選單的「開機自動啟動」（見〈視窗與選單〉）。
+
+### 第一次開啟：SmartScreen 警告
+
+這個 exe **沒有程式碼簽章**：簽章憑證每年都要付費，對這種規模的工具不划算。所以第一次開啟時，Windows SmartScreen 會顯示「Windows 已保護您的電腦」。請按「**其他資訊 → 仍要執行**」。取代簽章的做法是：每個 Release 都附上 zip 的 SHA-256，而且 zip 是由 GitHub Actions 的 workflow 從公開的原始碼建置出來的，建置紀錄公開，你可以確認手上的檔案確實是那個 workflow 建出來的（見下一節）。
+
+### 防毒軟體誤判
+
+用 PyInstaller 打包、又沒有簽章的程式，有時會被防毒軟體誤判。請比對你下載的 zip 的 SHA-256（PowerShell 執行 `Get-FileHash <zip 檔> -Algorithm SHA256`）與 Release 頁面上附的那一個；一致，就是 workflow 建出來的那個檔案。防毒軟體還是擋下來的話，請改用原始碼執行，見[〈給開發者：以原始碼執行〉](#給開發者以原始碼執行)。
 
 ## 納管帳號
 
@@ -84,7 +80,7 @@
 先在 Claude Code 登入該帳號，然後：
 
 ```
-python -m cc_quota_tracker add <帳號標籤>
+cc-quota-tracker-cli add <帳號標籤>
 ```
 
 它會把當前憑證複製進納管目錄，連同 Claude Code 的帳號資訊一起存下，並和目前登入的帳號綁定，所以當下就認得出這是哪個帳號，也之後能切換過去。對已存在的標籤再執行一次 `add` 會覆寫——已過期或已失效的憑證快照，以及舊版納管的帳號，就是這樣重新納管。
@@ -92,14 +88,15 @@ python -m cc_quota_tracker add <帳號標籤>
 其他命令：
 
 ```
-python -m cc_quota_tracker remove <帳號標籤>   # 移除監看帳號（工具自己的殘留資料一併清掉）
-python -m cc_quota_tracker list                # 用文字印出和視窗一樣的資訊；僅監看帳號會列出原因與補救指令
-python -m cc_quota_tracker query               # 請 Claude Code 查詢最新額度（見〈查詢額度〉）
-python -m cc_quota_tracker switch <帳號標籤>   # 切換到這個納管帳號（見〈切換帳號〉）
-python -m cc_quota_tracker switch --previous   # 還原上一次切換（見〈切換帳號〉）
-python -m cc_quota_tracker check               # 見〈給架設者〉
-python -m cc_quota_tracker gui                 # 開啟視窗
-python -m cc_quota_tracker --help              # 印出所有命令
+cc-quota-tracker-cli remove <帳號標籤>   # 移除監看帳號（工具自己的殘留資料一併清掉）
+cc-quota-tracker-cli list                # 用文字印出和視窗一樣的資訊；僅監看帳號會列出原因與補救指令
+cc-quota-tracker-cli query               # 請 Claude Code 查詢最新額度（見〈查詢額度〉）
+cc-quota-tracker-cli switch <帳號標籤>   # 切換到這個納管帳號（見〈切換帳號〉）
+cc-quota-tracker-cli switch --previous   # 還原上一次切換（見〈切換帳號〉）
+cc-quota-tracker-cli check               # 見〈給架設者〉
+cc-quota-tracker-cli gui                 # 開啟視窗，但會多帶一個主控台；不要主控台就雙擊 cc-quota-tracker.exe
+cc-quota-tracker-cli --version           # 印出版本
+cc-quota-tracker-cli --help              # 印出所有命令
 ```
 
 ### 2. 右鍵選單
@@ -178,8 +175,8 @@ python -m cc_quota_tracker --help              # 印出所有命令
 ### 從命令列切換
 
 ```
-python -m cc_quota_tracker switch <帳號標籤>
-python -m cc_quota_tracker switch --previous
+cc-quota-tracker-cli switch <帳號標籤>
+cc-quota-tracker-cli switch --previous
 ```
 
 兩種寫法都接受 `--yes`（放在標籤前後都可以）。
@@ -197,7 +194,7 @@ python -m cc_quota_tracker switch --previous
 | `2` | 用法錯誤，或沒帶 `--yes` 又不是在終端機裡（無法確認）；沒有寫任何檔案 |
 | `3` | 已經寫入，但驗證失敗（替新帳號查詢額度失敗），或只寫了一半（當前憑證寫了、帳號資訊沒寫成） |
 
-`switch <帳號標籤>` 驗證失敗時，訊息會附上回到切換前帳號的指令：`switch --previous --yes`；`switch --previous` 自己驗證失敗時只說明沒能確認還原有生效，不再附指令（再還原一次只會繞回剛離開的帳號）。`python -m cc_quota_tracker --help` 也列出這兩種寫法與 `--yes`。
+`switch <帳號標籤>` 驗證失敗時，訊息會附上回到切換前帳號的指令：`switch --previous --yes`；`switch --previous` 自己驗證失敗時只說明沒能確認還原有生效，不再附指令（再還原一次只會繞回剛離開的帳號）。`cc-quota-tracker-cli --help` 也列出這兩種寫法與 `--yes`。
 
 **注意：** 看板開著時你從命令列切換，兩者都能運作；工具不檢查 Claude Code 的刷新鎖檔，視窗與命令列之間也沒有加鎖，兩邊同時動手時以後寫入的為準。
 
@@ -214,12 +211,18 @@ python -m cc_quota_tracker switch --previous
 - **寫回失敗**：該帳號暫時是僅監看帳號，卡片顯示「寫回快照失敗，自動重試 n/3」；之後每輪 poll 重試一次，成功就自動恢復成納管帳號，什麼都不必做。三次都失敗就停止重試，卡片改成提示重新納管。重試的次數重新啟動後仍然記得；下一次 Claude Code 又刷新時，次數重新計算，給新的憑證一次寫回的機會。寫回失敗不會跳對話框，也不影響看板的其他部分。
 - **「已失效」**現在只在找不到同一次登入的證據時才亮——例如你對同一個帳號重新登入，新的那次登入跟快照不是同一次。它代表「這份快照已經不能用」，不是「Claude Code 輪替了憑證」；刷新造成的差異由同步補上，不算失效。標上之後一直保留到重新納管為止，即使你換到別的帳號也不會消失；重新納管之後熄滅，該帳號回到納管帳號。
 
+## 升級程式
+
+關掉視窗，把新版解壓縮到同一個資料夾，覆蓋原有的檔案。你的設定、帳號與憑證快照都不在程式資料夾裡（它們在設定檔與納管目錄），所以會沿用。工具不會自動檢查更新，因為那要連網，而本工具不發網路請求；請自己留意 [Releases 頁面](https://github.com/dummylaze/cc-quota-tracker/releases)。若某次升級需要你對帳號做什麼處理，會寫在下一節。
+
+**從原始碼版換成 exe：** 先關掉舊的視窗，再打開 `cc-quota-tracker.exe`，重新打開「開機自動啟動」。「開機自動啟動」只有一個登錄值，舊的那個是用 Python 從原始碼資料夾啟動；exe 看到它會顯示成關閉、不做遷移，在 exe 裡打開就會換成 exe 自己的。
+
 ## 從舊版升級
 
 舊版納管的憑證快照沒有帳號資訊，所以升級之後，那些帳號都是**僅監看帳號**，原因是「沒有帳號資訊」。它們的讀數與到期倒數照常顯示，只是不能切換過去。**對每一個你要切換的帳號，做一次：**
 
 1. 在 Claude Code 登入該帳號。
-2. 重新納管：在視窗按右鍵選「納管目前登入的帳號…」、輸入同一個標籤，或執行 `python -m cc_quota_tracker add <帳號標籤>`。
+2. 重新納管：在視窗按右鍵選「納管目前登入的帳號…」、輸入同一個標籤，或執行 `cc-quota-tracker-cli add <帳號標籤>`。
 
 重新納管會覆寫那份憑證快照並存下帳號資訊，之後它就是納管帳號。不打算切換過去的帳號，可以維持僅監看帳號，不必處理。其他資料——設定檔、帳號綁定、切換紀錄——可以直接沿用，不必重做。畫面上原本的「未納管帳號」現在叫「**未監看帳號**」，指的是工具完全沒在監看的帳號。
 
@@ -240,7 +243,7 @@ python -m cc_quota_tracker switch --previous
 
 - **卡片上的「更新」按鈕**：在當前憑證帳號的卡片上，緊接在「有新對話，額度尚未更新」或「讀數待更新」那行提示旁邊，三種版面都有，只在這兩種狀態才出現。查詢進行中顯示「查詢中…」；手動查詢完成後（不論成功失敗）30 秒內不能再點，避免連按；右鍵選單的項目共用這段冷卻。
 - **右鍵 →「查詢額度」**：除了查詢進行中或冷卻中，任何時候都能用，例如讀數沒有被標成落後、但你知道自己剛在別處用過這個帳號。
-- **命令列**：`python -m cc_quota_tracker query` 執行一次查詢並等它結束。成功時印出新的觀測時間、結束代碼 0；失敗時印出原因、結束代碼 1，方便腳本判斷。它沒有冷卻（和視窗是不同的行程）。讀數落後或待更新時，`list` 也會多印一行，指向 `query` 與 `/usage`。
+- **命令列**：`cc-quota-tracker-cli query` 執行一次查詢並等它結束。成功時印出新的觀測時間、結束代碼 0；失敗時印出原因、結束代碼 1，方便腳本判斷。它沒有冷卻（和視窗是不同的行程）。讀數落後或待更新時，`list` 也會多印一行，指向 `query` 與 `/usage`。
 - **自動查詢**，預設關閉。用右鍵 →「自動查詢額度」開關（重新啟動後仍保留）。開啟後，工具只在當前憑證帳號的讀數落後或待更新時才查，而且兩次查詢之間至少隔一個間隔（`providers.claude.autoUsageQueryMinutes`，預設 15 分鐘，下限 5 分鐘）。間隔從「工具上一次查詢」與「讀數的觀測時間」兩者中較晚的那個起算，所以你自己打的 `/usage` 也算一次。人離開電腦、沒有新的對話時，讀數不再落後，自動查詢最多再查一次就自己停下來；如果還有長任務、背景子代理或排程在跑，就照間隔繼續查，因為額度真的在消耗。自動查詢連續失敗 3 次就暫停，卡片上會顯示「自動查詢已暫停」與最後一次的原因，一次成功的手動更新就會恢復。單次失敗則等滿一個間隔再試。暫停狀態只存在記憶體，重新啟動工具後從頭開始。
 
 **它做了什麼。** 工具開一個 `claude` 子行程（print 模式），送出與 Claude Code 自己的用量面板相同的請求。子行程一律帶 `--settings '{"disableAllHooks":true}'`，所以你在 Claude Code 設定的 hooks（音效、備份、提醒）都不會被觸發。查詢不跑模型、不產生對話紀錄、不修改 Claude Code 的任何設定檔。通常幾秒就完成，超過 20 秒工具就放棄。只有額度快取的觀測時間真的往前走，才算成功。如果你把 Claude Code 目錄搬到別處（見〈工具到哪裡找檔案〉），子行程會被指到同一個目錄，所以它更新的正是工具在讀的那份快取。查詢時不會跳出主控台視窗，也不會搶走焦點。
@@ -273,14 +276,14 @@ python -m cc_quota_tracker switch --previous
 - **語系**：跟隨系統（預設）、正體中文、English。跟隨系統時取 Windows 的顯示語言，不是正體中文也不是英文就用英文。切換立即生效；命令列（`list`、`add`、`check` 等）也跟著同一項設定。Claude 自己回報的值（鎖定原因、本工具不認得的限額名稱）照原樣顯示，不翻譯
 - **主題**：跟隨系統（預設）、淺色、深色
 - **透明度**：100%（預設）、85%、70%
-- **開機自動啟動**（預設關）：在你的使用者登錄 `Run` 機碼寫入一個值，關閉時移除。不需要系統管理員權限，也不動其他任何東西。勾選狀態永遠以登錄的實際值為準。登錄的命令指向開啟它當下的 Python 與資料夾；搬動資料夾或換了 Python 之後，勾選會顯示成關閉，再開一次即可。
-- **納管／匯入／開啟資料夾／結束**：「開啟資料夾」下有「納管目錄」「設定目錄」兩項
+- **開機自動啟動**（預設關）：在你的使用者登錄 `Run` 機碼寫入一個值，關閉時移除。不需要系統管理員權限，也不動其他任何東西。勾選狀態永遠以登錄的實際值為準。登錄的命令是 `cc-quota-tracker.exe` 的完整路徑（以原始碼執行時：開啟它當下的 Python 與資料夾）。搬動資料夾（原始碼版：或換了 Python）之後，勾選會顯示成關閉，再開一次即可。這個值只有一個命令，所以 exe 與原始碼版不共用：誰打開開關就寫入誰自己的命令，另一邊看到的是關閉，也不做遷移。
+- **納管／匯入／開啟資料夾／結束**：「開啟資料夾」下有「納管目錄」「設定目錄」兩項。「結束」之下有一列反灰的最後一列，顯示你正在執行的版本。
 
 視窗會記住上次的位置；位置已不在任何螢幕內（例如拔掉外接螢幕）時，移回主螢幕。
 
 ## 錯誤紀錄
 
-用 `pythonw` 啟動時沒有主控台，出錯時畫面上看不到任何痕跡。每輪沒有完成時，錯誤（時間與完整 traceback）會追加寫進 `%APPDATA%\cc-quota-tracker\errors.log`，與 `settings.json` 同一個目錄，刻意不放納管目錄，因為出錯的可能正是納管目錄。要打開它：右鍵 →「開啟資料夾」→「設定目錄」。
+從 `cc-quota-tracker.exe` 啟動（以原始碼執行時用 `pythonw` 啟動）時沒有主控台，出錯時畫面上看不到任何痕跡。每輪沒有完成時，錯誤（時間與完整 traceback）會追加寫進 `%APPDATA%\cc-quota-tracker\errors.log`，與 `settings.json` 同一個目錄，刻意不放納管目錄，因為出錯的可能正是納管目錄。要打開它：右鍵 →「開啟資料夾」→「設定目錄」。
 
 寫一筆的時機：上一輪完成、這一輪沒有完成；或連續沒有完成、但錯誤內容換了。同一個錯誤連續發生只寫一次。超過 1 MB 時改名為 `errors.log.1`（取代原有的那一份）並重開 `errors.log`，所以最多留約 2 MB。紀錄本身寫不進去時，工具照常運作，不跳對話框。
 
@@ -342,16 +345,31 @@ python -m cc_quota_tracker switch --previous
 隨時可以執行檢查指令：
 
 ```
-python -m cc_quota_tracker check
+cc-quota-tracker-cli check
 ```
 
 它會驗證工具依賴的每個欄位路徑仍然存在、型別正確，列出 `utilization` 底下新出現的未知欄位，並印出實際使用的 Claude Code 目錄與納管目錄，註明各自來自設定檔、環境變數還是預設值。只印欄位名稱與型別，不印任何值。
 
 工具也會追加記錄每一次帳號切換——不論是它自己切的、還是它觀測到的（別的工具或 `/login`）；只有時間與帳號識別碼，存在納管目錄、收緊權限、不顯示在畫面上——以及自己最後一次運作的時間，供日後的報表把用量歸屬到正確的帳號。
 
+## 給開發者：以原始碼執行
+
+以原始碼執行需要 Python 3.9 以上，且含 `tkinter`（python.org 的標準安裝程式就有）。工具本身只用標準庫，不需要 `pip install` 任何東西。把 repo clone 下來，所有命令都在那個資料夾裡執行：
+
+```
+git clone https://github.com/dummylaze/cc-quota-tracker.git
+cd cc-quota-tracker
+python -m cc_quota_tracker --help
+pythonw -m cc_quota_tracker gui
+```
+
+用 `pythonw` 啟動視窗就不會出現主控台。本文件其他地方寫 `cc-quota-tracker-cli` 的地方，請改寫成 `python -m cc_quota_tracker`；工具印出的提示會依你執行的部署形式，寫出能用的那個命令。測試用 `python -m unittest` 執行。
+
+exe 是用 PyInstaller 打包的，它只有建置時才會用到，並且附 hash 鎖定在 `packaging/requirements-build.txt`（`pip install --require-hashes -r packaging/requirements-build.txt`，再執行 `python -m PyInstaller packaging/cc-quota-tracker.spec`）。版本號只有一個來源：`cc_quota_tracker/__init__.py` 的 `__version__`。推上符合它的 tag `v<版本>` 會觸發 `.github/workflows/release.yml`：跑測試、建置、發佈 zip 與它的 SHA-256；任何一步失敗就不發佈。
+
 ## 目前版本的範圍外
 
-加密憑證快照、多於一層的還原歷史、token 報表、其他供應商、macOS／Linux、打包成 exe、工具自己發出的網路請求（查詢額度是透過 Claude Code）、查詢待命帳號，以及任何以額度為觸發條件的自動化。
+加密憑證快照、多於一層的還原歷史、token 報表、其他供應商、macOS／Linux、工具自己發出的網路請求（查詢額度是透過 Claude Code）、查詢待命帳號，以及任何以額度為觸發條件的自動化。
 
 ## 免責聲明
 

@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import NamedTuple, Optional
 
-from . import COMMAND, claude_provider, i18n
+from . import COMMAND, __version__, claude_provider, i18n
 from .board import Board, SwitchOutcome
 from .claude_provider import FieldStatus, NoReading, SchemaCheck
 from .core import BindingsUnreadable, Core, InvalidLabel, NoCredential, UnknownLabel
@@ -41,6 +41,9 @@ def main(argv=None) -> int:
     command, params = (args[0], args[1:]) if args else (None, [])
     if (command, len(params)) in {("--help", 0), ("-h", 0)}:  # 使用者主動要用法：stdout、成功
         print(text(configured_language(None), "cli.usage", command=COMMAND))
+        return 0
+    if (command, len(params)) == ("--version", 0):  # 同 --help：不解析路徑，不分語系
+        print(f"cc-quota-tracker {__version__}")
         return 0
     switch_request = _switch_request(params) if command == "switch" else None
     if switch_request is not None and not (switch_request.yes or _stdin_is_terminal()):
