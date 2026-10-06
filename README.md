@@ -21,9 +21,10 @@ Unofficial; not affiliated with or endorsed by Anthropic. Use at your own risk �
 - **Compact mode**: the active account's session window and weekly window — progress bar and reading age; the reset countdown and credential expiry countdown depend on the layout (the card list shows both, the one-line strip shows the reset countdown, the ring gauge shows neither until expanded).
 - **Expanded mode**: one card per watched account, the active one highlighted; standby accounts show their last observed reading and how old it is.
 - **Query usage** (on request): when the active account's reading has fallen behind, one click asks Claude Code to look up the latest usage. See [Query usage](#query-usage).
+- **Switch account**: change to another managed account from the right-click menu or the command line, without logging in again in Claude Code; a wrong switch can be undone with *Restore previous switch*. See [Switching accounts](#switching-accounts).
 - Three layouts (card list, dense table / one-line strip, ring gauge), light / dark / follow-system theme, adjustable opacity, Traditional Chinese or English interface.
 
-**Everything comes from local files that Claude Code already maintains. By default the tool sends no requests and never changes Claude Code's settings (no statusLine, no hooks); it never writes to Claude Code's files itself. Only when you press the button, or turn on auto-query, does it ask Claude Code to look the usage up on its behalf.**
+**Everything comes from local files that Claude Code already maintains. By default the tool sends no requests and never changes Claude Code's settings (no statusLine, no hooks). Only when you press the button, or turn on auto-query, does it ask Claude Code to look the usage up on its behalf. The tool writes to Claude Code's files only when you switch accounts, and then only the current credential and the one account-info key in Claude Code's settings file; see [Switching accounts](#switching-accounts).**
 
 ## Requirements
 
@@ -72,6 +73,8 @@ To have the window start when you log into Windows, use *Start at login* in the 
 
 A watched account is one that has a **credential snapshot** in the managed directory: a copy of its login credential that this tool keeps. The snapshots live in the managed directory (`~/.claude-multi/` by default), one file per account; the file name without `.json` is the **account label** shown on screen.
 
+Watched accounts come in two kinds: a **managed account** can be switched to; a **watch-only account** can only be watched, not switched to (see [Managed and watch-only accounts](#managed-and-watch-only-accounts)).
+
 > The label is the only account name the tool ever displays. It never shows your email address. (When you manage an account, it keeps a copy of Claude Code's account info, which includes the email, next to the credential snapshot with the same restricted permissions. It is stored only, never displayed or sent anywhere.) If you pick a label that looks like an email, the tool warns you, because it will appear on screen (and in screenshots).
 
 There are three ways in:
@@ -84,14 +87,16 @@ Log in to the account in Claude Code first, then:
 python -m cc_quota_tracker add <label>
 ```
 
-This copies the current credential into the managed directory and binds it to the account currently logged in, so the account is recognised immediately. Running `add` again with an existing label overwrites it — this is how you renew a credential snapshot that is about to expire or has become invalid.
+This copies the current credential into the managed directory together with Claude Code's account info, and binds it to the account currently logged in, so the account is recognised immediately and can be switched to later. Running `add` again with an existing label overwrites it — this is how you manage again a credential snapshot that has expired or become invalid, or an account managed by an earlier version.
 
 Other commands:
 
 ```
 python -m cc_quota_tracker remove <label>   # remove a watched account (its leftover data too)
-python -m cc_quota_tracker list             # print the same information as the window, as text
+python -m cc_quota_tracker list             # print the same information as the window, as text; a watch-only account gets its reason and the remedy command
 python -m cc_quota_tracker query            # ask Claude Code for the latest usage (see "Query usage")
+python -m cc_quota_tracker switch <label>   # switch to this managed account (see "Switching accounts")
+python -m cc_quota_tracker switch --previous   # restore the previous switch (see "Switching accounts")
 python -m cc_quota_tracker check            # see "For hosts" below
 python -m cc_quota_tracker gui              # open the window
 python -m cc_quota_tracker --help           # print all commands
@@ -108,20 +113,122 @@ Right-click the window:
 
 Copy a credential file into the managed directory yourself (right-click → *Open folder* → *Managed directory* gets you there), named `<label>.json`. Renaming a file renames the account label; the identity binding is kept.
 
-**Limitation of dropping a file in (and of *Import*):** the file carries no account identifier, so the tool cannot tell which account's readings belong to it. Until that account has been your active account once and Claude Code has written a reading for it, its card shows **Reading pending** and nothing else. With `add` this does not happen, because it binds the account at the moment you run it.
+**Limitation of dropping a file in (and of *Import*):** the file carries no account identifier and no account info, so the tool cannot tell which account's readings belong to it, and cannot switch to it: it is a watch-only account, with the reason "no account info". Until that account has been your active account once and Claude Code has written a reading for it, its card shows **Reading pending** and nothing else. With `add` none of this happens, because it binds the account at the moment you run it and saves the account info too.
+
+### Managed and watch-only accounts
+
+- **Managed account**: a watched account that can be switched to. Its credential snapshot was created by `add` (or right-click → *Manage the signed-in account…*), has account info, has not expired, is not invalid, and has no write-back failure.
+- **Watch-only account**: every other watched account. Its card still shows the reading and the expiry countdown; it just cannot be switched to. The card carries a one-line reason, and in the *Switch account* submenu it cannot be selected.
+
+The reasons:
+
+| Reason | What it means |
+|---|---|
+| **No account info** | The snapshot came from an earlier version, was imported, or was dropped into the managed directory, so no account info was saved when it was managed. |
+| **Expired** | The refresh token in the snapshot is past its expiry time. One that is close to expiring but not yet expired is still a managed account; the confirmation dialog's countdown warns you. |
+| **No longer valid** | This snapshot is not from the same login as the credential Claude Code uses now — for example you logged in again to the same account. The mark stays until you manage the account again, even after you switch to another account. See [Credential sync](#credential-sync). |
+| **Write-back failed (retrying n/3) / (stopped retrying)** | The tool failed to write a refreshed credential back to the snapshot. While it is retrying it recovers by itself and you need do nothing; once it has stopped retrying, manage the account again. See [Credential sync](#credential-sync). |
+
+When several reasons apply, the card shows one, in this order: expired, no longer valid, write-back failed, no account info.
+
+**Whatever the reason, the remedy is the same: sign in to that account in Claude Code, then manage it again** — run `add <label>` with the same label, or right-click the window and choose *Manage the signed-in account…*. (Except while a write-back is still retrying: that recovers by itself.) `list` prints each watch-only account's reason and this remedy command.
 
 ### Permissions
 
-The managed directory holds long-lived credentials for every account. `add` and *Import* restrict it to your Windows user only (inheritance removed) and check the result afterwards; if the permissions were not as expected, the tool fixes them and tells you. Credential snapshots are **not encrypted** — the protection is the file permissions, so treat the directory like `~/.claude` itself.
+The managed directory holds long-lived credentials for every account. `add` and *Import* restrict it to your Windows user only (inheritance removed) and check the result afterwards; if the permissions were not as expected, the tool fixes them and tells you. Credential snapshots, account info, the pre-switch credential (see [Switching accounts](#switching-accounts)) and snapshots after a write-back all carry the same restricted permissions as when they were managed. They are **not encrypted** — the protection is the file permissions, so treat the directory like `~/.claude` itself.
 
 Some locations cannot restrict permissions at all — FAT32 and exFAT drives, common on USB sticks. If the managed directory is on one, the tool keeps working as usual and keeps warning you: a banner on the board, and a warning from `add` and *Import*. To silence the board banner, right-click → *Stop warning about unrestricted permissions*; it comes back if you switch to another managed directory, or if the permissions are once restricted successfully and later can't be again. The `add` and *Import* warnings are not affected. If you see the warning while the directory is already on NTFS, check that you are the owner of the directory.
+
+## Switching accounts
+
+Only managed accounts can be switched to (see [Managed and watch-only accounts](#managed-and-watch-only-accounts)). A switch writes the target account's credential snapshot as the **current credential**, and in Claude Code's settings file (`.claude.json`) rewrites only the account-info key (`oauthAccount`); everything else in it is left byte for byte. A Claude Code session you open afterwards uses the new account; whether a session that is already open follows is up to Claude Code and not something this tool controls. The tool does not change Claude Code's settings, register a statusLine or hooks, or make any network request.
+
+### Switching from the window
+
+1. Right-click the window and choose **Switch account**; the submenu lists the standby accounts, by account label. It is the same in all three layouts; there is deliberately no switch button on the cards, so you cannot hit one by accident.
+   - A watch-only account is greyed out and cannot be selected; its card says why.
+   - When there is no account to switch to, the submenu holds one greyed row, *(No account to switch to)*.
+   - While a usage query is running (manual or automatic) the whole submenu is greyed out until it finishes.
+2. After you pick one, a **confirmation dialog** shows which label you are switching to, the expiry countdown of its snapshot, and what the switch will do:
+   - if the current account is a watched account, its credential is synced back to its snapshot first;
+   - if the current account is an unwatched account, its credential is only saved as the pre-switch credential, and only the latest copy is kept.
+
+   When the current account's snapshot is invalid there is one more line: "The current account's snapshot is invalid; use "Restore previous switch", or sign in again in Claude Code and then re-manage it." The dialog shows no usage numbers and has no countdown delay; confirming starts the switch at once.
+3. After you confirm, a translucent layer covers the whole window until the switch has finished or clearly failed. While it is up the right-click menu does not open, you can still drag the window, and **a switch cannot be cancelled once started**. In expanded mode the layer shows the current step: syncing the current credential, querying usage for the old account (skipped when the old account's reading is not lagging or it is not bound), writing the target's credential, querying usage for the new account. Compact mode shows no steps.
+
+**Outcomes**
+
+- **Success**: no message. The first row changing to the new account and the reading updating is the feedback.
+- **Refused**: the reason is shown, no file was written, and the current credential and account info are unchanged. A switch is refused when: the label does not exist; the target is a watch-only account (including an expired one); the target is already the active account; the current account's credential could not be synced back to its snapshot before switching away; the current credential or Claude Code's settings file could not be read; the current credential or the pre-switch credential could not be written.
+- **Written, but verification failed**: the switch was written, but the usage query for the new account failed, so it could not be confirmed. A prompt asks "Restore the previous switch?"; *Yes* goes straight back to the original account (no further confirmation), *No* stays on the new one. (When a restore itself fails verification, the window only explains and does not ask whether to restore.)
+- **The query for the old account failed**: no message; the switch goes ahead.
+- **Account info not written**: the current credential was written but Claude Code's account info could not be, so the two disagree. The window shows an error; sign in again in Claude Code.
+
+Around a switch the tool queries usage once for the old account and once for the new one (still by asking Claude Code): the first makes the reading left behind on the standby account fresh, the second makes the new account's reading appear at once and confirms the switch took effect. These two queries do not start the *Update* button's cooldown, but they count toward the auto-query interval, so the total number of queries is never more than your own actions would cause. Every switch appends an entry to the switch log (see [For hosts](#for-hosts-what-the-tool-depends-on)).
+
+### Restoring the previous switch
+
+Before every switch the tool saves the current credential together with the account info as the **pre-switch credential**, in the managed directory (restricted permissions). **Only the latest one is kept**, and every switch overwrites it; it is not a credential snapshot, produces no card and does not make any account a watched account. If you were logged into an unwatched account before the switch, that is fine: after switching away you can still get back to it with the restore, without logging in again.
+
+- **Window**: the last row of the *Switch account* submenu is **Restore previous switch** (below a separator). It is greyed out when there is no pre-switch credential, when it has expired, or when the account info saved with it is empty. Choosing it first shows a confirmation dialog like any switch (with what will happen and the pre-switch credential's expiry countdown), and the layer covers the window the same way. The grey-out only reflects whether the pre-switch credential is usable; other refusals (for example the current credential cannot be read) are shown with their reason after you click.
+- **Command line**: `switch --previous`, see the next section.
+- **A restore is itself a switch**: it saves the credential in use at that moment as the new pre-switch credential, so restoring once more takes you back to the account you just left.
+- The pre-switch credential has an expiry date like a snapshot, and once expired it cannot be restored; to get back to that account, sign in to it again in Claude Code.
+
+### Switching from the command line
+
+```
+python -m cc_quota_tracker switch <label>
+python -m cc_quota_tracker switch --previous
+```
+
+Both accept `--yes` (before or after the label).
+
+- **In a terminal, without `--yes`**: it prints the same content as the confirmation dialog (target label, snapshot expiry countdown, what will happen; no usage numbers) and asks `Continue? [y/N]`. Only `y` or `yes` (any case) switches; just pressing Enter, typing anything else, EOF or Ctrl-C all count as no and print "Cancelled; nothing was switched." A request that would be refused even if confirmed (unknown label, a watch-only target, …) is refused before any question is asked.
+- **With `--yes`**: it skips the confirmation and switches straight away, so you can call it from your own scripts. That is all `--yes` is for; the tool has no automatic switching triggered by quota level.
+- **Not in a terminal and without `--yes`**: it prints the usage text to stderr and writes nothing.
+
+Exit codes:
+
+| Code | Meaning |
+|---|---|
+| `0` | Success |
+| `1` | Refused, or you answered no at the confirmation; nothing was written, the current credential and account info are unchanged |
+| `2` | Usage error, or no `--yes` and not in a terminal (cannot confirm); nothing was written |
+| `3` | Written, but verification failed (the usage query for the new account failed), or only half written (the current credential was written, the account info was not) |
+
+When `switch <label>` fails verification, the message includes the command to go back: `switch --previous --yes`; when `switch --previous` itself fails verification it only says the restore could not be confirmed, without a command (restoring again would just loop back to the account you left). `python -m cc_quota_tracker --help` lists both forms and `--yes` too.
+
+**Note:** if you switch from the command line while the board is open, both keep working; the tool does not check Claude Code's refresh lock file, and there is no lock between the window and the command line, so when both act at once the later write wins.
+
+## Credential sync
+
+**Why it is needed.** Each time Claude Code refreshes the current credential it swaps in a new refresh token and the old one stops working at once. So a credential snapshot becomes a dead file as soon as its account has been the active account and been refreshed once — earlier versions left the "invalid" warning lit permanently and still showed a valid expiry countdown on the standby account.
+
+**What it does.** After the current credential is refreshed, the tool writes the new credential back to the credential snapshot **from the same login**, so a refresh neither kills the snapshot nor marks it "no longer valid".
+
+- **How "the same login" is decided**: by the refresh token's expiry time only. If the current credential's expiry time is within 60 seconds of a snapshot's, and exactly one snapshot matches, that is taken as the same login and the current credential is written back to it. If two or more match, **none is written** — better not to write than to write to the wrong account. The tool never guesses whom the current credential belongs to from the account identifier and rewrites a snapshot on that basis.
+- **When it syncs**: only while the board is open, once per refresh round (about every 5 seconds, the poll). A refresh that happened while the board was closed is caught up in the first poll after the next start; no need to manage again. On the command line only `switch` syncs, once, before writing; `list`, `query`, `add` and `remove` do not sync (`add` overwriting an existing label is managing it again, not a sync).
+- **The written file**: an atomic write, with the same restricted permissions as when it was managed.
+- **Switching with another tool or `/login`**: the tool still detects it as a switch. The account you switched away from keeps a usable snapshot, as long as the board synced its latest credential while it was still the active account.
+- **When the write-back fails**: the account is temporarily watch-only and its card says "Couldn't write back the credential snapshot, retrying automatically n/3". It retries once per poll; on success it becomes a managed account again by itself and you need do nothing. After three failures it stops retrying and the card asks you to manage the account again. The retry count survives a restart; the next time Claude Code refreshes, the count starts over, giving the new credential a fresh chance. A failed write-back opens no dialog and does not affect the rest of the board.
+- **"No longer valid"** now lights only when no evidence of the same login can be found — for example you logged in again to the same account, and the new login is not the one the snapshot came from. It means "this snapshot can no longer be used", not "Claude Code rotated the credential"; differences caused by a refresh are filled in by the sync and are not invalidity. Once set, the mark stays until you manage the account again, even if you switch to another account; managing it again clears it and the account is a managed account again.
+
+## Upgrading from an earlier version
+
+Credential snapshots managed by an earlier version carry no account info, so after the upgrade those accounts are **watch-only accounts** with the reason "no account info". Their readings and expiry countdowns still show; they just cannot be switched to. **For each account you want to switch to, do this once:**
+
+1. Log in to that account in Claude Code.
+2. Manage it again: right-click the window → *Manage the signed-in account…* with the same label, or run `python -m cc_quota_tracker add <label>`.
+
+Managing it again overwrites the snapshot and saves the account info; from then on it is a managed account. Accounts you do not plan to switch to can stay watch-only; nothing needs doing. Your other data — settings file, account bindings, switch log — carries over as is. What the screen used to call an "unmanaged account" is now an **unwatched account**: an account the tool is not watching at all.
 
 ## Two states that are not faults
 
 | What you see | What it means |
 |---|---|
 | **Reading pending** (讀數待更新) | The active account has no reading of its own yet. Claude Code keeps only one account's reading at a time, so right after a switch the cached reading still belongs to the previous account, and the tool will not show it under the new one. It appears once Claude Code updates its cache (usually within seconds of logging in; otherwise on the next prompt or when its usage panel is open), or as soon as you press **Update** (see [Query usage](#query-usage)). |
-| **Unwatched account** (未監看帳號) | The account you are logged into has no credential snapshot here. The card tells you how to manage it. Nothing is wrong. |
+| **Unwatched account** (未監看帳號) | The account you are logged into has no credential snapshot here. The card tells you how to manage it. Nothing is wrong. When you switch away from it, its credential is saved as the pre-switch credential, so you can still come back with *Restore previous switch* (see [Switching accounts](#switching-accounts)). |
 
 Standby accounts show their **last observed** reading and how long ago that was (e.g. 3 天前). That reading is only accurate if the account has not been used since it was observed — if you used it on another machine, this machine cannot see that. Standby readings are never flagged as out of date just for being old. For the active account, an old reading is not flagged either unless there has been new conversation activity on this machine since the reading ("New activity; usage not updated"). If a reading was already flagged that way when you switched away from the account, its standby card keeps saying **Lagging before the switch** until a new reading for that account appears.
 
@@ -151,7 +258,9 @@ Every number comes from Claude Code's usage cache, and Claude Code only updates 
 
 ## Credentials expire
 
-A credential snapshot's refresh token lives about 30 days. Each card shows the time left; when less than `expiryWarningDays` (default 7) remain, it warns you. To renew (the card just says "renew it"): log in to that account again in Claude Code, then either right-click the window and choose *Manage the signed-in account…* with the same label, or run `add <label>` again. A card that says the credential snapshot is invalid means Claude Code rotated the token; renew it the same way. Logging in again to an account you already manage shows the same warning on the board, and managing it again clears it. The tool never rewrites a credential snapshot on its own.
+A credential snapshot's refresh token lives about 30 days, and a refresh does not extend it. Each card shows the time left; when less than `expiryWarningDays` (default 7) remain, it warns you, but the account can still be switched to. Once it has expired the account is a watch-only account (reason "expired") and can no longer be switched to. To renew: log in to that account again in Claude Code, then either right-click the window and choose *Manage the signed-in account…* with the same label, or run `add <label>` again.
+
+A card that says "no longer valid" is not about age: it means the snapshot is not from the same login as the credential Claude Code uses now (for example you logged in again to the same account); manage it again the same way to recover. A refresh by Claude Code does not make a snapshot invalid, because the tool writes the new credential back to it; see [Credential sync](#credential-sync). Apart from that sync, and from managing an account again, the tool never rewrites a credential snapshot.
 
 ## Window and menu
 
@@ -159,6 +268,7 @@ Drag anywhere to move; double-click to switch between compact and expanded. Righ
 
 - **Layout**: card list (default) / dense table and one-line strip / ring gauge
 - **Query usage** and **Auto-query usage** (default off): see [Query usage](#query-usage)
+- **Switch account**: a submenu listing the standby accounts, with *Restore previous switch* as its last row: see [Switching accounts](#switching-accounts)
 - **Always on top** (default on), **Mode** (compact / expanded)
 - **Language**: follow system (default), 正體中文, English. Follow system uses the Windows display language and falls back to English when it is neither Traditional Chinese nor English. Switching takes effect at once; the command line (`list`, `add`, `check`, …) follows the same setting. Values Claude reports itself (a lock reason, the name of a limit this tool doesn't recognise) are shown as reported, not translated
 - **Theme**: follow system (default), light, dark
@@ -215,7 +325,7 @@ Progress bar colours follow the severity Claude itself reports (`normal` / `warn
 
 With 1 or 2, both `.claude.json` and `.credentials.json` are looked for **inside** that directory, not next to it. (This is different from the default, where `.claude.json` sits in your home directory and the credential in `~/.claude/`.)
 
-**Managed directory**: `managedDir` in the settings file, otherwise `~/.claude-multi/`. It may be on another drive. It must not be inside the Claude Code directory, because the tool never writes there.
+**Managed directory**: `managedDir` in the settings file, otherwise `~/.claude-multi/`. It may be on another drive. It must not be inside the Claude Code directory, because the tool writes there only the current credential and the account info when you switch, and nothing else.
 
 A path field that is filled in must be an **absolute path to an existing directory**. If it is not, the tool **stops with an error naming the field** rather than falling back — falling back would silently read a different set of accounts while everything looked normal. Relative paths are rejected because they would resolve against a different working directory when started at login.
 
@@ -225,7 +335,7 @@ If none of the three levels is set and `~/.claude.json` cannot be found, the win
 
 ## For hosts: what the tool depends on
 
-All usage numbers come from the `cachedUsageUtilization` field in Claude Code's `.claude.json`. **This is an internal, undocumented field. Claude Code makes no compatibility promise about it, and a Claude Code update can change or remove it.**
+All usage numbers come from the `cachedUsageUtilization` field in Claude Code's `.claude.json`. **This is an internal, undocumented field. Claude Code makes no compatibility promise about it, and a Claude Code update can change or remove it.** Switching accounts also depends on two more things: `oauthAccount` (the account info) in `.claude.json` and `.credentials.json` (the current credential); the same lack of compatibility promise applies, and `check` verifies the former.
 
 The tool tolerates the expected kinds of trouble: a file caught mid-write (it keeps the last value quietly), a missing field (shown as "no reading yet", not an error), and unknown limit types (shown under their original names as "other limits"). If the structure genuinely changes, a banner appears — only after the problem persists for 3 consecutive polls — together with the last successful reading and its time, instead of a wall of 0%. A different banner, "Board stopped updating", means the tool itself could not finish a poll for about a minute (12 polls in a row): the board stays on the last successful reading, shown with its time, and the banner clears as soon as a poll succeeds again.
 
@@ -237,11 +347,11 @@ python -m cc_quota_tracker check
 
 It verifies that every field path the tool relies on still exists with the expected type, lists new unknown fields under `utilization`, and prints the Claude Code directory and managed directory actually in use, saying whether each came from the settings file, the environment variable, or the default. It prints field names and types only, never values.
 
-The tool also appends a log of every account switch it observes (time and account identifier only, kept in the managed directory with restricted permissions and never shown on screen) and the time it last ran, so that future reporting can attribute usage to the right account.
+The tool also appends a log of every account switch — whether it made the switch itself or observed one made by another tool or `/login` (time and account identifier only, kept in the managed directory with restricted permissions and never shown on screen) — and the time it last ran, so that future reporting can attribute usage to the right account.
 
 ## Out of scope for this version
 
-Switching accounts from inside the tool, encrypting credential snapshots, token reports, other providers, macOS / Linux, packaging as an exe, network requests made by the tool itself (Query usage goes through Claude Code), querying standby accounts, and any automation triggered by quota level.
+Encrypting credential snapshots, a restore history deeper than one step, token reports, other providers, macOS / Linux, packaging as an exe, network requests made by the tool itself (Query usage goes through Claude Code), querying standby accounts, and any automation triggered by quota level.
 
 ## Disclaimer
 
@@ -251,7 +361,7 @@ cc-quota-tracker is an independent, unofficial tool. It is not affiliated with, 
 
 In particular:
 
-- The tool reads files that Claude Code keeps on your computer, including credentials, and keeps copies of them (credential snapshots) unencrypted in the managed directory. The tool itself makes no network requests and has no server: your credentials and readings stay on your computer and are never sent to the authors or anyone else. (Query usage is the one exception that reaches the network, and it does so through Claude Code; see below.) Protecting the managed directory is up to you; see [Permissions](#permissions).
+- The tool reads files that Claude Code keeps on your computer, including credentials, and keeps copies of them (credential snapshots) unencrypted in the managed directory. When you switch accounts it rewrites Claude Code's current credential and account info; if that rewrite goes wrong, Claude Code may need you to sign in again. The tool itself makes no network requests and has no server: your credentials and readings stay on your computer and are never sent to the authors or anyone else. (Query usage is the one exception that reaches the network, and it does so through Claude Code; see below.) Protecting the managed directory is up to you; see [Permissions](#permissions).
 - Query usage asks Claude Code to send a request to the same endpoint as `/usage`. Asking too often can get you rate-limited; see [Query usage](#query-usage).
 - The tool depends on parts of Claude Code that are not documented and can change at any time; see [For hosts](#for-hosts-what-the-tool-depends-on). A reading shown by the tool may be out of date or wrong. Check `/usage` in Claude Code before relying on it.
 
