@@ -2,8 +2,8 @@
 from datetime import datetime, timedelta
 from typing import Optional
 
-from .board import (WRITEBACK_ATTEMPTS, Board, CountdownFormat, Money, Role, SwitchRefusal, SwitchResult, SwitchStep,
-                    WatchOnlyReason)
+from .board import (WRITEBACK_ATTEMPTS, Board, CountdownFormat, Money, QueryFailure, Role, SwitchRefusal, SwitchResult,
+                    SwitchStep, UsageQueryResult, WatchOnlyReason)
 from .i18n import text
 
 
@@ -51,6 +51,34 @@ def switch_confirmation(board: Board, label: str, lang: str) -> str:
     return "\n\n".join(paragraphs)
 
 
+def restore_confirmation(board: Board, lang: str) -> str:
+    """還原前要使用者確認的內容，段落以空行隔開：一句問題、一句後果說明、切換前憑證的到期倒數（沒寫到期時間就沒有這一段）。
+    還原回去的帳號可能是未監看帳號、沒有標籤可寫，所以不寫帳號；不帶任何額度數字。"""
+    assert board.as_of is not None  # 核心的看板一定帶這一輪的時間
+    paragraphs = [text(lang, "dialog.restore_confirm"), text(lang, "dialog.restore_consequence")]
+    if board.previous_expires_at is not None:
+        paragraphs.append(text(lang, "dialog.restore_expires_in",
+                               left=countdown(board.previous_expires_at - board.as_of, board.countdown_format, lang),
+                               when=absolute(board.previous_expires_at, board.as_of)))
+    return "\n\n".join(paragraphs)
+
+
+_QUERY_REASONS = {
+    QueryFailure.COMMAND_NOT_FOUND: "query.reason.command_not_found",
+    QueryFailure.TIMEOUT: "query.reason.timeout",
+    QueryFailure.NOT_WRITTEN: "query.reason.not_written",
+}
+
+
+def query_reason(result: UsageQueryResult, lang: str) -> str:
+    """查詢額度失敗的原因字樣：命令列的 `query` 與切換的驗證失敗（命令列與視窗）共用。"""
+    assert result.failure is not None
+    if result.failure is QueryFailure.REPORTED_ERROR:  # Claude Code 的原始訊息，不翻譯
+        return (text(lang, "query.reason.reported_error", message=result.message) if result.message
+                else text(lang, "query.reason.reported_error_no_message"))
+    return text(lang, _QUERY_REASONS[result.failure])
+
+
 _SWITCH_REFUSALS = {
     SwitchRefusal.ALREADY_ACTIVE: "switch.refused.already_active",
     SwitchRefusal.SYNC_FAILED: "switch.refused.sync_failed",
@@ -76,8 +104,11 @@ _SWITCH_STEPS = {SwitchStep.SYNC: "switch.step.sync", SwitchStep.QUERY_OLD: "swi
                  SwitchStep.WRITE: "switch.step.write", SwitchStep.QUERY_NEW: "switch.step.query_new"}
 
 
-def switch_step(step: SwitchStep, label: str, lang: str) -> str:
-    """切換中的圖層顯示的步驟；label 是切換的目標帳號標籤，只有寫入那一步用到。"""
+def switch_step(step: SwitchStep, label: Optional[str], lang: str) -> str:
+    """切換中的圖層顯示的步驟；label 是切換的目標帳號標籤，只有寫入那一步用到。還原沒有目標標籤（label 是 None），
+    寫入那一步改寫「切換前的憑證」。"""
+    if step is SwitchStep.WRITE and label is None:
+        return text(lang, "switch.step.write_previous")
     return text(lang, _SWITCH_STEPS[step], label=label)
 
 

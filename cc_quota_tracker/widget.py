@@ -25,7 +25,7 @@ from .layout_a import LayoutA
 from .layout_b import LayoutB
 from .layout_c import LayoutC
 from .managed_directory import ManagedDirectory
-from .fmt import account_label, switch_confirmation, switch_refusal, switch_step
+from .fmt import account_label, query_reason, restore_confirmation, switch_confirmation, switch_refusal, switch_step
 from .i18n import text
 from .render_text import add_warning
 from .claude_provider import AUTO_QUERY_FIELD, PROVIDER
@@ -124,10 +124,10 @@ class Widget:
         # 背景執行緒留下的結果（核心的結果值，或丟出的例外），主執行緒收走
         self._switch_outcome: Union[SwitchResult, Exception, None] = None
         self._switch_after = None
-        self._switch_label: Optional[str] = None  # 切換的目標帳號標籤：圖層的寫入步驟要寫出來
+        self._switch_label: Optional[str] = None  # 切換的目標帳號標籤：圖層的寫入步驟要寫出來；None 表示在還原上一次切換
         self._switch_step: Optional[SwitchStep] = None  # 背景執行緒回報的最新步驟，主執行緒讀走；None 表示還沒回報
         self._shown_step: Optional[SwitchStep] = None  # 圖層目前畫出來的步驟，與上一行不同就重畫
-        self._switch_rows = None  # 子選單目前列出的內容（語系，各列的標籤與可不可選）；沒變就不碰選單
+        self._switch_rows = None  # 子選單目前列出的內容（語系，各列的標籤與可不可選，能不能還原）；沒變就不碰選單
         root.overrideredirect(True)
         root.configure(bg=TRANSPARENT_KEY)
         try:
@@ -266,10 +266,12 @@ class Widget:
     def _sync_switch_menu(self):
         """「切換帳號」子選單依看板：待命帳號依帳號鍵的順序以標籤列出，僅監看帳號反灰；沒有任何可選的帳號時多放一列
         反灰的說明。查詢進行中或正在切換時，整個子選單反灰（核心的切換不檢查進行中的查詢，同時會有兩個 claude 子行程）。
+        最後一列固定是「還原上一次切換」，沒有可還原的切換前憑證、或它已過期（看板的 restorable）時反灰。
         內容與狀態都沒變就不碰選單（理由同 _sync_query_menu）。"""
         board = self._board
         standby = board.cards[1:] if board is not None else ()
-        rows = (self._lang, tuple((account_label(c.account_key), c.switchable) for c in standby))
+        restorable = board is not None and board.restorable
+        rows = (self._lang, tuple((account_label(c.account_key), c.switchable) for c in standby), restorable)
         if rows != self._switch_rows:
             self._switch_rows = rows
             menu = self._switch_menu
@@ -279,6 +281,9 @@ class Widget:
                                  command=lambda label=label: self.switch_to(label))
             if not any(switchable for _, switchable in rows[1]):
                 menu.add_command(label=text(self._lang, "menu.switch_none"), state="disabled")
+            menu.add_separator()
+            menu.add_command(label=text(self._lang, "menu.restore"), state="normal" if restorable else "disabled",
+                             command=self.restore_previous)
         busy = self.switching or board is not None and board.usage_query.in_progress
         if (self._menu.entrycget(self._switch_index, "state") == "disabled") != busy:
             self._menu.entryconfigure(self._switch_index, state="disabled" if busy else "normal")
@@ -293,10 +298,26 @@ class Widget:
         if not messagebox.askyesno(text(lang, "dialog.switch_title"), switch_confirmation(board, label, lang),
                                    parent=self.root):
             return
-        # 對話框開著時 Tk 照常跑排程：這段時間可能已有查詢（自動查詢）啟動，確認之後要再驗一次
+        self._start_switch(label)
+
+    def restore_previous(self):
+        """子選單的「還原上一次切換」：跟一般切換一樣要確認、在背景執行、蓋上圖層。確認的內容取自最近一輪的看板
+        （切換前憑證的到期時間）；能不能還原由核心重新判斷，被拒絕（看板過期等）會顯示原因。"""
+        board = self._board
+        if self.switching or board is None or board.usage_query.in_progress:
+            return
+        lang = self._lang
+        if not messagebox.askyesno(text(lang, "dialog.switch_title"), restore_confirmation(board, lang),
+                                   parent=self.root):
+            return
+        self._start_switch(None)
+
+    def _start_switch(self, label: Optional[str]) -> bool:
+        """確認之後開始背景的切換（label 是 None 就是還原上一次切換）。對話框開著時 Tk 照常跑排程：這段時間可能已有
+        查詢（自動查詢）啟動，所以這裡再驗一次，已在切換或在查就什麼都不做、回傳 False。"""
         latest = self._board
         if self.switching or latest is None or latest.usage_query.in_progress:
-            return
+            return False
         self._switch_outcome = None
         self._switch_label, self._switch_step = label, None
         self._switch_thread = threading.Thread(target=self._run_switch, args=(label,), daemon=True)
@@ -305,12 +326,14 @@ class Widget:
         self._sync_switch_menu()
         self._sync_query_menu()
         self._switch_after = self.root.after(SWITCH_CHECK_MS, self._check_switch, label)
+        return True
 
-    def _run_switch(self, label: str):
+    def _run_switch(self, label: Optional[str]):
         """背景執行緒：不碰 Tk，結果與目前的步驟留給主執行緒收。核心不是執行緒安全的，切換期間 refresh 不 poll、
         query_usage 不啟動查詢；右鍵選單在切換中打不開，納管、匯入等入口的守衛只剩保險。"""
         try:
-            self._switch_outcome = self._core.switch(label, on_step=self._report_step)
+            self._switch_outcome = (self._core.switch(label, on_step=self._report_step) if label is not None
+                                    else self._core.restore_previous(on_step=self._report_step))
         except Exception as e:  # 沒人看得到背景執行緒的例外：交給主執行緒告訴使用者
             self._switch_outcome = e
 
@@ -333,7 +356,7 @@ class Widget:
         shown = switch_step(step, self._switch_label, self._lang) if expanded and step is not None else None
         self._overlay.show(self._theme(self._prefs or Preferences()), shown)
 
-    def _check_switch(self, label: str):
+    def _check_switch(self, label: Optional[str]):
         assert self._switch_thread is not None
         if self._switch_thread.is_alive():
             if self._switch_step is not self._shown_step:
@@ -351,10 +374,31 @@ class Widget:
         elif outcome.outcome is SwitchOutcome.REFUSED:
             message = switch_refusal(outcome, label, lang)
         elif outcome.outcome is SwitchOutcome.WRITE_FAILED:
-            message = text(lang, "switch.write_failed", label=label)
+            message = text(lang, "switch.restore_write_failed" if label is None else "switch.write_failed", label=label)
+        elif outcome.outcome is SwitchOutcome.VERIFY_FAILED:
+            assert outcome.verify_failure is not None  # 驗證失敗一定帶查詢的失敗結果
+            reason = query_reason(outcome.verify_failure, lang)
+            if label is None:  # 還原自己驗證失敗：再問一次「要還原嗎」只會繞回剛離開的帳號，只說明
+                message = text(lang, "switch.restore_verify_failed", reason=reason)
+            else:
+                message = text(lang, "dialog.verify_failed", label=label, reason=reason)
+                if self._board is not None and self._board.restorable:  # 還原不了的話，問了也只會得到拒絕
+                    self._offer_restore(message)
+                    return
         else:
-            return  # 成功不提示；驗證失敗的提示由還原那一票處理，舊帳號查詢失敗不提示
+            return  # 成功不提示；舊帳號查詢失敗不提示
         messagebox.showerror(_TITLE, message, parent=self.root)
+
+    def _offer_restore(self, message: str):
+        """驗證失敗的提示：說明之後問要不要還原上一次切換。「是」就是在回答「要不要還原」，不再跳確認對話框。
+        問的時候對話框是模態的、Tk 的排程照跑，人離開座位久了自動查詢可能已啟動：還原被守衛擋下時要說出來，
+        不能讓按了「是」的人以為已經還原。"""
+        lang = self._lang
+        question = text(lang, "dialog.verify_failed_ask")
+        if not messagebox.askyesno(text(lang, "dialog.switch_title"), f"{message}\n\n{question}", parent=self.root):
+            return
+        if not self._start_switch(None):
+            messagebox.showerror(_TITLE, text(lang, "dialog.restore_busy"), parent=self.root)
 
     def _toggle_auto_query(self):
         """右鍵選單的「自動查詢額度」：寫回 providers.claude.autoUsageQuery 並立刻 poll，核心讀到新值，下一輪起生效。

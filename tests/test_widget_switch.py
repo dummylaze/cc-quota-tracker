@@ -55,11 +55,18 @@ class WidgetSwitchTestCase(SwitchTestCase, WidgetTestCase):
     def submenu(self, label=TITLE):
         return self.root.nametowidget(self.widget._menu.entrycget(self.menu_index(label), "menu"))
 
-    def rows(self, label=TITLE):
-        """子選單的每一列：(標籤, 可不可點)。"""
+    def all_rows(self, label=TITLE):
+        """子選單的每一列：(標籤, 可不可點)；分隔線不算。"""
         sub = self.submenu(label)
         return [(sub.entrycget(i, "label"), sub.entrycget(i, "state") != "disabled")
                 for i in range(sub.index("end") + 1) if sub.type(i) != "separator"]
+
+    def rows(self, label=TITLE):
+        """子選單裡的帳號列（含占位列）：最後一列的「還原上一次切換」另由 restore_row 看。"""
+        return self.all_rows(label)[:-1]
+
+    def restore_row(self, label=TITLE):
+        return self.all_rows(label)[-1]
 
     def choose(self, label, submenu=TITLE):
         sub = self.submenu(submenu)

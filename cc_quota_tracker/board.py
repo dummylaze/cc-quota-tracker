@@ -220,7 +220,9 @@ class Board:
     settings_unreadable：設定檔不是合法的 JSON 物件；本工具不覆寫它，等使用者修好。
     as_of：這一輪的時間，畫面層以它算倒數。countdown_format：設定檔目前的倒數格式。
     preferences：設定檔目前的偏好。invalid_settings：值不合法、改用預設的設定檔欄位名稱，依名稱排序。
-    usage_query：查詢額度的狀態。permissions_untightened：這一輪有納管目錄的權限收緊後查回仍未收緊，且使用者沒有關掉這個告警（ADR-0008）。"""
+    usage_query：查詢額度的狀態。permissions_untightened：這一輪有納管目錄的權限收緊後查回仍未收緊，且使用者沒有關掉這個告警（ADR-0008）。
+    restorable：現在能不能還原上一次切換（有可用的切換前憑證、沒過期、讀得到）；previous_expires_at：切換前憑證的
+    refreshToken 到期時間，沒有切換前憑證或沒寫到期時間為 None。"""
     cards: Tuple[Card, ...]
     schema_changed: bool = False
     last_reading_at: Optional[datetime] = None
@@ -234,3 +236,5 @@ class Board:
     invalid_settings: Tuple[str, ...] = ()
     usage_query: QueryStatus = QueryStatus()
     permissions_untightened: bool = False
+    restorable: bool = False
+    previous_expires_at: Optional[datetime] = None

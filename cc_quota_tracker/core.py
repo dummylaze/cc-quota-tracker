@@ -119,6 +119,7 @@ class Core:
         if auto_query:
             self._maybe_auto_query(cards[0])  # 在建看板之前：這一輪啟動的查詢，這一輪的看板就顯示進行中
         self._managed.end_round()
+        previous_refusal, previous_expires_at = self._previous_switch()
         return Board(cards=cards,
                      schema_changed=self._mismatch_rounds >= SCHEMA_CHANGE_ROUNDS,
                      last_reading_at=reading.observed_at if reading else None,
@@ -128,7 +129,8 @@ class Core:
                      settings_unreadable=self._settings_unreadable,
                      as_of=self._clock(), countdown_format=self._countdown_format,
                      preferences=self._preferences, invalid_settings=self._invalid_settings,
-                     usage_query=self._query_status(), permissions_untightened=self._managed.untightened_warning_lit())
+                     usage_query=self._query_status(), permissions_untightened=self._managed.untightened_warning_lit(),
+                     restorable=previous_refusal is None, previous_expires_at=previous_expires_at)
 
     def dismiss_untightened_warning(self) -> None:
         """使用者從右鍵選單關掉看板的「未收緊」告警（ADR-0008）；下一輪 poll 起看板不再帶這個狀態。"""
@@ -329,19 +331,25 @@ class Core:
         return None
 
     def _restore_refusal(self, board: Board) -> Optional[SwitchResult]:
-        """檢查切換前憑證；能還原回傳 None。到期的判法同憑證快照：沒寫到期時間不算過期。"""
+        """檢查切換前憑證；能還原回傳 None。"""
+        refusal, _ = self._previous_switch()
+        return None if refusal is None else SwitchResult(SwitchOutcome.REFUSED, refusal)
+
+    def _previous_switch(self) -> Tuple[Optional[SwitchRefusal], Optional[datetime]]:
+        """切換前憑證的狀態（只讀）：不能還原的原因（能還原是 None），以及它的 refreshToken 到期時間。
+        到期的判法同憑證快照：沒寫到期時間不算過期。看板的「能不能還原」與還原的拒絕檢查共用這一份。"""
         try:
             target = self._managed.pre_switch_target()
         except OSError:
-            return SwitchResult(SwitchOutcome.REFUSED, SwitchRefusal.UNREADABLE)
+            return SwitchRefusal.UNREADABLE, None
         store = BytesCredentialStore(target[0]) if target else None
         if store is None or store.fingerprint() is None:
-            return SwitchResult(SwitchOutcome.REFUSED, SwitchRefusal.NO_PREVIOUS)
+            return SwitchRefusal.NO_PREVIOUS, None
         credential = store.read()
         expires = credential.refresh_token_expires_at if credential else None
         if expires is not None and expires <= self._clock():
-            return SwitchResult(SwitchOutcome.REFUSED, SwitchRefusal.PREVIOUS_EXPIRED)
-        return None
+            return SwitchRefusal.PREVIOUS_EXPIRED, expires
+        return None, expires
 
     def _prepare_switch(self, load_target: Callable[[], Optional[Tuple[bytes, dict]]]
                         ) -> Union[_SwitchInputs, SwitchRefusal]:

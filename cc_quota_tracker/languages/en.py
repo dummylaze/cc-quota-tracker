@@ -168,6 +168,7 @@ STRINGS = {
     "menu.quit": "Quit",
     "menu.switch": "Switch account",
     "menu.switch_none": "(No account to switch to)",
+    "menu.restore": "Restore previous switch",
     "layout.cards": "Card list",
     "layout.table": "Dense table / one-line strip",
     "layout.ring": "Ring gauge",
@@ -186,6 +187,15 @@ STRINGS = {
     "dialog.switch_invalid": "The current account's snapshot is invalid; use \"Restore previous switch\", or sign in "
                              "again in Claude Code and then re-manage it.",
     "dialog.switch_failed": "The switch hit an error and did not complete: {error}",
+    "dialog.restore_confirm": "Restore the previous switch?",
+    "dialog.restore_consequence": "The pre-switch credential and account info are written back; the current credential "
+                                  "is saved as the new pre-switch credential, so you can restore back again.",
+    "dialog.restore_expires_in": "Pre-switch credential expires in {left} ({when})",
+    "dialog.verify_failed": "Switched to \"{label}\", but the usage query for it failed, so the switch couldn't be "
+                            "confirmed: {reason}",
+    "dialog.verify_failed_ask": "Restore the previous switch?",
+    "dialog.restore_busy": "A usage query is running, so nothing was restored; choose \"Restore previous switch\" from "
+                           "the menu once it finishes.",
     "dialog.label_prompt": "Account label (shown on screen, and also the credential snapshot's file name):",
     "dialog.import_title": "Import credential file",
     "dialog.all_files": "All files",
@@ -232,6 +242,7 @@ STRINGS = {
     "switch.step.sync": "Syncing the current credential…",
     "switch.step.query_old": "Querying usage for the old account…",
     "switch.step.write": "Writing the credential of \"{label}\"…",
+    "switch.step.write_previous": "Writing the pre-switch credential…",
     "switch.step.query_new": "Querying usage for the new account…",
     "switch.refused.watch_only": "\"{label}\" is a watch-only account ({reason}) and can't be switched to: sign in to "
                                  "this account in Claude Code, then manage it again",

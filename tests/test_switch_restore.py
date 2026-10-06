@@ -151,3 +151,49 @@ class RestoreRefusalTest(SwitchTestCase):
         steps = []
         self.core.restore_previous(on_step=steps.append)
         self.assertEqual(steps, [])
+
+
+class RestorableOnBoardTest(SwitchTestCase):
+    """看板帶「現在能不能還原」與切換前憑證的到期時間：視窗的「還原上一次切換」列依它反灰，確認對話框也用它；
+    探測只讀、不寫任何檔。"""
+
+    def test_nothing_to_restore_before_any_switch(self):
+        board = self.core.poll()
+        self.assertEqual((board.restorable, board.previous_expires_at), (False, None))
+
+    def test_restorable_after_a_switch_with_the_expiry_of_the_pre_switch_credential(self):
+        self.core.switch("home")
+        board = self.core.poll()
+        self.assertEqual((board.restorable, board.previous_expires_at), (True, WORK))  # 切換前是 work 那一次登入
+
+    def test_not_restorable_once_the_pre_switch_credential_has_expired(self):
+        self.core.switch("home")
+        self.clock.now = WORK + timedelta(seconds=1)
+        self.assertFalse(self.core.poll().restorable)
+
+    def test_the_pre_switch_credential_expires_exactly_at_its_expiry_time(self):
+        self.core.switch("home")
+        self.clock.now = WORK  # 與核心的拒絕檢查同一條邊界：到期的那一刻就算過期
+        self.assertFalse(self.core.poll().restorable)
+        self.assertEqual(self.core.restore_previous().refusal, SwitchRefusal.PREVIOUS_EXPIRED)
+
+    def test_not_restorable_when_the_pre_switch_account_info_was_empty_or_the_file_is_garbage(self):
+        self.core.switch("home")
+        saved = json.loads(self.pre_switch().read_text(encoding="utf-8"))
+        self.pre_switch().write_text(json.dumps({**saved, "accountInfo": None}), encoding="utf-8")
+        self.assertFalse(self.core.poll().restorable)
+        self.pre_switch().write_text("{not json", encoding="utf-8")
+        self.assertFalse(self.core.poll().restorable)
+
+    def test_probing_writes_nothing(self):
+        self.core.switch("home")
+        before, state = self.untouched(), self.pre_switch().read_bytes()
+        self.core.poll()
+        self.assertEqual(self.untouched(), before)
+        self.assertEqual(self.pre_switch().read_bytes(), state)
+
+    def test_a_restore_keeps_it_restorable_back_to_where_it_came_from(self):
+        self.core.switch("home")
+        self.core.restore_previous()
+        board = self.core.poll()
+        self.assertEqual((board.restorable, board.previous_expires_at), (True, HOME))
