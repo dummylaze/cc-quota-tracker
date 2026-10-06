@@ -6,10 +6,10 @@ from pathlib import Path
 from typing import Optional
 
 from . import COMMAND, claude_provider, i18n
-from .board import QueryFailure, SwitchOutcome, SwitchRefusal, UsageQueryResult
+from .board import QueryFailure, SwitchOutcome, UsageQueryResult
 from .claude_provider import FieldStatus, NoReading, SchemaCheck
 from .core import BindingsUnreadable, Core, InvalidLabel, NoCredential, UnknownLabel
-from .fmt import date_time, watch_only_reason
+from .fmt import date_time, switch_refusal
 from .i18n import text
 from .managed_directory import ManagedDirectory, PermissionState
 from .render_text import add_warning, render
@@ -134,14 +134,6 @@ def _switch_label(params) -> Optional[str]:
     return None if label == "--yes" else label
 
 
-_SWITCH_REFUSALS = {
-    SwitchRefusal.ALREADY_ACTIVE: "switch.refused.already_active",
-    SwitchRefusal.SYNC_FAILED: "switch.refused.sync_failed",
-    SwitchRefusal.UNREADABLE: "switch.refused.unreadable",
-    SwitchRefusal.UNWRITABLE: "switch.refused.unwritable",
-}
-
-
 def switch(core: Core, label: str, lang: str) -> int:
     """切換到帳號標籤 label：成功結束代碼 0；拒絕（沒寫任何檔）印原因、1；已寫入但驗證失敗或寫了一半 3。
     切換前替舊帳號的查詢失敗不另外提示。"""
@@ -157,15 +149,7 @@ def switch(core: Core, label: str, lang: str) -> int:
     if result.outcome is SwitchOutcome.WRITE_FAILED:
         print(text(lang, "switch.write_failed", label=label), file=sys.stderr)
         return 3
-    assert result.refusal is not None  # 拒絕一定帶原因
-    if result.refusal is SwitchRefusal.UNKNOWN_LABEL:
-        message = text(lang, "error.unknown_label", label=label)
-    elif result.watch_only_reason is not None:
-        reason = watch_only_reason(result.watch_only_reason, lang, result.writeback_failures)
-        message = text(lang, "switch.refused.watch_only", label=label, reason=reason)
-    else:
-        message = text(lang, _SWITCH_REFUSALS[result.refusal], label=label)
-    print(message, file=sys.stderr)
+    print(switch_refusal(result, label, lang), file=sys.stderr)
     return 1
 
 

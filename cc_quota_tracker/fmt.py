@@ -2,7 +2,8 @@
 from datetime import datetime, timedelta
 from typing import Optional
 
-from .board import WRITEBACK_ATTEMPTS, CountdownFormat, Money, WatchOnlyReason
+from .board import (WRITEBACK_ATTEMPTS, Board, CountdownFormat, Money, Role, SwitchRefusal, SwitchResult,
+                    WatchOnlyReason)
 from .i18n import text
 
 
@@ -29,6 +30,44 @@ def snapshot_expiry(expires: datetime, now: datetime, fmt: CountdownFormat, lang
 def account_label(account_key: str) -> str:
     """畫面上只顯示帳號標籤：帳號鍵是「供應商:帳號標籤」。"""
     return account_key.split(":", 1)[1]
+
+
+def switch_confirmation(board: Board, label: str, lang: str) -> str:
+    """切換前要使用者確認的內容，段落以空行隔開：目標標籤、目標憑證快照的到期倒數、後果說明（當前憑證帳號是監看帳號
+    或未監看帳號），當前憑證帳號的快照已失效時多一段。只依看板的帳號狀態，不帶任何額度數字。"""
+    assert board.as_of is not None  # 核心的看板一定帶這一輪的時間
+    paragraphs = [text(lang, "dialog.switch_confirm", label=label)]
+    target = next((c for c in board.cards if c.account_key and account_label(c.account_key) == label), None)
+    if target is not None and target.snapshot_expires_at is not None:
+        paragraphs.append(snapshot_expiry(target.snapshot_expires_at, board.as_of, board.countdown_format, lang))
+    current = board.cards[0]
+    if current.role is Role.UNWATCHED:
+        paragraphs.append(text(lang, "dialog.switch_unwatched"))
+    else:
+        assert current.account_key is not None  # 當前憑證帳號是監看帳號才有帳號鍵
+        paragraphs.append(text(lang, "dialog.switch_watched", label=account_label(current.account_key)))
+    if current.snapshot_invalid:
+        paragraphs.append(text(lang, "dialog.switch_invalid"))
+    return "\n\n".join(paragraphs)
+
+
+_SWITCH_REFUSALS = {
+    SwitchRefusal.ALREADY_ACTIVE: "switch.refused.already_active",
+    SwitchRefusal.SYNC_FAILED: "switch.refused.sync_failed",
+    SwitchRefusal.UNREADABLE: "switch.refused.unreadable",
+    SwitchRefusal.UNWRITABLE: "switch.refused.unwritable",
+}
+
+
+def switch_refusal(result: SwitchResult, label: str, lang: str) -> str:
+    """切換被拒絕的原因（沒寫任何檔）：視窗與命令列共用同一組字樣。"""
+    assert result.refusal is not None  # 拒絕一定帶原因
+    if result.refusal is SwitchRefusal.UNKNOWN_LABEL:
+        return text(lang, "error.unknown_label", label=label)
+    if result.watch_only_reason is not None:
+        reason = watch_only_reason(result.watch_only_reason, lang, result.writeback_failures)
+        return text(lang, "switch.refused.watch_only", label=label, reason=reason)
+    return text(lang, _SWITCH_REFUSALS[result.refusal], label=label)
 
 
 def until(when: datetime, now: datetime, fmt: CountdownFormat, lang: str, short: bool = False) -> str:

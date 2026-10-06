@@ -58,7 +58,10 @@ class MenuTest(QueryWiringTestCase):
             self.show(ACTIVE)
             self.show(ACTIVE, in_progress=True)
             self.show(ACTIVE, cooling_down=True)
-        self.assertEqual(configure.call_count, 1)  # 只有 normal → disabled 那一次
+        # 查詢項只有 normal → disabled 那一次；「切換帳號」查詢進行中也反灰、冷卻中恢復，各改一次，沒有多餘的
+        changed = [c.args[0] for c in configure.call_args_list]
+        self.assertEqual(sorted(changed), sorted([self.widget._query_index, self.widget._switch_index,
+                                                  self.widget._switch_index]))
 
     def test_polling_leaves_the_entry_alone_while_the_pointer_is_on_it(self):
         # 游標停在項目上時 Tk 把它的 state 設成 active；那仍是可點，不是狀態改變

@@ -166,6 +166,8 @@ STRINGS = {
     "menu.open_settings_dir": "Settings directory",
     "menu.dismiss_untightened": "Stop warning about unrestricted permissions",
     "menu.quit": "Quit",
+    "menu.switch": "Switch account",
+    "menu.switch_none": "(No account to switch to)",
     "layout.cards": "Card list",
     "layout.table": "Dense table / one-line strip",
     "layout.ring": "Ring gauge",
@@ -175,6 +177,15 @@ STRINGS = {
     "theme.light": "Light",
     "theme.dark": "Dark",
     "language.system": "Follow system",
+    "dialog.switch_title": "Switch account",
+    "dialog.switch_confirm": "Switch to \"{label}\"?",
+    "dialog.switch_watched": "The current account \"{label}\" is a watched account: its credential is synced to its "
+                             "snapshot before switching.",
+    "dialog.switch_unwatched": "The current account is an unwatched account: its credential is only saved as the "
+                               "pre-switch credential, and only the latest copy is kept.",
+    "dialog.switch_invalid": "The current account's snapshot is invalid; use \"Restore previous switch\", or sign in "
+                             "again in Claude Code and then re-manage it.",
+    "dialog.switch_failed": "The switch hit an error and did not complete: {error}",
     "dialog.label_prompt": "Account label (shown on screen, and also the credential snapshot's file name):",
     "dialog.import_title": "Import credential file",
     "dialog.all_files": "All files",

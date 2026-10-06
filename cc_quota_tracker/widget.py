@@ -7,15 +7,16 @@
 import os
 import subprocess
 import sys
+import threading
 import tkinter as tk
 from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 from tkinter import filedialog, messagebox, simpledialog
-from typing import Callable, Optional, Tuple
+from typing import Callable, Optional, Tuple, Union
 
 from . import i18n
-from .board import Board, Preferences
+from .board import Board, Preferences, SwitchOutcome, SwitchResult
 from .canvas_text import stalled_banner
 from .core import BindingsUnreadable, InvalidLabel, NoCredential
 from .entry import CLICKABLE_TAG
@@ -24,7 +25,7 @@ from .layout_a import LayoutA
 from .layout_b import LayoutB
 from .layout_c import LayoutC
 from .managed_directory import ManagedDirectory
-from .fmt import account_label
+from .fmt import account_label, switch_confirmation, switch_refusal
 from .i18n import text
 from .render_text import add_warning
 from .claude_provider import AUTO_QUERY_FIELD, PROVIDER
@@ -33,6 +34,7 @@ from .tokens import TRANSPARENT_KEY
 
 POLL_MS = 5000  # 固定值，不開放設定
 QUERY_POLL_MS = 500  # 固定值：查詢進行中縮短間隔，查完的新讀數才不必再等一整輪（查詢最久 20 秒，這段期間最多多 poll 約 40 次）
+SWITCH_CHECK_MS = 100  # 固定值：切換在背景執行，每隔這麼久看一次有沒有跑完
 STALL_ROUNDS = 12  # 固定值：連續這麼多輪沒有完成（約 1 分鐘）才亮停止更新橫幅
 DEFAULT_POSITION = (40, 40)  # 主螢幕上的位置：第一次啟動，或上次的位置已經不在任何螢幕內
 _GRIP = 20  # 判斷位置在不在螢幕內時，看視窗左上角往內這麼多的那一點：要拖得到視窗才算在螢幕內
@@ -117,6 +119,11 @@ class Widget:
         self._unwritten = {}  # 設定檔讀得懂、但這次寫不進去（例如被防毒鎖住）的改動：每輪重試，寫進去為止
         self._position: Optional[Tuple[int, int]] = None
         self._after = None
+        self._switch_thread: Optional[threading.Thread] = None  # 背景執行中的切換；None 表示沒有在切換
+        # 背景執行緒留下的結果（核心的結果值，或丟出的例外），主執行緒收走
+        self._switch_outcome: Union[SwitchResult, Exception, None] = None
+        self._switch_after = None
+        self._switch_rows = None  # 子選單目前列出的內容（語系，各列的標籤與可不可選）；沒變就不碰選單
         root.overrideredirect(True)
         root.configure(bg=TRANSPARENT_KEY)
         try:
@@ -177,6 +184,9 @@ class Widget:
             self._add_entry(menu, "checkbutton", "menu.autostart", variable=self._autostart_var,
                             command=self._toggle_autostart)
         menu.add_separator()
+        self._switch_menu = tk.Menu(menu, tearoff=0)
+        self._add_entry(menu, "cascade", "menu.switch", menu=self._switch_menu)
+        self._switch_index = menu.index("end")
         self._add_entry(menu, "command", "menu.query", command=self.query_usage)
         self._query_index = menu.index("end")
         self._add_entry(menu, "checkbutton", "menu.auto_query", variable=self._auto_query_var,
@@ -224,6 +234,8 @@ class Widget:
 
     def dismiss_untightened_warning(self):
         """右鍵選單的「不再提醒權限未收緊」：關掉看板的橫幅並立刻 poll 一次重畫；換納管目錄或權限恢復後會重新出現。"""
+        if self.switching:  # 核心正被背景的切換使用；切換中右鍵打不開之後，這個守衛只剩保險
+            return
         self._core.dismiss_untightened_warning()
         self.refresh()
 
@@ -233,10 +245,83 @@ class Widget:
         狀態沒變就不碰選單項：Windows 上改動彈出中的選單項會重建原生選單，展開中的子選單被收掉、整個選單跟著關閉，
         游標所在項目的反白也被清掉。游標停在這一項時 Tk 把它設成 active，那仍是可點，只比較可不可點。"""
         status = self._board.usage_query if self._board is not None else None
-        busy = status is not None and (status.in_progress or status.cooling_down)
+        busy = self.switching or status is not None and (status.in_progress or status.cooling_down)
         if (self._menu.entrycget(self._query_index, "state") == "disabled") != busy:
             self._menu.entryconfigure(self._query_index, state="disabled" if busy else "normal")
         self._auto_query_var.set(status is not None and status.auto_enabled)
+
+    @property
+    def switching(self) -> bool:
+        return self._switch_thread is not None
+
+    def _sync_switch_menu(self):
+        """「切換帳號」子選單依看板：待命帳號依帳號鍵的順序以標籤列出，僅監看帳號反灰；沒有任何可選的帳號時多放一列
+        反灰的說明。查詢進行中或正在切換時，整個子選單反灰（核心的切換不檢查進行中的查詢，同時會有兩個 claude 子行程）。
+        內容與狀態都沒變就不碰選單（理由同 _sync_query_menu）。"""
+        board = self._board
+        standby = board.cards[1:] if board is not None else ()
+        rows = (self._lang, tuple((account_label(c.account_key), c.switchable) for c in standby))
+        if rows != self._switch_rows:
+            self._switch_rows = rows
+            menu = self._switch_menu
+            menu.delete(0, "end")
+            for label, switchable in rows[1]:
+                menu.add_command(label=label, state="normal" if switchable else "disabled",
+                                 command=lambda label=label: self.switch_to(label))
+            if not any(switchable for _, switchable in rows[1]):
+                menu.add_command(label=text(self._lang, "menu.switch_none"), state="disabled")
+        busy = self.switching or board is not None and board.usage_query.in_progress
+        if (self._menu.entrycget(self._switch_index, "state") == "disabled") != busy:
+            self._menu.entryconfigure(self._switch_index, state="disabled" if busy else "normal")
+
+    def switch_to(self, label: str):
+        """子選單選了一個帳號：確認之後在背景切換，視窗的事件迴圈照常運作。切換進行中、或查詢進行中就什麼都不做
+        （選單這時本來就不可點，這裡只擋過期看板的漏網之魚）。確認的內容取自最近一輪的看板。"""
+        board = self._board
+        if self.switching or board is None or board.usage_query.in_progress:
+            return
+        lang = self._lang
+        if not messagebox.askyesno(text(lang, "dialog.switch_title"), switch_confirmation(board, label, lang),
+                                   parent=self.root):
+            return
+        # 對話框開著時 Tk 照常跑排程：這段時間可能已有查詢（自動查詢）啟動，確認之後要再驗一次
+        latest = self._board
+        if self.switching or latest is None or latest.usage_query.in_progress:
+            return
+        self._switch_outcome = None
+        self._switch_thread = threading.Thread(target=self._run_switch, args=(label,), daemon=True)
+        self._switch_thread.start()
+        self._sync_switch_menu()
+        self._sync_query_menu()
+        self._switch_after = self.root.after(SWITCH_CHECK_MS, self._check_switch, label)
+
+    def _run_switch(self, label: str):
+        """背景執行緒：不碰 Tk，結果留給主執行緒收。核心不是執行緒安全的，切換期間 refresh 不 poll、
+        query_usage 不啟動查詢；納管、匯入等其他右鍵選單入口還沒擋，等切換中的圖層那一票（右鍵在切換中打不開）。"""
+        try:
+            self._switch_outcome = self._core.switch(label)
+        except Exception as e:  # 沒人看得到背景執行緒的例外：交給主執行緒告訴使用者
+            self._switch_outcome = e
+
+    def _check_switch(self, label: str):
+        assert self._switch_thread is not None
+        if self._switch_thread.is_alive():
+            self._switch_after = self.root.after(SWITCH_CHECK_MS, self._check_switch, label)
+            return
+        outcome, self._switch_thread, self._switch_after = self._switch_outcome, None, None
+        self.refresh()  # 先重畫：成功時第一列換成新帳號、讀數更新就是回饋；之後才跳提示
+        lang = self._lang
+        if isinstance(outcome, Exception):
+            message = text(lang, "dialog.switch_failed", error=outcome)
+        elif outcome is None:
+            return  # 沒有結果可報（背景執行緒不會不留結果就結束）
+        elif outcome.outcome is SwitchOutcome.REFUSED:
+            message = switch_refusal(outcome, label, lang)
+        elif outcome.outcome is SwitchOutcome.WRITE_FAILED:
+            message = text(lang, "switch.write_failed", label=label)
+        else:
+            return  # 成功不提示；驗證失敗的提示由還原那一票處理，舊帳號查詢失敗不提示
+        messagebox.showerror(_TITLE, message, parent=self.root)
 
     def _toggle_auto_query(self):
         """右鍵選單的「自動查詢額度」：寫回 providers.claude.autoUsageQuery 並立刻 poll，核心讀到新值，下一輪起生效。
@@ -275,6 +360,9 @@ class Widget:
         由選單或按鈕直接呼叫時，會丟回它們的處理函式），畫面維持最後一次成功的看板，連續 STALL_ROUNDS 輪才亮停止更新橫幅；錯誤詳情寫進錯誤紀錄（error_log）。"""
         if self._after is not None:
             self.root.after_cancel(self._after)
+        if self.switching:  # 背景的切換正在用核心：這一輪不 poll，畫面維持原樣，切換結束時會立刻重畫
+            self._after = self.root.after(POLL_MS, self.refresh)
+            return
         missed, self._missed = self._missed, 0  # 先當成會完成：完成的這一輪渲染時橫幅就已熄滅
         try:
             # 先重試寫不進去的改動再 poll：這一輪讀到的設定檔就已經包含它們
@@ -301,7 +389,7 @@ class Widget:
     def query_usage(self):
         """卡片上的「更新」與右鍵選單的「查詢額度」：請核心開始查詢，立刻 poll 一次讓畫面顯示進行中。
         進行中或冷卻中核心會拒絕，這時什麼都不做（入口與選單項這時本來就不可點，這裡只擋過期看板的漏網之魚）。"""
-        if self._core.start_query():
+        if not self.switching and self._core.start_query():  # 切換進行中核心已被背景執行緒佔用
             self.refresh()
 
     def set_preference(self, field: str, value):
@@ -340,6 +428,7 @@ class Widget:
             self._lang = lang
             self._relabel_menu()
         self._sync_query_menu()
+        self._sync_switch_menu()
         self._sync_dismiss_menu()
         self._layout_var.set(prefs.layout)
         self._topmost_var.set(prefs.always_on_top)
@@ -371,6 +460,8 @@ class Widget:
         self.toggle_mode()
 
     def add_current_account(self):
+        if self.switching:
+            return
         lang = self._lang
         label = simpledialog.askstring(_TITLE, text(lang, "dialog.label_prompt"), parent=self.root)
         if label is None:
@@ -390,6 +481,8 @@ class Widget:
         self._report(text(lang, "account.added", label=label), warnings)
 
     def import_credential_file(self):
+        if self.switching:
+            return
         lang = self._lang
         source = filedialog.askopenfilename(parent=self.root, title=text(lang, "dialog.import_title"),
                                             filetypes=(("JSON", "*.json"), (text(lang, "dialog.all_files"), "*.*")))
@@ -441,6 +534,9 @@ class Widget:
         if self._after is not None:
             self.root.after_cancel(self._after)
             self._after = None
+        if self._switch_after is not None:
+            self.root.after_cancel(self._switch_after)
+            self._switch_after = None
         self._save_position()
         if self.layout is not None:
             self.layout.destroy()
