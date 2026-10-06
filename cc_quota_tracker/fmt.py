@@ -2,7 +2,7 @@
 from datetime import datetime, timedelta
 from typing import Optional
 
-from .board import (WRITEBACK_ATTEMPTS, Board, CountdownFormat, Money, Role, SwitchRefusal, SwitchResult,
+from .board import (WRITEBACK_ATTEMPTS, Board, CountdownFormat, Money, Role, SwitchRefusal, SwitchResult, SwitchStep,
                     WatchOnlyReason)
 from .i18n import text
 
@@ -68,6 +68,15 @@ def switch_refusal(result: SwitchResult, label: str, lang: str) -> str:
         reason = watch_only_reason(result.watch_only_reason, lang, result.writeback_failures)
         return text(lang, "switch.refused.watch_only", label=label, reason=reason)
     return text(lang, _SWITCH_REFUSALS[result.refusal], label=label)
+
+
+_SWITCH_STEPS = {SwitchStep.SYNC: "switch.step.sync", SwitchStep.QUERY_OLD: "switch.step.query_old",
+                 SwitchStep.WRITE: "switch.step.write", SwitchStep.QUERY_NEW: "switch.step.query_new"}
+
+
+def switch_step(step: SwitchStep, label: str, lang: str) -> str:
+    """切換中的圖層顯示的步驟；label 是切換的目標帳號標籤，只有寫入那一步用到。"""
+    return text(lang, _SWITCH_STEPS[step], label=label)
 
 
 def until(when: datetime, now: datetime, fmt: CountdownFormat, lang: str, short: bool = False) -> str:

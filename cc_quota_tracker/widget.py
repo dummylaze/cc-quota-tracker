@@ -16,7 +16,7 @@ from tkinter import filedialog, messagebox, simpledialog
 from typing import Callable, Optional, Tuple, Union
 
 from . import i18n
-from .board import Board, Preferences, SwitchOutcome, SwitchResult
+from .board import Board, Preferences, SwitchOutcome, SwitchResult, SwitchStep
 from .canvas_text import stalled_banner
 from .core import BindingsUnreadable, InvalidLabel, NoCredential
 from .entry import CLICKABLE_TAG
@@ -25,10 +25,11 @@ from .layout_a import LayoutA
 from .layout_b import LayoutB
 from .layout_c import LayoutC
 from .managed_directory import ManagedDirectory
-from .fmt import account_label, switch_confirmation, switch_refusal
+from .fmt import account_label, switch_confirmation, switch_refusal, switch_step
 from .i18n import text
 from .render_text import add_warning
 from .claude_provider import AUTO_QUERY_FIELD, PROVIDER
+from .switch_overlay import SwitchOverlay
 from .settings import PREFERENCE_FIELDS, ResolvedPaths, WriteResult, write_preference, write_provider_setting
 from .tokens import TRANSPARENT_KEY
 
@@ -123,6 +124,9 @@ class Widget:
         # 背景執行緒留下的結果（核心的結果值，或丟出的例外），主執行緒收走
         self._switch_outcome: Union[SwitchResult, Exception, None] = None
         self._switch_after = None
+        self._switch_label: Optional[str] = None  # 切換的目標帳號標籤：圖層的寫入步驟要寫出來
+        self._switch_step: Optional[SwitchStep] = None  # 背景執行緒回報的最新步驟，主執行緒讀走；None 表示還沒回報
+        self._shown_step: Optional[SwitchStep] = None  # 圖層目前畫出來的步驟，與上一行不同就重畫
         self._switch_rows = None  # 子選單目前列出的內容（語系，各列的標籤與可不可選）；沒變就不碰選單
         root.overrideredirect(True)
         root.configure(bg=TRANSPARENT_KEY)
@@ -133,14 +137,19 @@ class Widget:
         self.canvas = tk.Canvas(root, bg=TRANSPARENT_KEY, highlightthickness=0, borderwidth=0)
         self.canvas.pack()
         self.layout = None  # 目前選用的版面：第一次套用偏好時才建立
+        self._overlay = SwitchOverlay(self.canvas)  # 切換中才有 item；字型跟著版面
         self._build_menu()
         self._restore_position(on_screen or on_any_screen(root))
         root.bind("<ButtonPress-1>", self._press)
         root.bind("<B1-Motion>", self._drag)
         root.bind("<ButtonRelease-1>", lambda e: self._save_position())
-        root.bind("<Button-3>", lambda e: self._menu.tk_popup(e.x_root, e.y_root))
+        root.bind("<Button-3>", self._popup_menu)
         root.bind("<Double-Button-1>", self._double_click)
         self.refresh()
+
+    def _popup_menu(self, event):
+        if not self.switching:  # 切換中右鍵打不開：避免切到一半又觸發另一個動作
+            self._menu.tk_popup(event.x_root, event.y_root)
 
     def _add_entry(self, parent, kind, key, **options):
         """加一個選單項，並記下它的語系鍵：key 為 None 的項目在每個語系都用同一個名稱，由 label 直接給。"""
@@ -289,26 +298,50 @@ class Widget:
         if self.switching or latest is None or latest.usage_query.in_progress:
             return
         self._switch_outcome = None
+        self._switch_label, self._switch_step = label, None
         self._switch_thread = threading.Thread(target=self._run_switch, args=(label,), daemon=True)
         self._switch_thread.start()
+        self._sync_overlay()
         self._sync_switch_menu()
         self._sync_query_menu()
         self._switch_after = self.root.after(SWITCH_CHECK_MS, self._check_switch, label)
 
     def _run_switch(self, label: str):
-        """背景執行緒：不碰 Tk，結果留給主執行緒收。核心不是執行緒安全的，切換期間 refresh 不 poll、
-        query_usage 不啟動查詢；納管、匯入等其他右鍵選單入口還沒擋，等切換中的圖層那一票（右鍵在切換中打不開）。"""
+        """背景執行緒：不碰 Tk，結果與目前的步驟留給主執行緒收。核心不是執行緒安全的，切換期間 refresh 不 poll、
+        query_usage 不啟動查詢；右鍵選單在切換中打不開，納管、匯入等入口的守衛只剩保險。"""
         try:
-            self._switch_outcome = self._core.switch(label)
+            self._switch_outcome = self._core.switch(label, on_step=self._report_step)
         except Exception as e:  # 沒人看得到背景執行緒的例外：交給主執行緒告訴使用者
             self._switch_outcome = e
+
+    def _report_step(self, step: SwitchStep):
+        """背景執行緒回報進度。"""
+        self._switch_step = step  # 單純指派：主執行緒每 SWITCH_CHECK_MS 看一次，不必加鎖
+
+    def _theme(self, prefs: Preferences) -> str:
+        """實際套用的深淺色：偏好選「跟隨系統」就問作業系統。"""
+        return self._system_theme() if prefs.theme == "system" else prefs.theme  # 跟隨系統：每次渲染都問一次
+
+    def _sync_overlay(self):
+        """切換中蓋上圖層，結束就拿掉。展開模式在圖層上寫目前的步驟，精簡模式只有半透明的一層。
+        圖層整批重建，所以一定在最上面；版面重畫（換模式、換語系）之後要再呼叫一次。"""
+        if not self.switching:
+            self._overlay.hide()
+            return
+        step = self._shown_step = self._switch_step
+        expanded = self._prefs is not None and self._prefs.mode == "expanded"
+        shown = switch_step(step, self._switch_label, self._lang) if expanded and step is not None else None
+        self._overlay.show(self._theme(self._prefs or Preferences()), shown)
 
     def _check_switch(self, label: str):
         assert self._switch_thread is not None
         if self._switch_thread.is_alive():
+            if self._switch_step is not self._shown_step:
+                self._sync_overlay()
             self._switch_after = self.root.after(SWITCH_CHECK_MS, self._check_switch, label)
             return
         outcome, self._switch_thread, self._switch_after = self._switch_outcome, None, None
+        self._sync_overlay()  # 拿掉圖層：下面的 refresh 這一輪出錯也一樣
         self.refresh()  # 先重畫：成功時第一列換成新帳號、讀數更新就是回饋；之後才跳提示
         lang = self._lang
         if isinstance(outcome, Exception):
@@ -444,14 +477,16 @@ class Widget:
             self.layout = make(self.canvas, on_query=self.query_usage)
         if new_layout or prefs.font != previous.font:
             self.layout.set_font(prefs.font)  # 字型存不存在只有畫面層知道；找不到時版面自己在橫幅提示
+            self._overlay.set_font(prefs.font)
         stalled = self._missed >= STALL_ROUNDS
         if self._board is not None or stalled:
             # 跟隨系統：每輪 poll 都會走到這裡，系統切換深淺色後下一輪就跟上
-            theme = self._system_theme() if prefs.theme == "system" else prefs.theme
+            theme = self._theme(prefs)
             now = self._clock()
             board = self._board or Board(cards=(), as_of=now)  # 從沒完成過一輪：沒有看板，只畫橫幅
             self.layout.render(board, theme, prefs.mode == "expanded", self._lang,
                                stalled_banner(self._lang, self._done_at, now) if stalled else None)
+        self._sync_overlay()  # 版面剛重畫過：圖層要重蓋，才在新 item 上面、也跟上模式與語系的改變
 
     def _double_click(self, event):
         # 摺疊區標題自己處理點擊：雙擊它等於開合兩次，不該同時切換模式
@@ -538,6 +573,7 @@ class Widget:
             self.root.after_cancel(self._switch_after)
             self._switch_after = None
         self._save_position()
+        self._overlay.destroy()
         if self.layout is not None:
             self.layout.destroy()
         self.root.destroy()

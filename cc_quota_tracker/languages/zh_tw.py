@@ -183,6 +183,10 @@ STRINGS = {
                  "                               切換到這個納管帳號；--yes 表示不再確認、直接切換。\n"
                  "                               成功結束代碼 0，拒絕（沒寫任何檔）1，已寫入但驗證失敗或只寫了一半 3，沒帶 --yes 2",
     "switch.done": "已切換到「{label}」",
+    "switch.step.sync": "同步目前帳號的憑證…",
+    "switch.step.query_old": "查詢舊帳號的額度…",
+    "switch.step.write": "寫入「{label}」的憑證…",
+    "switch.step.query_new": "查詢新帳號的額度…",
     "switch.refused.watch_only": "「{label}」是僅監看帳號（{reason}），不能切換過去：在 Claude Code 登入這個帳號後重新納管",
     "switch.refused.already_active": "「{label}」已經是當前憑證帳號。",
     "switch.refused.sync_failed": "目前帳號的憑證沒能同步回它的快照，沒有切換；請稍後再試。",

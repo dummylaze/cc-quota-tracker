@@ -7,7 +7,9 @@ from dataclasses import replace
 from datetime import timedelta
 from unittest import mock
 
-from cc_quota_tracker.board import SwitchOutcome, SwitchRefusal, SwitchResult
+from cc_quota_tracker.board import SwitchOutcome, SwitchRefusal, SwitchResult, SwitchStep
+from cc_quota_tracker.entry import CLICKABLE_TAG
+from cc_quota_tracker.tokens import THEMES
 from tests.fakehome import NOW
 from tests.test_credential_sync import HOME, WORK
 from tests.test_layout_a import visible_texts
@@ -228,7 +230,7 @@ class SwitchRunTest(WidgetSwitchTestCase):
         """核心的 switch 卡在這裡，直到測試放行；回傳放行用的事件。"""
         release, real = threading.Event(), self.core.switch
 
-        def slow(label):
+        def slow(label, on_step=None):
             release.wait(10)
             return real(label)
         self.counting.switch = slow
@@ -366,7 +368,8 @@ class ResultTest(WidgetSwitchTestCase):
         self.widget.set_preference("language", "en")
         self.confirm()
         errors = self.errors()
-        self.counting.switch = lambda label: SwitchResult(SwitchOutcome.REFUSED, SwitchRefusal.SYNC_FAILED)
+        self.counting.switch = lambda label, on_step=None: SwitchResult(SwitchOutcome.REFUSED,
+                                                                        SwitchRefusal.SYNC_FAILED)
         self.choose("home", "Switch account")
         self.finish()
         self.assertEqual(errors.call_args.args[1],
@@ -376,7 +379,7 @@ class ResultTest(WidgetSwitchTestCase):
     def test_a_write_that_stopped_halfway_is_reported_too(self):
         self.confirm()
         errors = self.errors()
-        self.counting.switch = lambda label: SwitchResult(SwitchOutcome.WRITE_FAILED)
+        self.counting.switch = lambda label, on_step=None: SwitchResult(SwitchOutcome.WRITE_FAILED)
         self.choose("home")
         self.finish()
         self.assertIn("「home」", errors.call_args.args[1])
@@ -385,7 +388,8 @@ class ResultTest(WidgetSwitchTestCase):
     def test_old_account_query_failure_is_not_reported(self):
         self.confirm()
         errors = self.errors()
-        self.counting.switch = lambda label: SwitchResult(SwitchOutcome.SWITCHED, old_account_query_failed=True)
+        self.counting.switch = lambda label, on_step=None: SwitchResult(SwitchOutcome.SWITCHED,
+                                                                        old_account_query_failed=True)
         self.choose("home")
         self.finish()
         self.assertFalse(errors.called)
@@ -394,7 +398,7 @@ class ResultTest(WidgetSwitchTestCase):
         self.confirm()
         errors = self.errors()
 
-        def boom(label):
+        def boom(label, on_step=None):
             raise RuntimeError("壞了")
         self.counting.switch = boom
         self.choose("home")
@@ -402,3 +406,238 @@ class ResultTest(WidgetSwitchTestCase):
         errors.assert_called_once()
         self.assertFalse(self.widget.switching)
         self.assertEqual(self.widget._menu.entrycget(self.menu_index(TITLE), "state"), "normal")
+
+
+OVERLAY = "switch-overlay"
+
+
+class OverlayTest(WidgetSwitchTestCase):
+    """切換中蓋在整個視窗上的半透明圖層：右鍵打不開、可以拖動、沒有取消的入口，展開模式顯示目前步驟。"""
+
+    def gated_switch(self, *steps, result=None):
+        """核心的 switch 依序回報 steps，每回報一步就等測試放行（gate.release()），全部放行後才做真的切換；
+        result 給了就回傳它、不真的切換（要在同一個測試裡切好幾次時用）。"""
+        gate, real = threading.Semaphore(0), self.core.switch
+
+        def gated(label, on_step=None):
+            for step in steps:
+                on_step(step)
+                gate.acquire(timeout=10)
+            return result or real(label)
+        self.counting.switch = gated
+        self.addCleanup(lambda: [gate.release() for _ in steps])
+        return gate
+
+    def overlay(self):
+        return self.widget.canvas.find_withtag(OVERLAY)
+
+    def overlay_texts(self):
+        cv = self.widget.canvas
+        return [cv.itemcget(i, "text") for i in self.overlay() if cv.type(i) == "text"]
+
+    def veil(self):
+        return next(i for i in self.overlay() if self.widget.canvas.type(i) == "polygon")
+
+    def pump(self, until):
+        """讓事件迴圈跑到條件成立；超時就是畫面沒跟上。"""
+        deadline = time.monotonic() + 10
+        while not until():
+            self.assertLess(time.monotonic(), deadline, "畫面沒有跟上")
+            self.root.update()
+            time.sleep(0.02)
+
+    def begin(self, *steps, mode="expanded", result=None):
+        """選了「home」並確認，核心卡在第一個步驟；回傳放行用的 gate。"""
+        self.widget.set_preference("mode", mode)
+        self.confirm()
+        gate = self.gated_switch(*steps, result=result)
+        self.choose("home", "Switch account" if self.widget._lang == "en" else TITLE)
+        return gate
+
+    def show_window(self):
+        """真的把視窗顯示出來（移到螢幕外），滑鼠事件才會送到它。"""
+        self.root.geometry("+-3000+-3000")
+        self.root.deiconify()
+        self.root.update()
+        self.addCleanup(self.root.update)
+
+    def right_click(self):
+        self.widget.canvas.event_generate("<Button-3>", x=30, y=30, rootx=130, rooty=130)
+
+    def test_the_overlay_covers_the_whole_window_from_confirmation_until_the_switch_ends(self):
+        self.assertEqual(self.overlay(), ())
+        gate = self.begin(SwitchStep.SYNC)
+        self.assertTrue(self.overlay())
+        cv = self.widget.canvas
+        width, height = cv.winfo_reqwidth(), cv.winfo_reqheight()
+        for x, y in ((width // 2, height // 2), (20, 20), (width - 20, 20), (20, height - 20),
+                     (width - 20, height - 20)):
+            self.assertIn(OVERLAY, cv.gettags(cv.find_overlapping(x, y, x, y)[-1]), (x, y))  # 最上面的就是圖層
+        gate.release()
+        self.finish()
+        self.assertEqual(self.overlay(), ())
+
+    def test_the_overlay_is_translucent_not_solid(self):
+        self.begin(SwitchStep.SYNC)
+        self.assertTrue(self.widget.canvas.itemcget(self.veil(), "stipple"))  # 點陣填色：底下的內容隱約可見
+
+    def test_the_overlay_follows_the_theme(self):
+        self.widget.set_preference("theme", "dark")
+        self.begin(SwitchStep.SYNC)
+        self.assertEqual(self.widget.canvas.itemcget(self.veil(), "fill"), THEMES["dark"]["panel"])
+
+    def test_the_overlay_goes_away_when_the_switch_is_refused_fails_to_verify_or_blows_up(self):
+        for result in (SwitchResult(SwitchOutcome.REFUSED, SwitchRefusal.SYNC_FAILED),
+                       SwitchResult(SwitchOutcome.VERIFY_FAILED),
+                       SwitchResult(SwitchOutcome.WRITE_FAILED),
+                       RuntimeError("壞了")):
+            self.confirm()
+            self.errors()
+            release = threading.Event()
+
+            def outcome(label, on_step=None, result=result):
+                release.wait(10)
+                if isinstance(result, Exception):
+                    raise result
+                return result
+            self.counting.switch = outcome
+            self.choose("home")
+            self.assertTrue(self.overlay(), result)
+            release.set()
+            self.finish()
+            self.assertEqual(self.overlay(), (), result)
+
+    def test_the_context_menu_does_not_open_while_switching(self):
+        self.show_window()
+        with mock.patch.object(self.widget._menu, "tk_popup") as popup:
+            self.right_click()
+            self.assertEqual(popup.call_count, 1)  # 沒在切換時照常打得開
+            gate = self.begin(SwitchStep.SYNC)
+            self.right_click()
+            self.assertEqual(popup.call_count, 1)
+            gate.release()
+            self.finish()
+            self.right_click()
+            self.assertEqual(popup.call_count, 2)  # 結束之後又打得開
+
+    def test_the_window_can_still_be_dragged_while_switching(self):
+        self.show_window()
+        self.begin(SwitchStep.SYNC)
+        cv = self.widget.canvas
+        before = self.root.geometry().split("+", 1)[1]
+        cv.event_generate("<ButtonPress-1>", x=30, y=30, rootx=330, rooty=330)
+        cv.event_generate("<B1-Motion>", x=80, y=70, rootx=380, rooty=370, state=0x100)
+        self.assertNotEqual(self.root.geometry().split("+", 1)[1], before)
+
+    def test_there_is_no_way_to_cancel(self):
+        self.begin(SwitchStep.SYNC)
+        self.assertFalse([i for i in self.overlay() if CLICKABLE_TAG in self.widget.canvas.gettags(i)])
+        words = ("取消", "Cancel", "cancel")
+        self.assertFalse([t for t in self.overlay_texts() + self.widget.menu_labels() if any(w in t for w in words)])
+
+    def test_expanded_mode_shows_each_step_as_it_is_reached(self):
+        gate = self.begin(*SwitchStep)
+        for shown in ("同步目前帳號的憑證…", "查詢舊帳號的額度…", "寫入「home」的憑證…", "查詢新帳號的額度…"):
+            self.pump(lambda: self.overlay_texts() == [shown])
+            self.assertIn(shown, visible_texts(self.widget.canvas))
+            gate.release()
+        self.finish()
+        self.assertEqual(self.overlay(), ())
+
+    def test_a_step_that_is_not_reported_is_not_shown(self):
+        gate = self.begin(SwitchStep.SYNC, SwitchStep.WRITE)  # 舊帳號的查詢被跳過
+        shown = []
+        for _ in range(2):
+            self.pump(lambda: self.overlay_texts() and self.overlay_texts() != shown[-1:])
+            shown.append(self.overlay_texts()[0])
+            gate.release()
+        self.assertEqual(shown, ["同步目前帳號的憑證…", "寫入「home」的憑證…"])
+        self.finish()
+
+    def test_compact_mode_covers_the_window_but_shows_no_step(self):
+        gate = self.begin(SwitchStep.SYNC, mode="compact")
+        for _ in range(5):
+            self.root.update()
+            time.sleep(0.12)  # 讓背景的回報有機會被視窗收走
+        self.assertTrue(self.overlay())
+        self.assertEqual(self.overlay_texts(), [])
+        gate.release()
+        self.finish()
+
+    def test_toggling_the_mode_during_the_switch_adds_or_removes_the_step_text(self):
+        gate = self.begin(SwitchStep.SYNC)
+        self.pump(lambda: self.overlay_texts())
+        self.widget.toggle_mode()
+        self.assertEqual(self.overlay_texts(), [])
+        self.assertTrue(self.overlay())
+        self.widget.toggle_mode()
+        self.assertEqual(self.overlay_texts(), ["同步目前帳號的憑證…"])
+        cv = self.widget.canvas
+        self.assertIn(OVERLAY, cv.gettags(cv.find_all()[-1]))  # 重畫版面之後，圖層仍在最上面
+        gate.release()
+        self.finish()
+
+    def test_the_steps_follow_the_language(self):
+        self.widget.set_preference("language", "en")
+        gate = self.begin(*SwitchStep)
+        for shown in ("Syncing the current credential…", "Querying usage for the old account…",
+                      'Writing the credential of "home"…', "Querying usage for the new account…"):
+            self.pump(lambda: self.overlay_texts() == [shown])
+            gate.release()
+        self.finish()
+
+    def test_every_layout_gets_the_overlay_on_top(self):
+        for layout in ("cards", "table", "ring"):
+            self.widget.set_preference("layout", layout)
+            gate = self.begin(SwitchStep.SYNC, result=SwitchResult(SwitchOutcome.SWITCHED))
+            self.pump(lambda: self.overlay_texts())
+            cv = self.widget.canvas
+            self.assertIn(OVERLAY, cv.gettags(cv.find_all()[-1]), layout)
+            gate.release()
+            self.finish()
+            self.assertEqual(self.overlay(), (), layout)
+
+    def test_the_overlay_goes_away_even_when_the_round_after_the_switch_fails(self):
+        gate = self.begin(SwitchStep.SYNC, result=SwitchResult(SwitchOutcome.SWITCHED))
+
+        def boom():
+            raise RuntimeError("壞了")
+        self.counting.poll = boom  # 切換結束後那一輪 poll 出錯：_apply 到不了，圖層要靠結束時的那一次拿掉
+        gate.release()
+        self.finish()
+        self.assertEqual(self.overlay(), ())
+
+    def test_changing_the_theme_language_or_layout_during_the_switch_redraws_the_overlay(self):
+        gate = self.begin(SwitchStep.SYNC)
+        self.pump(lambda: self.overlay_texts())
+        cv = self.widget.canvas
+        self.widget.set_preference("theme", "dark")
+        self.assertEqual(cv.itemcget(self.veil(), "fill"), THEMES["dark"]["panel"])
+        self.widget.set_preference("language", "en")
+        self.assertEqual(self.overlay_texts(), ["Syncing the current credential…"])
+        for layout in ("table", "ring", "cards"):
+            self.widget.set_preference("layout", layout)
+            self.assertIn(OVERLAY, cv.gettags(cv.find_all()[-1]), layout)
+            self.assertEqual(len(self.overlay_texts()), 1, layout)
+        gate.release()
+        self.finish()
+
+    def test_clicks_land_on_the_overlay_and_not_on_the_entries_underneath(self):
+        real = self.core.poll
+        self.counting.poll = lambda: (lambda b: replace(b, cards=(replace(b.cards[0], lagging=True),
+                                                                  *b.cards[1:])))(real())
+        self.widget.refresh()
+        self.show_window()
+        cv = self.widget.canvas
+        entry = next(i for i in cv.find_all() if cv.type(i) == "text" and cv.itemcget(i, "text") == "更新"
+                     and cv.itemcget(i, "state") != "hidden")
+        x1, y1, x2, y2 = cv.bbox(entry)
+        x, y = int((x1 + x2) / 2), int((y1 + y2) / 2)
+        cv.event_generate("<Motion>", x=x, y=y)
+        self.root.update()
+        self.assertIn(CLICKABLE_TAG, cv.gettags("current"))  # 沒在切換時，游標落在「更新」上
+        self.begin(SwitchStep.SYNC)
+        cv.event_generate("<Motion>", x=x + 1, y=y)
+        self.root.update()
+        self.assertIn(OVERLAY, cv.gettags("current"))  # 切換中，同一個位置落在圖層上
+        self.assertNotIn(CLICKABLE_TAG, cv.gettags("current"))

@@ -164,6 +164,14 @@ class SwitchOutcome(Enum):
     VERIFY_FAILED = "verify_failed"  # 已寫入，但替新帳號查詢額度失敗：沒能確認切換有生效，原因見 SwitchResult.verify_failure
 
 
+class SwitchStep(Enum):
+    """切換進行到哪一步，由核心在該步驟開始之前回報。舊帳號的查詢被跳過時，QUERY_OLD 不回報。"""
+    SYNC = "sync"  # 同步當前憑證
+    QUERY_OLD = "query_old"  # 替舊帳號查詢額度
+    WRITE = "write"  # 保存切換前憑證、寫入目標的憑證與帳號資訊
+    QUERY_NEW = "query_new"  # 替新帳號查詢額度，兼作驗證
+
+
 class SwitchRefusal(Enum):
     UNKNOWN_LABEL = "unknown_label"
     WATCH_ONLY = "watch_only"  # 目標是僅監看帳號（含過期），原因見 SwitchResult.watch_only_reason

@@ -218,6 +218,10 @@ STRINGS = {
                  "                            Exit code 0 on success, 1 if refused (nothing written), 3 if written but "
                  "the usage check failed or only partly written, 2 without --yes",
     "switch.done": "Switched to \"{label}\"",
+    "switch.step.sync": "Syncing the current credential…",
+    "switch.step.query_old": "Querying usage for the old account…",
+    "switch.step.write": "Writing the credential of \"{label}\"…",
+    "switch.step.query_new": "Querying usage for the new account…",
     "switch.refused.watch_only": "\"{label}\" is a watch-only account ({reason}) and can't be switched to: sign in to "
                                  "this account in Claude Code, then manage it again",
     "switch.refused.already_active": "\"{label}\" is already the active account.",

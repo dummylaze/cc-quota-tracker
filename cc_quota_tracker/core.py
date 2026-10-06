@@ -12,7 +12,7 @@ from . import atomic
 from . import claude_provider as provider
 from . import usage_query
 from .board import (Board, Card, CountdownFormat, Limit, Preferences, QueryFailure, QueryStatus, ReadingState, Role,
-                    Severity, SwitchOutcome, SwitchRefusal, SwitchResult, UsageQueryResult, WatchOnlyReason)
+                    Severity, SwitchOutcome, SwitchRefusal, SwitchResult, SwitchStep, UsageQueryResult, WatchOnlyReason)
 from .credstore import BytesCredentialStore, FileCredentialStore
 from .managed_directory import (BindingsUnreadable, InvalidLabel, ManagedDirectory, NoCredential,  # noqa: F401
                                 Observed, PermissionState, Synced, UnknownLabel, WritebackFailure, check_label,
@@ -265,21 +265,25 @@ class Core:
     def remove(self, label: str) -> None:
         self._managed.remove_snapshot(label)  # 綁定檔讀不到就不寫：留下的孤兒綁定由之後的 poll 清掉
 
-    def switch(self, label: str) -> SwitchResult:
+    def switch(self, label: str, on_step: Optional[Callable[[SwitchStep], None]] = None) -> SwitchResult:
         """切換到帳號標籤 label：寫入它的憑證快照，Claude Code 設定檔只改帳號資訊那一個鍵（ADR-0006）。
         先跑一輪 poll 取得與畫面相同的分類，依序：檢查目標、同步當前憑證、替舊帳號查詢額度（跳過的條件見
         _old_account_needs_query）、保存切換前憑證、寫入、記切換紀錄、替新帳號查詢額度兼作驗證。
         寫入之前的任何一步不成就拒絕，當前憑證與 Claude Code 設定檔都不動（查詢只讓 Claude Code 寫它自己的額度快取）。
-        不檢查刷新鎖檔，也不跟其他程序互鎖。這是同步呼叫：兩次查詢最久各等 usage_query.TIMEOUT，GUI 要放在背景執行。"""
+        不檢查刷新鎖檔，也不跟其他程序互鎖。這是同步呼叫：兩次查詢最久各等 usage_query.TIMEOUT，GUI 要放在背景執行。
+        on_step：每個步驟開始之前呼叫一次（SwitchStep）；目標檢查就被拒絕時一次都不呼叫。呼叫發生在切換所在的執行緒。"""
+        step = on_step or (lambda _: None)
         board = self._poll(auto_query=False)
         refused = self._switch_refusal(label, board)
         if refused is not None:
             return refused
+        step(SwitchStep.SYNC)
         prepared = self._prepare_switch(label)
         if isinstance(prepared, SwitchRefusal):
             return SwitchResult(SwitchOutcome.REFUSED, prepared)
         old_query_failed = False
         if self._old_account_needs_query(board.cards[0]):
+            step(SwitchStep.QUERY_OLD)
             old_query_failed = self._switch_query().failure is not None
             # 讀數落後的舊帳號：新讀數趁還沒切走就存成它的待命讀數，切換偵測才會拿它判斷離開時落不落後
             self._refresh()
@@ -288,9 +292,11 @@ class Core:
             prepared = self._prepare_switch(label)
             if isinstance(prepared, SwitchRefusal):
                 return SwitchResult(SwitchOutcome.REFUSED, prepared, old_account_query_failed=old_query_failed)
+        step(SwitchStep.WRITE)
         result = replace(self._write_switch(prepared), old_account_query_failed=old_query_failed)
         if result.outcome is not SwitchOutcome.SWITCHED:
             return result
+        step(SwitchStep.QUERY_NEW)
         verified = self._switch_query()
         if verified.failure is None:
             return result
