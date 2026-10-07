@@ -79,7 +79,8 @@ class LayoutACompactTest(unittest.TestCase):
     def test_reset_countdown_has_no_trailing_word_in_chinese(self):
         self.layout.render(BOARDS[0], "light")
         shown = self.visible_texts()
-        self.assertEqual(shown.count("重置：2小時0分（22:00）"), 2)  # 三種版面的重置倒數寫法一致
+        clock = absolute(NOW + timedelta(hours=2), NOW)  # 本地時刻，隨執行環境的時區而變
+        self.assertEqual(shown.count(f"重置：2小時0分（{clock}）"), 2)  # 三種版面的重置倒數寫法一致
 
     def test_no_open_window_is_not_shown_as_zero_percent(self):
         self.layout.render(BOARDS[3], "light")

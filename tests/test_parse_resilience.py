@@ -134,7 +134,14 @@ class ParseResilienceTest(HomeTestCase):
         # 檔案暫時被鎖（防毒、索引服務）不等於額度快取不存在
         self.write_good(session=33)
         self.core.poll()
-        with mock.patch("os.stat", side_effect=PermissionError):
+        source, real_stat = str(self.home / ".claude.json"), os.stat
+
+        def locked(path, *args, **kwargs):  # 只鎖額度快取；其他路徑（含 3.12 起 pathlib 走的 os.stat）照常
+            if os.fspath(path) == source:
+                raise PermissionError
+            return real_stat(path, *args, **kwargs)
+
+        with mock.patch("os.stat", side_effect=locked):
             board = self.core.poll()
         self.assertEqual(board.cards[0].reading_state, ReadingState.HAS_READING)
         self.assertEqual(board.cards[0].limits[0].percent, 33)
