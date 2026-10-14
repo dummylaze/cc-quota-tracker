@@ -32,6 +32,7 @@ from .claude_provider import AUTO_QUERY_FIELD, PROVIDER
 from .switch_overlay import SwitchOverlay
 from .settings import PREFERENCE_FIELDS, ResolvedPaths, WriteResult, write_preference, write_provider_setting
 from .tokens import TRANSPARENT_KEY
+from .zorder import out_of_topmost_band
 
 POLL_MS = 5000  # 固定值，不開放設定
 QUERY_POLL_MS = 500  # 固定值：查詢進行中縮短間隔，查完的新讀數才不必再等一整輪（查詢最久 20 秒，這段期間最多多 poll 約 40 次）
@@ -499,6 +500,9 @@ class Widget:
         previous, self._prefs = self._prefs, prefs
         if previous is None or prefs.always_on_top != previous.always_on_top:
             self.root.attributes("-topmost", prefs.always_on_top)
+        elif prefs.always_on_top and out_of_topmost_band(int(self.root.wm_frame(), 16)):
+            # Windows 偶爾讓視窗掉出置頂層、旗標卻還在：重新宣告救回來。沒掉層就不動，免得蓋住開著的右鍵選單
+            self.root.attributes("-topmost", True)
         if previous is None or prefs.opacity != previous.opacity:
             self.root.attributes("-alpha", prefs.opacity / 100)
         # 跟隨系統：每輪 poll 都會走到這裡，系統換介面語言後下一輪就跟上
