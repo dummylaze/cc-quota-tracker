@@ -341,7 +341,6 @@ STRINGS = {
     "report.ledger.updated_at": "Ledger updated",
     "report.ledger.never": "never",
     "report.ledger.earliest": "Earliest data",
-    "report.ledger.reason.transcripts": "some transcript files could not be read, so nothing was recorded this time",
     "report.ledger.reason.unknown": "unknown reason",
     "report.range": "Range",
     "report.range.7d": "Last 7 days",

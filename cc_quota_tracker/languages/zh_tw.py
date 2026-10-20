@@ -287,7 +287,6 @@ STRINGS = {
     "report.ledger.updated_at": "帳本更新",
     "report.ledger.never": "尚未更新",
     "report.ledger.earliest": "最早有資料",
-    "report.ledger.reason.transcripts": "有對話紀錄檔讀不到，這次不入帳以免漏記",
     "report.ledger.reason.unknown": "原因不明",
     "report.range": "區間",
     "report.range.7d": "近 7 天",

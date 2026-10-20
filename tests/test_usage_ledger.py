@@ -238,7 +238,7 @@ class LedgerFailureTest(LedgerTestCase):
         self.assertEqual((data["notices"], err), ([], ""))
         self.assertEqual(data["ledger"]["updatedAt"], NOW.isoformat())
 
-    def test_transcripts_that_cannot_be_read_stop_ledgering_so_nothing_is_lost_for_good(self):
+    def test_transcripts_that_cannot_be_read_do_not_hold_the_ledger_back(self):
         self.write_transcript("p/s1.jsonl", assistant("m1", "r1", OLD, output=3))
         self.write_transcript("p/s2.jsonl", assistant("m2", "r2", OLD, output=4))
         real_open = open
@@ -249,12 +249,10 @@ class LedgerFailureTest(LedgerTestCase):
             return real_open(file, *args, **kwargs)
         with mock.patch("cc_quota_tracker.transcripts.open", locked_open, create=True):
             data, _ = self.report()
-        self.assertFalse(self.ledger_file.exists())
-        self.assertEqual(sorted(n["kind"] for n in data["notices"]), ["ledgerUpdateFailed", "transcriptUnreadable"])
-        data, _ = self.report()  # 檔案能讀了：補入帳
-        self.assertEqual(self.output_of(data), 7)
-        self.delete_transcripts()
-        self.assertEqual(self.output_of(self.report()[0]), 7)
+        self.assertEqual([n["kind"] for n in data["notices"]], ["transcriptUnreadable"])  # 示警，但不是帳本失敗
+        self.assertEqual(data["ledger"]["updatedAt"], NOW.isoformat())
+        self.delete_transcripts()  # 能讀的那個已經入帳；讀不到的沒算進去，這是示警的意思
+        self.assertEqual(self.output_of(self.report()[0]), 3)
 
     def test_a_torn_batch_is_not_used_and_the_next_update_writes_the_hours_again(self):
         self.write_transcript("p/s1.jsonl", assistant("m1", "r1", OLD, output=3))

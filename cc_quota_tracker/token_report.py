@@ -24,10 +24,6 @@ LEDGER_DELAY = timedelta(hours=24)  # 過了這麼久的小時才入帳；更近
 _HourKey = Tuple[datetime, Optional[str], str]  # UTC 小時、帳號識別碼（None＝未歸屬）、模型
 
 
-class _TranscriptsUnreadable(Exception):
-    """有東西要入帳、但對話紀錄有檔案讀不到。"""
-
-
 class ReportWarning(Exception):
     """報表上的示警，寫進錯誤紀錄用：訊息就是印給使用者看的那一句。"""
 
@@ -119,7 +115,8 @@ def _hourly(usages: Iterable[Usage], attribution: Attribution) -> Dict[_HourKey,
 def update_ledger(managed: ManagedDirectory, scan: Scan, switch_log: SwitchLog, now: datetime) -> LedgerStatus:
     """把已經過去 24 小時以上、帳本裡還沒有的小時追加進帳本，回傳更新後的狀態。
     別的行程正在寫（等不到鎖）是跳過這次，不算失敗，狀態維持原樣。失敗時帳本不變，原因記進狀態（之後成功才清掉）。
-    有東西要入帳、但對話紀錄有檔案讀不到時不入帳：那些檔案的用量這次沒算進來，入帳了就補不回去（Claude Code 之後可能刪掉它們）。"""
+    對話紀錄有檔案讀不到時照樣入帳（報表頂端另外示警）：讀不到的檔案可能永遠讀不到，為了它擋住整個帳本，
+    Claude Code 刪掉舊紀錄後所有用量都會漏掉，比少一個檔案的用量嚴重得多。"""
     previous = managed.read_ledger_status()
     through = _hour_of(now - LEDGER_DELAY)
     attribution = Attribution(switch_log.records)
@@ -133,16 +130,12 @@ def update_ledger(managed: ManagedDirectory, scan: Scan, switch_log: SwitchLog, 
             _hourly(fresh, attribution).items(), key=lambda kv: (kv[0][0], kv[0][1] or "", kv[0][2]))]
         if not cells:
             return None  # 沒有用量就不前進：什麼都沒有可以保住
-        if scan.unreadable_files:
-            raise _TranscriptsUnreadable()
         return cells, through
 
     failure: Optional[LedgerFailure] = None
     try:
         if managed.update_usage_ledger(plan):
             return previous
-    except _TranscriptsUnreadable:
-        failure = LedgerFailure("transcriptUnreadable")
     except OSError as e:
         failure = LedgerFailure("io", e.strerror or type(e).__name__)  # 不用 str(e)：它帶著含使用者名稱的路徑
     status = LedgerStatus(previous.updated_at if failure else now, failure)
@@ -235,6 +228,4 @@ def _notices(scan: Scan, switch_log: SwitchLog, ledger: LedgerRead, status: Ledg
 
 def failure_reason(lang: str, failure: LedgerFailure) -> str:
     """帳本更新失敗的原因，給橫幅與錯誤紀錄用的一句話。"""
-    if failure.kind == "transcriptUnreadable":
-        return i18n.text(lang, "report.ledger.reason.transcripts")
     return failure.detail or i18n.text(lang, "report.ledger.reason.unknown")
