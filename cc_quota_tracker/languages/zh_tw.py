@@ -185,6 +185,8 @@ STRINGS = {
                  "  {command} list               列出看板\n"
                  "  {command} check              檢查 Claude Code 的額度快取結構是否仍與本工具相容，並列出實際使用的目錄\n"
                  "  {command} query              查詢一次最新額度並等它結束；成功結束代碼 0，失敗 1\n"
+                 "  {command} report [--no-open] 從對話紀錄算出各帳號的 token 用量，產生本機 HTML 報表並用預設瀏覽器打開；"
+                 "--no-open 只產生並印出檔案路徑。報表產生成功結束代碼 0（有示警也是 0），沒能產生 1\n"
                  "  {command} gui                開啟懸浮視窗，但會多帶一個主控台；不要主控台就雙擊 cc-quota-tracker.exe（原始碼版：改用 pythonw 執行）\n"
                  "  {command} --version          印出版本\n"
                  "  {command} switch <帳號標籤> [--yes]\n"
@@ -278,4 +280,34 @@ STRINGS = {
     "status.no_items": "清單是空的，無從檢查",
     "status.unreachable": "上層不符，無從檢查",
     "status.parent_absent": "上層未出現，免檢查",
+
+    # token 報表
+    "report.title": "token 報表",
+    "report.generated_at": "產生時間",
+    "report.range": "區間",
+    "report.range.7d": "近 7 天",
+    "report.range.30d": "近 30 天",
+    "report.range.all": "全部",
+    "report.col.account": "帳號",
+    "report.col.input": "input",
+    "report.col.output": "output",
+    "report.col.cache_write_5m": "cache 寫入（5 分鐘）",
+    "report.col.cache_write_1h": "cache 寫入（1 小時）",
+    "report.col.cache_read": "cache 讀取",
+    "report.col.cache_hit": "cache 命中比例",
+    "report.row.total": "合計",
+    "report.row.unattributed": "未歸屬",
+    "report.account.unwatched": "未監看帳號 {n}",
+    "report.empty": "這個區間沒有用量。",
+    "report.cache_note": "cache 命中比例＝cache 讀取 ÷（input＋cache 寫入＋cache 讀取），output 不計。"
+                         "供應商沒有公布這個比例的算法，這是依供應商「總 input＝三者相加」的定義推得的。",
+    "report.unattributed_note": "未歸屬：無法確定用量屬於哪個帳號的時段，不歸給任何帳號，但計入合計。",
+    "report.note.downtime_since": "{date} 之前無從辨識停機時段：本工具停止運作期間若切換過帳號，用量照切換紀錄的時間歸屬，可能歸錯。",
+    "report.note.downtime_never": "無從辨識停機時段：本工具停止運作期間若切換過帳號，用量照切換紀錄的時間歸屬，可能歸錯。",
+    "report.notice.schema_mismatch": "有 {n} 筆對話紀錄的結構不符，沒有計入用量，實際用量可能比報表高。",
+    "report.notice.transcript_unreadable": "有 {n} 個對話紀錄檔讀不到，沒有計入用量，實際用量可能比報表高。",
+    "report.notice.switch_log_unreadable": "切換紀錄讀不到，用量無法歸屬到帳號，全部列為未歸屬。",
+    "report.notice.switch_log_skipped": "切換紀錄有 {n} 行讀不懂，已略過，歸屬可能不完整。",
+    "report.write_failed": "報表寫不進 {path}：{reason}",
+    "report.open_failed": "沒能用預設瀏覽器打開報表；報表在 {path}",
 }

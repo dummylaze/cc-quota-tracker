@@ -1,14 +1,16 @@
 """命令列：納管帳號的操作都交給核心，這裡只負責參數與文案；文案的語系與視窗一樣取自設定檔的 language。"""
 import os
 import sys
+import webbrowser
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import NamedTuple, Optional
 
-from . import COMMAND, __version__, claude_provider, i18n
+from . import COMMAND, __version__, atomic, claude_provider, i18n, report_page, token_report, transcripts
 from .board import Board, SwitchOutcome
 from .claude_provider import FieldStatus, NoReading, SchemaCheck
 from .core import BindingsUnreadable, Core, InvalidLabel, NoCredential, UnknownLabel
+from .error_log import ErrorLog
 from .fmt import date_time, query_reason, restore_confirmation, switch_confirmation, switch_refusal
 from .i18n import text
 from .managed_directory import ManagedDirectory, PermissionState
@@ -48,8 +50,9 @@ def main(argv=None) -> int:
     switch_request = _switch_request(params) if command == "switch" else None
     if switch_request is not None and not (switch_request.yes or _stdin_is_terminal()):
         switch_request = None  # 沒帶 --yes 又不是在終端機裡：沒有人可以確認，不切換
-    if switch_request is None and (command, len(params)) not in {("add", 1), ("remove", 1), ("list", 0), ("query", 0),
-                                                               ("check", 0), ("gui", 0)}:
+    open_report = _report_request(params) if command == "report" else None
+    if switch_request is None and open_report is None and (command, len(params)) not in {
+            ("add", 1), ("remove", 1), ("list", 0), ("query", 0), ("check", 0), ("gui", 0)}:
         print(text(configured_language(None), "cli.usage", command=COMMAND), file=sys.stderr)  # 還沒解析路徑，讀不到設定檔
         return 2
     try:
@@ -76,6 +79,8 @@ def main(argv=None) -> int:
         print(text(lang, "notice", text=text(lang, "settings.unreadable")), file=sys.stderr)
     if command == "query":
         return query(core, lang)
+    if open_report is not None:
+        return report(paths, lang, open_report)
     if switch_request is not None:
         return switch(core, switch_request, lang)
     label = params[0]
@@ -112,6 +117,35 @@ def query(core: Core, lang: str) -> int:
         return 0
     print(text(lang, "query.failed", reason=query_reason(result, lang)), file=sys.stderr)
     return 1
+
+
+def _report_request(params) -> Optional[bool]:
+    """`report` 或 `report --no-open`：回傳要不要打開瀏覽器；不是這兩個形狀就是 None（用法錯誤）。"""
+    return {(): True, ("--no-open",): False}.get(tuple(params))
+
+
+def report(paths: ResolvedPaths, lang: str, open_browser: bool) -> int:
+    """從對話紀錄算出各帳號的用量，寫成報表並印出檔案路徑：產生成功結束代碼 0（示警印到 stderr、也寫進錯誤紀錄，
+    不改變結束代碼）；報表沒能寫成 1。"""
+    now = datetime.now(timezone.utc)
+    managed = ManagedDirectory(paths.managed_dir)
+    data = token_report.build_data(transcripts.scan(paths.claude_dir), managed.read_switches(),
+                                   managed.list_accounts(), now, lang)
+    path = paths.settings_file.parent / report_page.REPORT_FILE
+    try:
+        atomic.write_atomic(path, report_page.render(data, lang).encode("utf-8"))
+    except OSError as e:
+        print(text(lang, "report.write_failed", path=path, reason=e.strerror or e), file=sys.stderr)
+        return 1
+    log = ErrorLog(path.parent, lambda: now)
+    for notice in data["notices"]:
+        message = report_page.notice_text(lang, notice)
+        print(message, file=sys.stderr)
+        log.failed(token_report.ReportWarning(message))
+    print(path)
+    if open_browser and not webbrowser.open(path.as_uri()):
+        print(text(lang, "report.open_failed", path=path), file=sys.stderr)
+    return 0
 
 
 class _SwitchRequest(NamedTuple):

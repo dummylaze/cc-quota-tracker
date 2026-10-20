@@ -222,6 +222,9 @@ STRINGS = {
                  "with this tool, and list the directories actually used\n"
                  "  {command} query           ask Claude Code for the latest usage once and wait for it; "
                  "exit code 0 on success, 1 on failure\n"
+                 "  {command} report [--no-open]  compute each account's token usage from the transcripts, write a "
+                 "local HTML report and open it in the default browser; --no-open only writes it and prints the file path. "
+                 "Exit code 0 once the report is written (warnings included), 1 if it could not be written\n"
                  "  {command} gui             open the floating window, with a console attached; for no console, double-click cc-quota-tracker.exe (from source: run with pythonw)\n"
                  "  {command} --version       print the version\n"
                  "  {command} switch <label> [--yes]\n"
@@ -331,4 +334,43 @@ STRINGS = {
     "status.no_items": "list is empty, nothing to check",
     "status.unreachable": "parent doesn't match, nothing to check",
     "status.parent_absent": "parent absent, no check needed",
+
+    # Token report
+    "report.title": "Token report",
+    "report.generated_at": "Generated",
+    "report.range": "Range",
+    "report.range.7d": "Last 7 days",
+    "report.range.30d": "Last 30 days",
+    "report.range.all": "All",
+    "report.col.account": "Account",
+    "report.col.input": "Input",
+    "report.col.output": "Output",
+    "report.col.cache_write_5m": "Cache write (5 min)",
+    "report.col.cache_write_1h": "Cache write (1 h)",
+    "report.col.cache_read": "Cache read",
+    "report.col.cache_hit": "Cache hit ratio",
+    "report.row.total": "Total",
+    "report.row.unattributed": "Unattributed",
+    "report.account.unwatched": "Unwatched account {n}",
+    "report.empty": "No usage in this range.",
+    "report.cache_note": "Cache hit ratio = cache read ÷ (input + cache write + cache read); output is not counted. "
+                         "The provider does not publish how this ratio is computed; this follows from its definition "
+                         "\"total input = the sum of the three\".",
+    "report.unattributed_note": "Unattributed: spans where it cannot be told which account the usage belongs to. "
+                                "They are not given to any account but are counted in the total.",
+    "report.note.downtime_since": "Downtime cannot be identified before {date}: if an account was switched while this "
+                                  "tool was not running, the usage is attributed by the time in the switch log and "
+                                  "may be wrong.",
+    "report.note.downtime_never": "Downtime cannot be identified: if an account was switched while this tool was not "
+                                  "running, the usage is attributed by the time in the switch log and may be wrong.",
+    "report.notice.schema_mismatch": "{n} transcript entries have an unrecognized structure and were not counted; "
+                                     "actual usage may be higher than shown.",
+    "report.notice.transcript_unreadable": "{n} transcript files could not be read and were not counted; "
+                                           "actual usage may be higher than shown.",
+    "report.notice.switch_log_unreadable": "The switch log could not be read, so usage cannot be attributed to "
+                                           "accounts; all of it is listed as unattributed.",
+    "report.notice.switch_log_skipped": "{n} lines of the switch log could not be understood and were skipped; "
+                                        "attribution may be incomplete.",
+    "report.write_failed": "Could not write the report to {path}: {reason}",
+    "report.open_failed": "Could not open the report in the default browser; it is at {path}",
 }

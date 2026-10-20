@@ -26,7 +26,8 @@
   是否已停止重試），寫回成功、重新納管或移除（那份憑證指紋不在了）時清掉。讀不到時照樣寫回，但失敗不記次數；
   寫不成不丟例外，下一輪再記。沒有這個檔的舊版視為沒有寫回失敗。
 - .state/switches.jsonl，切換紀錄：只追加。寫不成丟 OSError，既有的行不變。lastRunAt 是後加的欄位，只有重新啟動後
-  第一次判定就偵測到的切換才有；沒有這個欄位的舊行照舊可讀。
+  第一次判定就偵測到的切換才有；沒有這個欄位的舊行照舊可讀。read_switches 供 token 報表讀回：不存在就是沒有紀錄，
+  打不開回報 unreadable，讀不懂的行略過並計數。
 - .state/pre-switch.json，切換前憑證（當前憑證原文＋帳號資訊，含 email；只保存、不顯示）：每次切換在寫入當前憑證之前覆寫，
   只有一份。寫不成丟 OSError，呼叫端不切換。
 - .state/window.json，視窗位置：寫不成是「這次沒記住」，不丟例外；收不緊權限照常寫入。
@@ -106,6 +107,20 @@ class Observed(NamedTuple):
     kept_invalid: Tuple[str, ...] = ()
     expires_at: Optional[datetime] = None
     last_run_at: Optional[datetime] = None
+
+
+class SwitchRecord(NamedTuple):
+    """切換紀錄的一筆：觀測到切換的時間、切到的帳號識別碼（拿不到為 None）、重新啟動後第一次判定就偵測到時的上一次運作時間。"""
+    at: datetime
+    account_id: Optional[str]
+    last_run_at: Optional[datetime] = None
+
+
+class SwitchLog(NamedTuple):
+    """讀回的切換紀錄：依時間排序的紀錄、讀不懂而略過的行數、整個檔案是否打不開。"""
+    records: Tuple[SwitchRecord, ...]
+    skipped: int
+    unreadable: bool
 
 
 class Synced(NamedTuple):
@@ -271,6 +286,30 @@ class ManagedDirectory:
         line = json.dumps(record)
         atomic.append(self._switch_log, (line + "\n").encode("utf-8"),
                       before_replace=lambda tmp: self._tighten(tmp, new=True))
+
+    def read_switches(self) -> SwitchLog:
+        """切換紀錄依時間排序讀回（token 報表用）。檔案不存在就是還沒有紀錄；打不開（被鎖住、權限）是 unreadable，
+        一筆都不採用；個別行讀不懂（不是物件、沒有時間）略過並計數，其餘照用。lastRunAt 讀不懂只當成沒帶。"""
+        try:
+            content = self._switch_log.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            return SwitchLog((), 0, False)
+        except (OSError, ValueError):
+            return SwitchLog((), 0, True)
+        records, skipped = [], 0
+        for line in content.split("\n"):  # 不用 splitlines：它會在 U+2028 之類的字元上多切一刀
+            if not line.strip():
+                continue
+            try:
+                state = json.loads(line)
+            except ValueError:
+                state = None
+            at = _datetime(state.get("at")) if isinstance(state, dict) else None
+            if at is None:
+                skipped += 1
+                continue
+            records.append(SwitchRecord(at, _text(state.get("accountId")), _datetime(state.get("lastRunAt"))))
+        return SwitchLog(tuple(sorted(records, key=lambda r: r.at)), skipped, False)
 
     def list_accounts(self) -> Tuple[WatchedAccount, ...]:
         """所有監看帳號，依帳號標籤排序。綁定檔讀不到時當成都沒有綁定；憑證指紋讀不出來的是「未知」。"""
