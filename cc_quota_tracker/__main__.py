@@ -50,8 +50,8 @@ def main(argv=None) -> int:
     switch_request = _switch_request(params) if command == "switch" else None
     if switch_request is not None and not (switch_request.yes or _stdin_is_terminal()):
         switch_request = None  # 沒帶 --yes 又不是在終端機裡：沒有人可以確認，不切換
-    open_report = _report_request(params) if command == "report" else None
-    if switch_request is None and open_report is None and (command, len(params)) not in {
+    report_request = _report_request(params) if command == "report" else None
+    if switch_request is None and report_request is None and (command, len(params)) not in {
             ("add", 1), ("remove", 1), ("list", 0), ("query", 0), ("check", 0), ("gui", 0)}:
         print(text(configured_language(None), "cli.usage", command=COMMAND), file=sys.stderr)  # 還沒解析路徑，讀不到設定檔
         return 2
@@ -79,8 +79,8 @@ def main(argv=None) -> int:
         print(text(lang, "notice", text=text(lang, "settings.unreadable")), file=sys.stderr)
     if command == "query":
         return query(core, lang)
-    if open_report is not None:
-        return report(paths, lang, open_report)
+    if report_request is not None:
+        return report(paths, lang, report_request)
     if switch_request is not None:
         return switch(core, switch_request, lang)
     label = params[0]
@@ -119,31 +119,50 @@ def query(core: Core, lang: str) -> int:
     return 1
 
 
-def _report_request(params) -> Optional[bool]:
-    """`report` 或 `report --no-open`：回傳要不要打開瀏覽器；不是這兩個形狀就是 None（用法錯誤）。"""
-    return {(): True, ("--no-open",): False}.get(tuple(params))
+class _ReportRequest(NamedTuple):
+    open_browser: bool  # 產生後用預設瀏覽器打開
+    ledger_only: bool  # 只更新用量帳本、不產生報表
 
 
-def report(paths: ResolvedPaths, lang: str, open_browser: bool) -> int:
-    """從對話紀錄算出各帳號的用量，寫成報表並印出檔案路徑：產生成功結束代碼 0（示警印到 stderr、也寫進錯誤紀錄，
-    不改變結束代碼）；報表沒能寫成 1。"""
+def _report_request(params) -> Optional[_ReportRequest]:
+    """`report`、`report --no-open`，或不寫進說明的 `report --update-ledger`（只更新帳本，給懸浮視窗每日更新用）；
+    不是這幾個形狀就是 None（用法錯誤）。"""
+    return {(): _ReportRequest(True, False), ("--no-open",): _ReportRequest(False, False),
+            ("--update-ledger",): _ReportRequest(False, True)}.get(tuple(params))
+
+
+def report(paths: ResolvedPaths, lang: str, request: _ReportRequest) -> int:
+    """先把過了 24 小時的用量記進帳本，再由帳本加上最近 24 小時的對話紀錄算出各帳號的用量，寫成報表並印出檔案路徑：
+    產生成功結束代碼 0（示警印到 stderr、也寫進錯誤紀錄，不改變結束代碼）；報表沒能寫成 1。
+    只更新帳本時不產生報表：帳本更新失敗結束代碼 1（原因寫進錯誤紀錄、印到 stderr），其餘 0。"""
     now = datetime.now(timezone.utc)
     managed = ManagedDirectory(paths.managed_dir)
-    data = token_report.build_data(transcripts.scan(paths.claude_dir), managed.read_switches(),
-                                   managed.list_accounts(), now, lang)
+    scan = transcripts.scan(paths.claude_dir)
+    switches = managed.read_switches()
+    status = token_report.update_ledger(managed, scan, switches, now)
+    log = ErrorLog(paths.settings_file.parent, lambda: now)
+    if request.ledger_only:
+        if status.failure is None:
+            return 0
+        message = report_page.notice_text(lang, {"kind": "ledgerUpdateFailed",
+                                                 "reason": token_report.failure_reason(lang, status.failure)})
+        print(message, file=sys.stderr)
+        log.failed(token_report.ReportWarning(message))
+        return 1
+    data = token_report.build_data(scan, switches, managed.list_accounts(), now, lang,
+                                   managed.read_usage_ledger(), status)
     path = paths.settings_file.parent / report_page.REPORT_FILE
     try:
         atomic.write_atomic(path, report_page.render(data, lang).encode("utf-8"))
     except OSError as e:
         print(text(lang, "report.write_failed", path=path, reason=e.strerror or e), file=sys.stderr)
         return 1
-    log = ErrorLog(path.parent, lambda: now)
     for notice in data["notices"]:
         message = report_page.notice_text(lang, notice)
         print(message, file=sys.stderr)
         log.failed(token_report.ReportWarning(message))
     print(path)
-    if open_browser and not webbrowser.open(path.as_uri()):
+    if request.open_browser and not webbrowser.open(path.as_uri()):
         print(text(lang, "report.open_failed", path=path), file=sys.stderr)
     return 0
 

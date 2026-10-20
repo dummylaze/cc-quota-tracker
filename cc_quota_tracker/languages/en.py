@@ -338,6 +338,11 @@ STRINGS = {
     # Token report
     "report.title": "Token report",
     "report.generated_at": "Generated",
+    "report.ledger.updated_at": "Ledger updated",
+    "report.ledger.never": "never",
+    "report.ledger.earliest": "Earliest data",
+    "report.ledger.reason.transcripts": "some transcript files could not be read, so nothing was recorded this time",
+    "report.ledger.reason.unknown": "unknown reason",
     "report.range": "Range",
     "report.range.7d": "Last 7 days",
     "report.range.30d": "Last 30 days",
@@ -371,6 +376,10 @@ STRINGS = {
                                            "accounts; all of it is listed as unattributed.",
     "report.notice.switch_log_skipped": "{n} lines of the switch log could not be understood and were skipped; "
                                         "attribution may be incomplete.",
+    "report.notice.ledger_failed": "Updating the usage ledger failed ({reason}): usage not yet recorded can only be "
+                                   "computed from the transcripts, and is lost once they are deleted.",
+    "report.notice.ledger_skipped": "{n} places in the usage ledger could not be understood and were skipped; "
+                                    "actual usage may be higher than shown.",
     "report.write_failed": "Could not write the report to {path}: {reason}",
     "report.open_failed": "Could not open the report in the default browser; it is at {path}",
 }

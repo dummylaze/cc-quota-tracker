@@ -4,19 +4,28 @@
 未歸屬：第一筆切換紀錄之前；切到帳號未知（識別碼為空）之後；t 之後的下一筆切換紀錄帶有上一次運作時間 P、且 P ≤ t
 （本工具停止運作期間發生了切換，P 到切換偵測到的時間之間不知道是哪個帳號）。
 
-報表資料不含帳號識別碼與 email：帳號只以不透明的鍵（a1、a2…）和帳號標籤出現。"""
+報表資料不含帳號識別碼與 email：帳號只以不透明的鍵（a1、a2…）和帳號標籤出現。
+
+資料來源是用量帳本加上最近的對話紀錄：帳本記著「through 之前的小時」，這些小時一律取帳本，對話紀錄只算 through 之後的小時
+（沒入帳的最近 24 小時，遲到的紀錄因此不會漏）。兩邊的小時互不重疊，不會重複計算。"""
 from bisect import bisect_right
 from collections import defaultdict
 from datetime import date, datetime, time, timedelta, tzinfo
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 from . import i18n
-from .managed_directory import SwitchLog, SwitchRecord, WatchedAccount
-from .transcripts import Scan
+from .managed_directory import ManagedDirectory, SwitchLog, SwitchRecord, WatchedAccount
+from .transcripts import Scan, Usage
+from .usage_ledger import TOKEN_FIELDS, LedgerCell, LedgerFailure, LedgerRead, LedgerStatus
 
 SCHEMA = 1  # 報表資料的版本；之後加欄位不升版，改變既有欄位的意思才升
 RANGES = (("7d", 7), ("30d", 30), ("all", None))  # 區間：近 N 個本機的日（含今天），None＝全部
-TOKEN_FIELDS = ("input", "output", "cacheWrite5m", "cacheWrite1h", "cacheRead")
+LEDGER_DELAY = timedelta(hours=24)  # 過了這麼久的小時才入帳；更近的每次從對話紀錄重算，遲到的紀錄才不會漏
+_HourKey = Tuple[datetime, Optional[str], str]  # UTC 小時、帳號識別碼（None＝未歸屬）、模型
+
+
+class _TranscriptsUnreadable(Exception):
+    """有東西要入帳、但對話紀錄有檔案讀不到。"""
 
 
 class ReportWarning(Exception):
@@ -54,18 +63,17 @@ class Attribution:
 
 
 def build_data(scan: Scan, switch_log: SwitchLog, accounts: Sequence[WatchedAccount], now: datetime,
-               lang: str) -> dict:
+               lang: str, ledger: LedgerRead, status: LedgerStatus) -> dict:
     zone = local_zone()
     attribution = Attribution(switch_log.records)
-    keys, labels = _account_keys(switch_log.records, accounts, lang)
+    keys, labels = _account_keys(switch_log.records, accounts, lang, (c.account_id for c in ledger.cells))
 
-    # 先收成 UTC 小時（spec：用量帳本就是這個粒度），再把小時換算成本機的日。小時整個歸給「小時起點」所在的日：
+    # 先收成 UTC 小時（帳本就是這個粒度），再把小時換算成本機的日。小時整個歸給「小時起點」所在的日：
     # 半小時偏移的時區（+5:30、+5:45）裡，一個 UTC 小時會跨本機的日界，那半小時會歸給前一天；這是帳本粒度的代價
-    hours: Dict[Tuple[datetime, Optional[str], str], List[int]] = defaultdict(lambda: [0] * len(TOKEN_FIELDS))
-    for u in scan.usages:
-        hour = u.at.replace(minute=0, second=0, microsecond=0)
-        _add(hours[(hour, attribution.account_at(u.at), u.model)],
-             (u.input, u.output, u.cache_write_5m, u.cache_write_1h, u.cache_read))
+    live = [u for u in scan.usages if ledger.through is None or _hour_of(u.at) >= ledger.through]
+    hours = _hourly(live, attribution)
+    for cell in ledger.cells:
+        _add(hours[(cell.hour, cell.account_id, cell.model)], cell.counts)
     days: Dict[Tuple[str, Optional[str], str], List[int]] = defaultdict(lambda: [0] * len(TOKEN_FIELDS))
     for (hour, account_id, model), counts in hours.items():
         _add(days[(hour.astimezone(zone).date().isoformat(), keys[account_id] if account_id else None, model)], counts)
@@ -77,7 +85,7 @@ def build_data(scan: Scan, switch_log: SwitchLog, accounts: Sequence[WatchedAcco
 
     today = now.astimezone(zone).date()
     cutoff = next((r.at for r in switch_log.records if r.last_run_at is not None), None)
-    earliest = min((u.at for u in scan.usages), default=None)
+    earliest = min([u.at for u in live] + [c.hour for c in ledger.cells], default=None)
     return {
         "schema": SCHEMA,
         "generatedAt": now.isoformat(),
@@ -86,15 +94,68 @@ def build_data(scan: Scan, switch_log: SwitchLog, accounts: Sequence[WatchedAcco
         "accounts": [{"key": key, "label": labels[account_id]} for account_id, key in keys.items()
                      if any(r["account"] == key for r in rows)],
         "rows": rows,
+        # 用量帳本：最早有資料的時間、最後一次成功更新的時間（沒更新過是 null）；更新失敗的原因在 notices
+        "ledger": {"earliest": earliest.isoformat() if earliest else None,
+                   "updatedAt": status.updated_at.isoformat() if status.updated_at else None},
         # 開始記錄停機時段的那一天（本機）；沒有任何一筆帶上一次運作時間時是 null
         "downtimeRecordedSince": cutoff.astimezone(zone).date().isoformat() if cutoff else None,
         "summary": {name: _summary(rows, today, span, zone, cutoff, earliest, rank) for name, span in RANGES},
-        "notices": _notices(scan, switch_log),
+        "notices": _notices(scan, switch_log, ledger, status, lang),
     }
 
 
-def _account_keys(switches: Sequence[SwitchRecord], accounts: Sequence[WatchedAccount],
-                  lang: str) -> Tuple[Dict[str, str], Dict[str, str]]:
+def _hour_of(at: datetime) -> datetime:
+    return at.replace(minute=0, second=0, microsecond=0)
+
+
+def _hourly(usages: Iterable[Usage], attribution: Attribution) -> Dict[_HourKey, List[int]]:
+    hours: Dict[_HourKey, List[int]] = defaultdict(lambda: [0] * len(TOKEN_FIELDS))
+    for u in usages:
+        _add(hours[(_hour_of(u.at), attribution.account_at(u.at), u.model)],
+             (u.input, u.output, u.cache_write_5m, u.cache_write_1h, u.cache_read))
+    return hours
+
+
+def update_ledger(managed: ManagedDirectory, scan: Scan, switch_log: SwitchLog, now: datetime) -> LedgerStatus:
+    """把已經過去 24 小時以上、帳本裡還沒有的小時追加進帳本，回傳更新後的狀態。
+    別的行程正在寫（等不到鎖）是跳過這次，不算失敗，狀態維持原樣。失敗時帳本不變，原因記進狀態（之後成功才清掉）。
+    有東西要入帳、但對話紀錄有檔案讀不到時不入帳：那些檔案的用量這次沒算進來，入帳了就補不回去（Claude Code 之後可能刪掉它們）。"""
+    previous = managed.read_ledger_status()
+    through = _hour_of(now - LEDGER_DELAY)
+    attribution = Attribution(switch_log.records)
+
+    def plan(read: LedgerRead) -> Optional[Tuple[List[LedgerCell], datetime]]:
+        if read.through is not None and through <= read.through:
+            return None
+        fresh = [u for u in scan.usages if (read.through is None or _hour_of(u.at) >= read.through)
+                 and _hour_of(u.at) < through]
+        cells = [LedgerCell(hour, account_id, model, tuple(counts)) for (hour, account_id, model), counts in sorted(
+            _hourly(fresh, attribution).items(), key=lambda kv: (kv[0][0], kv[0][1] or "", kv[0][2]))]
+        if not cells:
+            return None  # 沒有用量就不前進：什麼都沒有可以保住
+        if scan.unreadable_files:
+            raise _TranscriptsUnreadable()
+        return cells, through
+
+    failure: Optional[LedgerFailure] = None
+    try:
+        if managed.update_usage_ledger(plan):
+            return previous
+    except _TranscriptsUnreadable:
+        failure = LedgerFailure("transcriptUnreadable")
+    except OSError as e:
+        failure = LedgerFailure("io", e.strerror or type(e).__name__)  # 不用 str(e)：它帶著含使用者名稱的路徑
+    status = LedgerStatus(previous.updated_at if failure else now, failure)
+    try:
+        managed.write_ledger_status(status)
+    except OSError as e:
+        if failure is None:
+            status = LedgerStatus(previous.updated_at, LedgerFailure("io", e.strerror or type(e).__name__))
+    return status
+
+
+def _account_keys(switches: Sequence[SwitchRecord], accounts: Sequence[WatchedAccount], lang: str,
+                  ledgered: Iterable[Optional[str]] = ()) -> Tuple[Dict[str, str], Dict[str, str]]:
     """帳號識別碼 → 不透明的鍵（依在切換紀錄首次出現的順序）、帳號識別碼 → 顯示的標籤。
     標籤取自現有的綁定；查不到的是未監看帳號，依首次出現的順序編號（編號跨次報表固定的規則在 token-report/05）。"""
     by_id: Dict[str, str] = {}
@@ -104,14 +165,15 @@ def _account_keys(switches: Sequence[SwitchRecord], accounts: Sequence[WatchedAc
     keys: Dict[str, str] = {}
     labels: Dict[str, str] = {}
     unwatched = 0
-    for record in switches:
-        if record.account_id and record.account_id not in keys:
-            keys[record.account_id] = f"a{len(keys) + 1}"
-            if record.account_id in by_id:
-                labels[record.account_id] = by_id[record.account_id]
+    # 帳本裡的帳號識別碼接在切換紀錄之後（切換紀錄讀不到時，帳本裡的帳號照樣要有鍵）
+    for account_id in [r.account_id for r in switches] + list(ledgered):
+        if account_id and account_id not in keys:
+            keys[account_id] = f"a{len(keys) + 1}"
+            if account_id in by_id:
+                labels[account_id] = by_id[account_id]
             else:
                 unwatched += 1
-                labels[record.account_id] = i18n.text(lang, "report.account.unwatched", n=unwatched)
+                labels[account_id] = i18n.text(lang, "report.account.unwatched", n=unwatched)
     return keys, labels
 
 
@@ -154,7 +216,7 @@ def cache_hit_ratio(figures: dict) -> Optional[float]:
     return figures["cacheRead"] / denominator if denominator else None
 
 
-def _notices(scan: Scan, switch_log: SwitchLog) -> List[dict]:
+def _notices(scan: Scan, switch_log: SwitchLog, ledger: LedgerRead, status: LedgerStatus, lang: str) -> List[dict]:
     notices = []
     if scan.mismatched:
         notices.append({"kind": "schemaMismatch", "count": scan.mismatched})
@@ -164,4 +226,15 @@ def _notices(scan: Scan, switch_log: SwitchLog) -> List[dict]:
         notices.append({"kind": "switchLogUnreadable"})
     elif switch_log.skipped:
         notices.append({"kind": "switchLogSkipped", "count": switch_log.skipped})
+    if status.failure:
+        notices.append({"kind": "ledgerUpdateFailed", "reason": failure_reason(lang, status.failure)})
+    if ledger.skipped:
+        notices.append({"kind": "ledgerSkipped", "count": ledger.skipped})
     return notices
+
+
+def failure_reason(lang: str, failure: LedgerFailure) -> str:
+    """帳本更新失敗的原因，給橫幅與錯誤紀錄用的一句話。"""
+    if failure.kind == "transcriptUnreadable":
+        return i18n.text(lang, "report.ledger.reason.transcripts")
+    return failure.detail or i18n.text(lang, "report.ledger.reason.unknown")

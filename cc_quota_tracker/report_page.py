@@ -14,6 +14,9 @@ REPORT_FILE = "token-report.html"  # 放在設定檔所在的目錄，每次覆�
 _PAGE_TEXT = {
     "title": "report.title",
     "generatedAt": "report.generated_at",
+    "ledgerUpdatedAt": "report.ledger.updated_at",
+    "ledgerNever": "report.ledger.never",
+    "earliest": "report.ledger.earliest",
     "range": "report.range",
     "range.7d": "report.range.7d",
     "range.30d": "report.range.30d",
@@ -39,13 +42,15 @@ NOTICE_KEYS = {
     "transcriptUnreadable": "report.notice.transcript_unreadable",
     "switchLogUnreadable": "report.notice.switch_log_unreadable",
     "switchLogSkipped": "report.notice.switch_log_skipped",
+    "ledgerUpdateFailed": "report.notice.ledger_failed",
+    "ledgerSkipped": "report.notice.ledger_skipped",
 }
-_HOLES = {"n": "{n}", "date": "{date}"}  # 讓 text() 把佔位符原樣留下，由腳本填
+_HOLES = {"n": "{n}", "date": "{date}", "reason": "{reason}"}  # 讓 text() 把佔位符原樣留下，由腳本填
 
 
 def notice_text(lang: str, notice: dict) -> str:
     """命令列印到 stderr 的示警；與頁面橫幅是同一份語系文字。"""
-    return i18n.text(lang, NOTICE_KEYS[notice["kind"]], n=notice.get("count", ""))
+    return i18n.text(lang, NOTICE_KEYS[notice["kind"]], n=notice.get("count", ""), reason=notice.get("reason", ""))
 
 
 def render(data: dict, lang: str) -> str:
@@ -141,8 +146,12 @@ tr.total td{font-weight:700;border-bottom:0}
   }
 
   document.getElementById('title').textContent = T.title;
-  document.getElementById('meta').textContent =
-    T.generatedAt + ' ' + new Date(data.generatedAt).toLocaleString(data.language);
+  function when(iso) { return new Date(iso).toLocaleString(data.language); }
+  document.getElementById('meta').textContent = [
+    T.generatedAt + ' ' + when(data.generatedAt),
+    T.ledgerUpdatedAt + ' ' + (data.ledger.updatedAt ? when(data.ledger.updatedAt) : T.ledgerNever),
+    T.earliest + ' ' + (data.ledger.earliest ? when(data.ledger.earliest) : '\\u2014')
+  ].join(' \\u00b7 ');
   document.getElementById('range-label').textContent = T.range;
   var select = document.getElementById('range');
   ['7d', '30d', 'all'].forEach(function (name) {
@@ -153,7 +162,8 @@ tr.total td{font-weight:700;border-bottom:0}
 
   var banners = document.getElementById('banners');
   data.notices.forEach(function (notice) {
-    var banner = el('p', fill(T.notices[notice.kind], { n: numbers.format(notice.count || 0) }), 'banner');
+    var banner = el('p', fill(T.notices[notice.kind],
+      { n: numbers.format(notice.count || 0), reason: notice.reason || '' }), 'banner');
     banner.setAttribute('role', 'alert');
     banners.appendChild(banner);
   });

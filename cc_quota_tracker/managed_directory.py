@@ -28,6 +28,10 @@
 - .state/switches.jsonl，切換紀錄：只追加。寫不成丟 OSError，既有的行不變。lastRunAt 是後加的欄位，只有重新啟動後
   第一次判定就偵測到的切換才有；沒有這個欄位的舊行照舊可讀。read_switches 供 token 報表讀回：不存在就是沒有紀錄，
   打不開回報 unreadable，讀不懂的行略過並計數。
+- .state/usage-ledger.jsonl，用量帳本（token 報表）：只追加，格式見 usage_ledger。一次追加在跨行程的鎖（.state/usage-ledger.lock）裡進行：
+  等不到鎖就跳過這次追加（update_usage_ledger 回報 True），不是失敗。寫不成丟 OSError，既有的行不變。read_usage_ledger：不存在就是
+  還沒有入帳，打不開回報 unreadable，讀不懂或被中斷的批次不採用並計數。
+- .state/usage-ledger-status.json，帳本的更新狀態（最後成功更新的時間、最近一次失敗的原因）：每次更新後覆寫。讀不到、讀不懂都當成沒有；寫不成丟 OSError。
 - .state/pre-switch.json，切換前憑證（當前憑證原文＋帳號資訊，含 email；只保存、不顯示）：每次切換在寫入當前憑證之前覆寫，
   只有一份。寫不成丟 OSError，呼叫端不切換。
 - .state/window.json，視窗位置：寫不成是「這次沒記住」，不丟例外；收不緊權限照常寫入。
@@ -42,13 +46,14 @@ import re
 from datetime import datetime, timedelta
 from enum import Enum
 from pathlib import Path
-from typing import Dict, NamedTuple, Optional, Set, Tuple
+from typing import Callable, Dict, NamedTuple, Optional, Sequence, Set, Tuple
 
-from . import atomic
+from . import atomic, usage_ledger
 from . import claude_provider as provider
 from .board import WRITEBACK_ATTEMPTS
 from .credstore import BytesCredentialStore, FileCredentialStore
 from .permissions import is_private, make_private
+from .usage_ledger import LedgerCell, LedgerFailure, LedgerRead, LedgerStatus
 
 _LAGGING_FIELD = "_lagging"  # 讀數檔裡存落後標記的欄位；帳號識別碼不會是這個名字，舊版讀數檔的讀法會把它當成讀不懂的一筆略過
 _STATE_DIR = ".state"  # 納管目錄底下放工具狀態的子目錄，與憑證快照分開
@@ -168,6 +173,9 @@ class ManagedDirectory:
         self._state_dir = self._path / _STATE_DIR
         self._observed = self._state_dir / "observed.json"  # 最後運作時間與上一輪的觀測
         self._switch_log = self._state_dir / "switches.jsonl"
+        self._usage_ledger = self._state_dir / "usage-ledger.jsonl"
+        self._ledger_lock = self._state_dir / "usage-ledger.lock"
+        self._ledger_status = self._state_dir / "usage-ledger-status.json"
         self._window_position = self._state_dir / "window.json"
         self._bindings_file = self._state_dir / "bindings.json"  # 憑證指紋 → 帳號識別碼
         self._writeback_file = self._state_dir / "writeback.json"  # 沒寫成的憑證快照的憑證指紋 → 寫回失敗
@@ -310,6 +318,65 @@ class ManagedDirectory:
                 continue
             records.append(SwitchRecord(at, _text(state.get("accountId")), _datetime(state.get("lastRunAt"))))
         return SwitchLog(tuple(sorted(records, key=lambda r: r.at)), skipped, False)
+
+    def read_usage_ledger(self) -> LedgerRead:
+        """用量帳本讀回（token 報表用）。檔案不存在就是還沒有入帳；打不開（被鎖住、權限）是 unreadable，一筆都不採用。"""
+        try:
+            return self._read_ledger_file()
+        except OSError:
+            return LedgerRead((), None, 0, True)
+
+    def _read_ledger_file(self) -> LedgerRead:
+        try:
+            return usage_ledger.decode(self._usage_ledger.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            return LedgerRead((), None, 0, False)
+        except ValueError as e:  # 不是 UTF-8：當成打不開
+            raise OSError("usage ledger unreadable") from e
+
+    def update_usage_ledger(self, plan: Callable[[LedgerRead], Optional[Tuple[Sequence[LedgerCell], datetime]]],
+                            wait: Optional[float] = None) -> bool:
+        """在跨行程的鎖裡讀帳本、交給 plan 決定要追加什麼（格子與已入帳到哪個小時之前；None 是不追加），再追加一個批次。
+        回傳是否被別的行程擋住：等了 wait 秒（預設見 usage_ledger）拿不到鎖就跳過，不是失敗。
+        帳本打不開、追加不成都丟 OSError，既有的行不變。"""
+        self._mkdir_state_dir()
+        seconds = usage_ledger.LOCK_WAIT_SECONDS if wait is None else wait
+        with usage_ledger.exclusive(self._ledger_lock, seconds) as held:
+            if not held:
+                return True
+            self._tighten(self._ledger_lock, new=True)
+            planned = plan(self._read_ledger_file())
+            if planned is not None:
+                data = usage_ledger.encode_batch(*planned)
+                if self._ledger_ends_mid_line():
+                    data = b"\n" + data  # 上一次寫到一半被中斷：先收尾，新批次才不會接在殘行後面
+                atomic.append(self._usage_ledger, data, before_replace=lambda tmp: self._tighten(tmp, new=True))
+        return False
+
+    def _ledger_ends_mid_line(self) -> bool:
+        try:
+            with open(self._usage_ledger, "rb") as f:
+                f.seek(0, 2)
+                if f.tell() == 0:
+                    return False
+                f.seek(-1, 2)
+                return f.read(1) != b"\n"
+        except FileNotFoundError:
+            return False
+
+    def read_ledger_status(self) -> LedgerStatus:
+        state = self._read_state(self._ledger_status) or {}
+        failure = state.get("failure")
+        kind = _text(failure.get("kind")) if isinstance(failure, dict) else None
+        detail = failure.get("detail") if isinstance(failure, dict) else None
+        return LedgerStatus(_datetime(state.get("updatedAt")),
+                            LedgerFailure(kind, detail if isinstance(detail, str) else "") if kind else None)
+
+    def write_ledger_status(self, status: LedgerStatus) -> None:
+        """寫不成就丟 OSError。"""
+        failure = {"kind": status.failure.kind, "detail": status.failure.detail} if status.failure else None
+        updated = status.updated_at.isoformat() if status.updated_at else None
+        self._write_state(self._ledger_status, {"updatedAt": updated, "failure": failure})
 
     def list_accounts(self) -> Tuple[WatchedAccount, ...]:
         """所有監看帳號，依帳號標籤排序。綁定檔讀不到時當成都沒有綁定；憑證指紋讀不出來的是「未知」。"""

@@ -284,6 +284,11 @@ STRINGS = {
     # token 報表
     "report.title": "token 報表",
     "report.generated_at": "產生時間",
+    "report.ledger.updated_at": "帳本更新",
+    "report.ledger.never": "尚未更新",
+    "report.ledger.earliest": "最早有資料",
+    "report.ledger.reason.transcripts": "有對話紀錄檔讀不到，這次不入帳以免漏記",
+    "report.ledger.reason.unknown": "原因不明",
     "report.range": "區間",
     "report.range.7d": "近 7 天",
     "report.range.30d": "近 30 天",
@@ -308,6 +313,8 @@ STRINGS = {
     "report.notice.transcript_unreadable": "有 {n} 個對話紀錄檔讀不到，沒有計入用量，實際用量可能比報表高。",
     "report.notice.switch_log_unreadable": "切換紀錄讀不到，用量無法歸屬到帳號，全部列為未歸屬。",
     "report.notice.switch_log_skipped": "切換紀錄有 {n} 行讀不懂，已略過，歸屬可能不完整。",
+    "report.notice.ledger_failed": "用量帳本更新失敗（{reason}）：還沒入帳的用量只能從對話紀錄算出，對話紀錄被刪掉後就會少算。",
+    "report.notice.ledger_skipped": "用量帳本有 {n} 處讀不懂，已略過，實際用量可能比報表高。",
     "report.write_failed": "報表寫不進 {path}：{reason}",
     "report.open_failed": "沒能用預設瀏覽器打開報表；報表在 {path}",
 }
