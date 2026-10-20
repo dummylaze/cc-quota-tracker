@@ -4,7 +4,7 @@ import os
 import sys
 import tempfile
 import unittest
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest import mock
 
@@ -56,7 +56,7 @@ class ReadObservedTest(ManagedDirectoryTestCase):
     def test_written_observation_reads_back(self):
         observed = Observed("fp-1", "fp-0", ("fp-8", "fp-7"), AT)
         self.managed.write_observed(AT, observed)
-        self.assertEqual(self.managed.read_observed(), Observed("fp-1", "fp-0", ("fp-7", "fp-8"), AT))
+        self.assertEqual(self.managed.read_observed(), Observed("fp-1", "fp-0", ("fp-7", "fp-8"), AT, AT))
         self.assertEqual(json.loads(self.observed_file.read_text(encoding="utf-8")),
                          {"lastRunAt": AT.isoformat(), "fingerprint": "fp-1", "invalidSnapshot": "fp-0",
                           "invalidSnapshots": ["fp-7", "fp-8"], "expiresAt": AT.isoformat()})
@@ -68,7 +68,21 @@ class ReadObservedTest(ManagedDirectoryTestCase):
     def test_existing_file_with_the_last_run_time_is_readable(self):
         self.put(self.observed_file, json.dumps({"lastRunAt": "2026-01-01T12:00:00+00:00",
                                                  "fingerprint": "fp-1", "invalidSnapshot": None}, indent=2))
-        self.assertEqual(self.managed.read_observed(), Observed("fp-1", None))
+        self.assertEqual(self.managed.read_observed(),
+                         Observed("fp-1", None, last_run_at=datetime(2026, 1, 1, 12, tzinfo=timezone.utc)))
+
+
+class ReadLastRunAtTest(ManagedDirectoryTestCase):
+    def test_reads_what_the_last_round_wrote(self):
+        self.managed.write_observed(AT, Observed("fp-1"))
+        self.assertEqual(self.managed.read_observed().last_run_at, AT)
+
+    def test_missing_or_unreadable_time_reads_as_nothing(self):
+        self.assertIsNone(self.managed.read_observed().last_run_at)
+        for content in ("{broken", "[1]", json.dumps({"lastRunAt": 5}),
+                        json.dumps({"lastRunAt": "2026-01-01T12:00:00"})):  # 最後一個沒帶時區
+            self.put(self.observed_file, content)
+            self.assertIsNone(self.managed.read_observed().last_run_at, content)
 
 
 class WriteObservedTest(ManagedDirectoryTestCase):
@@ -89,6 +103,14 @@ class AppendSwitchTest(ManagedDirectoryTestCase):
     def test_creates_the_directories_and_the_first_line(self):
         self.managed.append_switch(AT, "acct-1")
         self.assertEqual(self.lines(), [{"at": AT.isoformat(), "accountId": "acct-1", "source": "observed"}])
+
+    def test_last_run_time_is_recorded_only_when_given(self):
+        self.managed.append_switch(AT, "acct-1")
+        self.managed.append_switch(AT, "acct-2", AT - timedelta(hours=2))
+        self.assertEqual(self.lines(), [
+            {"at": AT.isoformat(), "accountId": "acct-1", "source": "observed"},
+            {"at": AT.isoformat(), "accountId": "acct-2", "source": "observed",
+             "lastRunAt": (AT - timedelta(hours=2)).isoformat()}])
 
     def test_unknown_account_is_recorded_as_null(self):
         self.managed.append_switch(AT, None)

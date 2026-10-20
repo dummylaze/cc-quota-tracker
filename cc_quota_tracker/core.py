@@ -101,6 +101,9 @@ class Core:
         self._last_query_started: Optional[datetime] = None  # 工具上一次查詢的開始時間（手動、自動都算）
         self._query_is_auto = False  # 進行中的查詢是不是自動觸發的：手動查詢才有冷卻
         self._consecutive_failures = 0  # 查詢連續失敗的次數，一次成功歸零
+        self._awaiting_first_judgement = True  # 啟動後還沒有一輪完成判定；這一輪偵測到的切換要記上一次運作時間
+        self._stopped_at: Optional[datetime] = None  # 啟動後第一次讀到的上一輪觀測裡的運作時間（檔案裡的那個每輪都會被覆寫）
+        self._stopped_at_read = False  # _stopped_at 已經取過；沒有時間可取（None）也算取過
 
     def poll(self) -> Board:
         return self._poll(self._auto_query)
@@ -485,6 +488,8 @@ class Core:
         失效旗標分兩段：當前憑證帳號的那份是暫定的，帳號資訊在同一份憑證下改變時跟著改判（/login 先寫憑證、
         後寫帳號資訊）；切換離開時轉為持久，保留到重新納管（憑證指紋換掉）為止。
         上一輪的觀測存在工具狀態，重新啟動後接著比對；第一次運作也算一次切換。
+        重新啟動後第一次完成判定（讀得到當前憑證與上一輪的觀測）的那一輪若偵測到切換，紀錄另外帶本工具上一次運作的時間，
+        取自啟動後第一次讀到的上一輪觀測（沒有判定的輪次也會覆寫它，所以讀到就先留著）；其他切換不帶。
         讀不到當前憑證（寫到一半、登出）時不動：不記錄，也不覆蓋上一輪的憑證指紋。"""
         store = FileCredentialStore(self._credentials)
         current, credential = store.fingerprint(), store.read()
@@ -496,6 +501,9 @@ class Core:
         state = self._managed.read_observed()
         if state is None:  # 讀不到上一輪的觀測（例如短暫鎖住）：這一輪不判定
             return by_fp.get(current) or unsynced, frozenset()
+        if not self._stopped_at_read:
+            self._stopped_at, self._stopped_at_read = state.last_run_at, True
+        first_judgement = self._awaiting_first_judgement and current is not None
         previous, provisional, flagged = state.fingerprint, state.pending_invalid, set(state.kept_invalid)
         if synced is not None:  # 寫回換掉了憑證快照的憑證指紋：上一輪記的舊指紋跟著換
             previous, provisional = synced.follow(previous), synced.follow(provisional)
@@ -530,10 +538,12 @@ class Core:
         try:
             if switched:
                 self._mark_lagging_before_switch(left_account, account_id)
-                self._managed.append_switch(self._clock(), account_id)
+                self._managed.append_switch(self._clock(), account_id, self._stopped_at if first_judgement else None)
             # 紀錄寫成、這裡寫失敗時，下一輪會再記一次同一個帳號；重複的一行不影響歸屬
             self._managed.write_observed(self._clock(), Observed(
                 current or previous, provisional, tuple(flagged), expires if current else state.expires_at))
+            if first_judgement:
+                self._awaiting_first_judgement = False
         except OSError:
             pass  # 不推進上一輪的觀測，下一輪重試
         invalid = frozenset(flagged | {provisional} if provisional else flagged)

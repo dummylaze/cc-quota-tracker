@@ -3,9 +3,11 @@ import os
 import sys
 import unittest
 from datetime import timedelta
+from unittest import mock
 
 from cc_quota_tracker import COMMAND
 from cc_quota_tracker.board import Role
+from cc_quota_tracker.managed_directory import ManagedDirectory
 from cc_quota_tracker.render_text import render
 from tests.fakehome import NOW, HomeTestCase, WindowsAclAssertions
 
@@ -135,6 +137,128 @@ class RestartTest(SwitchTestCase):
         self.log_in(refresh="rt-w", account_uuid="acct-w")
         self.start()
         self.assertEqual([line["accountId"] for line in self.poll_after()], ["acct-w"])
+
+
+class RestartLastRunTest(SwitchTestCase):
+    """重新啟動後第一次完成判定的那一輪偵測到的切換，紀錄另外帶本工具上一次運作的時間（lastRunAt）。"""
+    def setUp(self):
+        super().setUp()
+        self.manage("work", "rt-w", "acct-w")
+        self.manage("home", "rt-h", "acct-h")
+        self.core.poll()
+        self.clock.advance(minutes=3)
+        self.core.poll()
+        self.stopped_at = self.clock.now  # 工具最後一次運作
+        self.clock.advance(hours=2)
+
+    def restart_and_switch(self):
+        self.log_in(refresh="rt-w", account_uuid="acct-w")
+        self.start()
+
+    def write_observed(self, edit):
+        path = self.state_dir() / "observed.json"
+        data = json.loads(path.read_text(encoding="utf-8"))
+        edit(data)
+        path.write_text(json.dumps(data), encoding="utf-8")
+
+    def test_switch_found_on_the_first_round_after_restart_carries_the_last_run_time(self):
+        self.restart_and_switch()
+        lines = self.poll_after()
+        self.assertEqual(lines, [{"at": self.clock.now.isoformat(), "accountId": "acct-w", "source": "observed",
+                                  "lastRunAt": self.stopped_at.isoformat()}])
+
+    def test_switch_while_running_does_not_carry_it(self):
+        self.assertNotIn("lastRunAt", self.poll_after(lambda: self.log_in(refresh="rt-w", account_uuid="acct-w"))[0])
+
+    def test_switch_after_the_first_judged_round_does_not_carry_it(self):
+        self.start()
+        self.assertEqual(self.poll_after(), [])
+        lines = self.poll_after(lambda: self.log_in(refresh="rt-w", account_uuid="acct-w"))
+        self.assertEqual([line["accountId"] for line in lines], ["acct-w"])
+        self.assertNotIn("lastRunAt", lines[0])
+
+    def test_later_switch_after_a_restart_switch_does_not_carry_it(self):
+        self.restart_and_switch()
+        self.poll_after()
+        lines = self.poll_after(lambda: self.log_in(refresh="rt-h", account_uuid="acct-h"))
+        self.assertEqual([line["accountId"] for line in lines], ["acct-h"])
+        self.assertNotIn("lastRunAt", lines[0])
+
+    def test_first_run_ever_is_a_switch_without_it(self):
+        (self.state_dir() / "observed.json").unlink()  # 沒有上一輪觀測
+        self.start()
+        lines = self.poll_after()
+        self.assertEqual([line["accountId"] for line in lines], ["acct-h"])
+        self.assertNotIn("lastRunAt", lines[0])
+
+    def test_previous_observation_without_a_last_run_time_records_the_switch_without_it(self):
+        self.write_observed(lambda data: data.pop("lastRunAt"))
+        self.restart_and_switch()
+        lines = self.poll_after()
+        self.assertEqual([line["accountId"] for line in lines], ["acct-w"])
+        self.assertNotIn("lastRunAt", lines[0])
+
+    def test_unreadable_last_run_time_records_the_switch_without_it(self):
+        for garbage in ("yesterday", 5, None, "2026-01-01T12:00:00"):  # 最後一個沒帶時區
+            with self.subTest(garbage=garbage):
+                self.write_observed(lambda data: data.update(lastRunAt=garbage))
+                self.restart_and_switch()
+                lines = self.poll_after()
+                self.assertEqual([line["accountId"] for line in lines], ["acct-w"])
+                self.assertNotIn("lastRunAt", lines[0])
+                self.log_in(refresh="rt-h", account_uuid="acct-h")  # 還原成下一輪的起點
+                self.core.poll()
+
+    def test_restart_without_a_switch_writes_nothing(self):
+        self.start()
+        self.assertEqual(self.poll_after(), [])
+
+    def test_unreadable_current_credential_is_not_a_judged_round(self):
+        """沒有判定的輪次不算：之後第一次判定到的切換仍帶重新啟動前的運作時間，不是那一輪留下的時間。"""
+        self.restart_and_switch()
+        path = self.paths.claude_dir / ".credentials.json"
+        saved = path.read_bytes()
+        path.unlink()
+        self.assertEqual(self.poll_after(), [])
+        self.clock.advance(minutes=1)
+        lines = self.poll_after(lambda: path.write_bytes(saved))
+        self.assertEqual([line["accountId"] for line in lines], ["acct-w"])
+        self.assertEqual(lines[0]["lastRunAt"], self.stopped_at.isoformat())
+
+    def test_unreadable_previous_observation_is_not_a_judged_round(self):
+        self.restart_and_switch()
+        with self.locked("observed.json"):
+            self.assertEqual(self.poll_after(), [])
+        lines = self.poll_after()
+        self.assertEqual([line["accountId"] for line in lines], ["acct-w"])
+        self.assertEqual(lines[0]["lastRunAt"], self.stopped_at.isoformat())
+
+    def test_failed_write_retries_on_the_next_round_with_the_same_field(self):
+        self.restart_and_switch()
+        with mock.patch.object(ManagedDirectory, "write_observed", side_effect=OSError("locked")):
+            first = self.poll_after()  # 紀錄寫成、上一輪的觀測沒寫成
+        self.clock.advance(seconds=5)
+        retry = self.poll_after()
+        self.assertEqual([line["accountId"] for line in first + retry], ["acct-w", "acct-w"])
+        self.assertEqual([line["lastRunAt"] for line in first + retry], [self.stopped_at.isoformat()] * 2)
+        self.assertEqual(self.poll_after(), [])
+
+    def test_failed_append_retries_on_the_next_round_with_the_field(self):
+        self.restart_and_switch()
+        with mock.patch.object(ManagedDirectory, "append_switch", side_effect=OSError("locked")):
+            self.assertEqual(self.poll_after(), [])
+        lines = self.poll_after()
+        self.assertEqual([line["accountId"] for line in lines], ["acct-w"])
+        self.assertEqual(lines[0]["lastRunAt"], self.stopped_at.isoformat())
+
+    def test_old_format_log_lines_and_observation_stay_readable(self):
+        """舊格式的紀錄（沒有 lastRunAt）與新格式的並存：既有的行不動，新的行追加在後面。"""
+        before = (self.state_dir() / "switches.jsonl").read_bytes()
+        self.restart_and_switch()
+        self.poll_after()
+        after = (self.state_dir() / "switches.jsonl").read_bytes()
+        self.assertTrue(after.startswith(before))
+        self.assertNotIn(b"lastRunAt", before)
 
 
 class SameAccountReloginTest(SwitchTestCase):

@@ -25,7 +25,8 @@
 - .state/writeback.json，寫回失敗：憑證同步寫回失敗時記下（沒寫成的憑證快照的憑證指紋 → 當時當前憑證的憑證指紋、失敗次數、
   是否已停止重試），寫回成功、重新納管或移除（那份憑證指紋不在了）時清掉。讀不到時照樣寫回，但失敗不記次數；
   寫不成不丟例外，下一輪再記。沒有這個檔的舊版視為沒有寫回失敗。
-- .state/switches.jsonl，切換紀錄：只追加。寫不成丟 OSError，既有的行不變。
+- .state/switches.jsonl，切換紀錄：只追加。寫不成丟 OSError，既有的行不變。lastRunAt 是後加的欄位，只有重新啟動後
+  第一次判定就偵測到的切換才有；沒有這個欄位的舊行照舊可讀。
 - .state/pre-switch.json，切換前憑證（當前憑證原文＋帳號資訊，含 email；只保存、不顯示）：每次切換在寫入當前憑證之前覆寫，
   只有一份。寫不成丟 OSError，呼叫端不切換。
 - .state/window.json，視窗位置：寫不成是「這次沒記住」，不丟例外；收不緊權限照常寫入。
@@ -98,11 +99,13 @@ class Stored(NamedTuple):
 
 class Observed(NamedTuple):
     """上一輪的觀測：當時當前憑證的憑證指紋；暫定的失效旗標（當前憑證帳號的憑證快照，帳號資訊還可能跟上而改判）；
-    持久的失效旗標（保留到重新納管）；當時當前憑證的到期時間。沒有上一輪時全部是空的。"""
+    持久的失效旗標（保留到重新納管）；當時當前憑證的到期時間；上一輪的運作時間（只在讀回時有值，寫入時由
+    write_observed 的 last_run_at 決定）。沒有上一輪時全部是空的。"""
     fingerprint: Optional[str] = None
     pending_invalid: Optional[str] = None
     kept_invalid: Tuple[str, ...] = ()
     expires_at: Optional[datetime] = None
+    last_run_at: Optional[datetime] = None
 
 
 class Synced(NamedTuple):
@@ -247,7 +250,7 @@ class ManagedDirectory:
         flags = state.get("invalidSnapshots")
         return Observed(_text(state.get("fingerprint")), _text(state.get("invalidSnapshot")),
                         tuple(f for f in flags if _text(f)) if isinstance(flags, list) else (),
-                        _datetime(state.get("expiresAt")))
+                        _datetime(state.get("expiresAt")), _datetime(state.get("lastRunAt")))
 
     def write_observed(self, last_run_at: datetime, observed: Observed) -> None:
         """記下這一輪的觀測與運作時間，下一輪（含重新啟動後）接著比對。寫不成就丟 OSError。"""
@@ -257,10 +260,15 @@ class ManagedDirectory:
                                           "invalidSnapshots": sorted(observed.kept_invalid),
                                           "expiresAt": expires})
 
-    def append_switch(self, at: datetime, account_id: Optional[str]) -> None:
-        """切換紀錄只追加：時間、切到的帳號識別碼（拿不到為 null）、來源。不記帳號鍵（ADR-0009）。寫不成就丟 OSError。"""
+    def append_switch(self, at: datetime, account_id: Optional[str], last_run_at: Optional[datetime] = None) -> None:
+        """切換紀錄只追加：時間、切到的帳號識別碼（拿不到為 null）、來源。不記帳號鍵（ADR-0009）。
+        last_run_at 是重新啟動後第一次判定就偵測到的切換才帶的「本工具上一次運作的時間」，其他切換不帶這個欄位。
+        寫不成就丟 OSError。"""
         self._mkdir_state_dir()
-        line = json.dumps({"at": at.isoformat(), "accountId": account_id, "source": "observed"})
+        record = {"at": at.isoformat(), "accountId": account_id, "source": "observed"}
+        if last_run_at is not None:
+            record["lastRunAt"] = last_run_at.isoformat()
+        line = json.dumps(record)
         atomic.append(self._switch_log, (line + "\n").encode("utf-8"),
                       before_replace=lambda tmp: self._tighten(tmp, new=True))
 
