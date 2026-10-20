@@ -105,6 +105,13 @@ class SpecTest(unittest.TestCase):
         self.assertEqual(spec.count("COLLECT("), 1)  # 一個 COLLECT：兩個 exe 在同一個資料夾
         self.assertIn('name="cc-quota-tracker")', spec.split("COLLECT(", 1)[1])
 
+    def test_the_price_table_ships_next_to_the_module_that_reads_it(self):
+        # 單價表隨版本發佈（ADR-0013）：exe 裡的位置要跟原始碼版一樣在 cc_quota_tracker/ 底下，prices.py 才讀得到
+        spec = (PACKAGING / "cc-quota-tracker.spec").read_text(encoding="utf-8")
+        self.assertIn('(str(root / "cc_quota_tracker" / "prices.json"), "cc_quota_tracker")', spec)
+        self.assertEqual(spec.count("datas=datas"), 1)  # 兩個 exe 都經過同一個 analysis()
+        self.assertTrue((ROOT / "cc_quota_tracker" / "prices.json").is_file())
+
     def test_the_window_exe_name_matches_what_autostart_registers(self):
         self.assertEqual(GUI_EXE, "cc-quota-tracker.exe")
 

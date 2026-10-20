@@ -1,6 +1,7 @@
 """用量帳本的檔案格式與跨行程的鎖（ADR-0013）。檔案本身的讀寫與權限在 ManagedDirectory。
 
-帳本只存 token 數，不存金額：每一格是「UTC 小時 × 帳號識別碼（None 是未歸屬）× 模型」的各種 token 數。
+帳本只存 token 數，不存金額：每一格是「UTC 小時 × 帳號識別碼（None 是未歸屬）× 模型 × 計費因素」的各種 token 數。
+計費因素另外存，是因為對話紀錄被刪掉之後就分辨不出哪些用量單價表算不出來。
 檔案是 JSON Lines，只追加。一次追加是一個批次：先一行 {"through": 時間, "rows": n}，再接 n 行格子。
 through 之前的小時都已入帳（含沒有用量的小時），之後的小時不在帳本裡。
 批次以標頭宣告行數：寫到一半被中斷的批次（行數不足、有行讀不懂）整批不採用，through 不前進，下次整批重寫，
@@ -24,6 +25,10 @@ class LedgerCell(NamedTuple):
     account_id: Optional[str]
     model: str
     counts: Tuple[int, ...]  # 依 TOKEN_FIELDS 的順序
+    factors: Tuple[str, ...] = ()  # 單價表無法計價的計費因素（見 token_report）；空的是標準計費，檔案裡不寫這個欄位
+    # 格子裡最長的 prompt 的 token 數：入帳之後單價表才補上長 prompt 門檻的模型，靠它判斷這格算不算得出。
+    # 記錄它之前入帳的格子是 0
+    max_prompt: int = 0
 
 
 class LedgerRead(NamedTuple):
@@ -49,8 +54,11 @@ class LedgerStatus(NamedTuple):
 def encode_batch(cells: Sequence[LedgerCell], through: datetime) -> bytes:
     lines = [json.dumps({"through": through.isoformat(), "rows": len(cells)})]
     for cell in cells:
-        lines.append(json.dumps(dict(hour=cell.hour.isoformat(), accountId=cell.account_id, model=cell.model,
-                                     **dict(zip(TOKEN_FIELDS, cell.counts)))))
+        row = dict(hour=cell.hour.isoformat(), accountId=cell.account_id, model=cell.model,
+                   **dict(zip(TOKEN_FIELDS, cell.counts)), maxPrompt=cell.max_prompt)
+        if cell.factors:
+            row["factors"] = list(cell.factors)
+        lines.append(json.dumps(row))
     return ("\n".join(lines) + "\n").encode("utf-8")
 
 
@@ -106,11 +114,14 @@ def _cell(row: Optional[dict]) -> Optional[LedgerCell]:
         return None
     hour, account_id, model = _datetime(row.get("hour")), row.get("accountId"), row.get("model")
     counts = [row.get(field) for field in TOKEN_FIELDS]
+    # 記錄計費因素與最長 prompt 之前寫的格子沒有這兩個欄位
+    factors, max_prompt = row.get("factors", []), row.get("maxPrompt", 0)
     if (hour is None or not (account_id is None or (isinstance(account_id, str) and account_id))
             or not (isinstance(model, str) and model)
-            or not all(isinstance(c, int) and not isinstance(c, bool) and c >= 0 for c in counts)):
+            or not all(isinstance(c, int) and not isinstance(c, bool) and c >= 0 for c in counts + [max_prompt])
+            or not (isinstance(factors, list) and all(isinstance(f, str) and f for f in factors))):
         return None
-    return LedgerCell(hour, account_id, model, tuple(counts))
+    return LedgerCell(hour, account_id, model, tuple(counts), tuple(factors), max_prompt)
 
 
 @contextmanager

@@ -7,12 +7,15 @@ from contextlib import redirect_stderr, redirect_stdout
 from datetime import datetime, timedelta, timezone
 from unittest import mock
 
+from cc_quota_tracker import prices
 from cc_quota_tracker.__main__ import main
 from cc_quota_tracker.managed_directory import ManagedDirectory
 from tests.fakehome import NOW, HomeTestCase
 
 UTC = timezone.utc
 T0 = datetime(2025, 12, 31, 8, 0, tzinfo=UTC)
+# 假單價表的單價（每百萬 token 的美元）：input、output、cache 寫入 5 分鐘、1 小時、cache 讀取
+PRICES = {"input": 1, "output": 2, "cacheWrite5m": 3, "cacheWrite1h": 4, "cacheRead": 0.5}
 LATE = ' '  # 字串內容裡的 U+2028：str.splitlines 會把含它的一行切成兩半
 
 
@@ -40,6 +43,17 @@ class ReportTestCase(HomeTestCase):
         zone = mock.patch("cc_quota_tracker.token_report.local_zone", return_value=UTC)  # 不隨執行的機器改變
         zone.start()
         self.addCleanup(zone.stop)
+        # 測試專用的假單價表：不隨正式單價表的改版改變
+        self.price_file = self.home / "prices.json"
+        self.write_prices({"claude-test-1": PRICES})
+        price_file = mock.patch.object(prices, "PRICE_FILE", self.price_file)
+        price_file.start()
+        self.addCleanup(price_file.stop)
+
+    def write_prices(self, models, version="2025-12-01"):
+        self.price_file.write_text(json.dumps({"version": version, "source": "https://example.invalid/pricing",
+                                               "currency": "USD", "unit": "per million tokens", "models": models}),
+                                   encoding="utf-8")
 
     def write_transcript(self, relative, *lines):
         """lines 的每一項：dict 寫成一行 JSON，字串原樣寫成一行。檔尾一律有換行。"""

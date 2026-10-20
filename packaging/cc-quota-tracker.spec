@@ -6,8 +6,12 @@ from pathlib import Path
 root = Path(SPECPATH).parent  # SPECPATH 由 PyInstaller 提供：這個 spec 所在的資料夾
 
 
+# 隨版本發佈的資料檔：放在套件資料夾裡跟原始碼版同一個相對位置（cc_quota_tracker/prices.py 從 __file__ 旁邊讀）
+datas = [(str(root / "cc_quota_tracker" / "prices.json"), "cc_quota_tracker")]
+
+
 def analysis(entry):
-    return Analysis([str(root / "packaging" / entry)], pathex=[str(root)], noarchive=False)
+    return Analysis([str(root / "packaging" / entry)], pathex=[str(root)], datas=datas, noarchive=False)
 
 
 def executable(a, name, console):

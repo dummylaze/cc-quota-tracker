@@ -237,8 +237,20 @@ _Avoid_：寫回（單獨使用）、備份、自動納管
 _Avoid_：切換歷史、log
 
 **用量帳本（Usage Ledger）**：
-本工具從 Claude Code 的對話紀錄算出的 token 用量，依時間、帳號、模型存下，只追加不改寫；是 token 報表的資料來源。Claude Code 會刪掉舊的對話紀錄，帳本不受影響：只要在刪掉之前記進帳本，那段用量就一直看得到。只存 token 數，不存金額。
+本工具從 Claude Code 的對話紀錄算出的 token 用量，依時間、帳號、模型、計費因素存下，只追加不改寫；是 token 報表的資料來源。Claude Code 會刪掉舊的對話紀錄，帳本不受影響：只要在刪掉之前記進帳本，那段用量就一直看得到。只存 token 數，不存估算金額。
 _Avoid_：token 快取、用量資料庫、歷史紀錄
+
+**單價表（Price Table）**：
+隨本工具的版本發佈的各模型 API 單價，來源是供應商公開的定價，記有版本日期。每個模型有 input、output、cache 寫入（5 分鐘、1 小時）、cache 讀取五種單價。執行時不連網更新；價格變了就發新版。
+_Avoid_：價目表、費率表、pricing
+
+**估算金額（Estimated Cost）**：
+token 報表依單價表把 token 數換算成的美元數，產生報表時才算，不寫進任何紀錄。只是 API 單價的等值估算，不是實際帳單；訂閱方案不按 token 計費。單價表算不出的部分是未知，合計只含算得出的部分並標明。與限額附帶的金額（Money）、美元金額（Dollars）無關。
+_Avoid_：金額（單獨使用）、花費、帳單
+
+**計費因素（Billing Factor）**：
+讓一則回應不按單價表的五種單價計費的條件，例如 fast mode、US-only 推論、非標準的服務等級、web search 次數費，或 prompt 超過某些模型的長度門檻。帶有計費因素的用量照樣計入 token 數，但估算金額是未知。
+_Avoid_：計費修正、加價
 
 **cache 命中比例（Cache Hit Ratio）**：
 送進模型的 input 裡，從 cache 讀出的部分所占的比例：cache 讀取 ÷（input＋cache 寫入＋cache 讀取）。output 不計。供應商沒有公布這個比例的算法，這是依供應商「總 input＝三者相加」的定義推得的。

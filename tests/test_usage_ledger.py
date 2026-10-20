@@ -108,7 +108,7 @@ class LedgerKeepsUsageTest(LedgerTestCase):
         self.report()
         cell = self.ledger_rows()[0]
         self.assertEqual(sorted(cell), ["accountId", "cacheRead", "cacheWrite1h", "cacheWrite5m", "hour", "input",
-                                        "model", "output"])
+                                        "maxPrompt", "model", "output"])  # maxPrompt 也是 token 數：最長的 prompt
 
     def test_usage_with_no_account_is_ledgered_as_unattributed(self):
         self.write_transcript("p/s1.jsonl", assistant("m1", "r1", NOW - timedelta(days=40), output=3))

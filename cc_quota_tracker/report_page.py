@@ -35,6 +35,12 @@ _PAGE_TEXT = {
     "unattributedNote": "report.unattributed_note",
     "downtimeSince": "report.note.downtime_since",
     "downtimeNever": "report.note.downtime_never",
+    "pricesVersion": "report.prices.version",
+    "cost": "report.col.cost",
+    "costNote": "report.cost_note",
+    "costPartial": "report.cost.partial",
+    "costExcludes": "report.cost.excludes",
+    "listSep": "report.list_sep",
 }
 # 示警的種類（報表資料 notices[].kind）→ 語系鍵
 NOTICE_KEYS = {
@@ -44,8 +50,9 @@ NOTICE_KEYS = {
     "switchLogSkipped": "report.notice.switch_log_skipped",
     "ledgerUpdateFailed": "report.notice.ledger_failed",
     "ledgerSkipped": "report.notice.ledger_skipped",
+    "costUnknown": "report.notice.cost_unknown",
 }
-_HOLES = {"n": "{n}", "date": "{date}", "reason": "{reason}"}  # 讓 text() 把佔位符原樣留下，由腳本填
+_HOLES = {"n": "{n}", "date": "{date}", "reason": "{reason}", "cost": "{cost}"}  # 讓 text() 把佔位符原樣留下，由腳本填
 
 
 def notice_text(lang: str, notice: dict) -> str:
@@ -129,7 +136,12 @@ tr.total td{font-weight:700;border-bottom:0}
   var numbers = new Intl.NumberFormat(data.language);
   var labels = {};
   data.accounts.forEach(function (a) { labels[a.key] = a.label; });
-  var COLUMNS = ['input', 'output', 'cacheWrite5m', 'cacheWrite1h', 'cacheRead', 'cacheHitRatio'];
+  // 金額：格子是整數美元，完整到分的數字放在滑鼠停留提示
+  var dollars = new Intl.NumberFormat(data.language,
+    { style: 'currency', currency: 'USD', currencyDisplay: 'narrowSymbol', maximumFractionDigits: 0 });
+  var cents = new Intl.NumberFormat(data.language,
+    { style: 'currency', currency: 'USD', currencyDisplay: 'narrowSymbol', minimumFractionDigits: 2 });
+  var COLUMNS = ['input', 'output', 'cacheWrite5m', 'cacheWrite1h', 'cacheRead', 'cacheHitRatio', 'cost'];
 
   function fill(template, values) {
     return template.replace(/\\{(\\w+)\\}/g, function (whole, name) { return name in values ? values[name] : whole; });
@@ -144,13 +156,25 @@ tr.total td{font-weight:700;border-bottom:0}
     if (column === 'cacheHitRatio') return row[column] == null ? '\\u2014' : (row[column] * 100).toFixed(1) + '%';
     return numbers.format(row[column]);
   }
+  // 金額格：全部算不出是「—」，部分算不出是「已知＋—」；提示列出到分的已知金額與算不出的原因
+  function cell(row, column) {
+    if (column !== 'cost') return el('td', figure(row, column));
+    var known = row.cost == null ? null : dollars.format(row.cost);
+    var td = el('td', known == null ? '\\u2014' : row.costUnknown.length ? fill(T.costPartial, { cost: known }) : known);
+    var tip = [];
+    if (row.cost != null) tip.push(cents.format(row.cost));
+    if (row.costUnknown.length) tip.push(fill(T.costExcludes, { reason: row.costUnknown.join(T.listSep) }));
+    td.title = tip.join('\\n');
+    return td;
+  }
 
   document.getElementById('title').textContent = T.title;
   function when(iso) { return new Date(iso).toLocaleString(data.language); }
   document.getElementById('meta').textContent = [
     T.generatedAt + ' ' + when(data.generatedAt),
     T.ledgerUpdatedAt + ' ' + (data.ledger.updatedAt ? when(data.ledger.updatedAt) : T.ledgerNever),
-    T.earliest + ' ' + (data.ledger.earliest ? when(data.ledger.earliest) : '\\u2014')
+    T.earliest + ' ' + (data.ledger.earliest ? when(data.ledger.earliest) : '\\u2014'),
+    fill(T.pricesVersion, { date: data.prices.version || '\\u2014' })
   ].join(' \\u00b7 ');
   document.getElementById('range-label').textContent = T.range;
   var select = document.getElementById('range');
@@ -182,18 +206,19 @@ tr.total td{font-weight:700;border-bottom:0}
       summary.accounts.forEach(function (row) {
         var tr = el('tr');
         tr.appendChild(el('td', row.account === null ? T.unattributed : labels[row.account]));
-        COLUMNS.forEach(function (column) { tr.appendChild(el('td', figure(row, column))); });
+        COLUMNS.forEach(function (column) { tr.appendChild(cell(row, column)); });
         table.appendChild(tr);
       });
       var total = el('tr', null, 'total');
       total.appendChild(el('td', T.total));
-      COLUMNS.forEach(function (column) { total.appendChild(el('td', figure(summary.total, column))); });
+      COLUMNS.forEach(function (column) { total.appendChild(cell(summary.total, column)); });
       table.appendChild(total);
       card.appendChild(table);
     }
     var notes = document.getElementById('notes');
     notes.textContent = '';
     notes.appendChild(el('p', T.cacheNote));
+    notes.appendChild(el('p', T.costNote));
     if (summary.accounts.some(function (row) { return row.account === null; })) {
       notes.appendChild(el('p', T.unattributedNote));
     }

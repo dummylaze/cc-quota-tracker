@@ -379,6 +379,23 @@ STRINGS = {
                                    "computed from the transcripts, and is lost once they are deleted.",
     "report.notice.ledger_skipped": "{n} places in the usage ledger could not be understood and were skipped; "
                                     "actual usage may be higher than shown.",
+    "report.notice.cost_unknown": "Some usage could not be priced; totals include only the priced part: {reason}",
+    "report.prices.version": "Price table {date}",
+    "report.col.cost": "Estimated cost (USD)",
+    "report.cost_note": "Costs are estimated from the API prices in the built-in price table, not an actual bill; "
+                        "subscription plans are not billed by token.",
+    "report.cost.partial": "{cost} + —",
+    "report.cost.excludes": "Excludes: {reason}",
+    "report.cost.unknown_model": "{model} (not in the price table)",
+    "report.cost.prices_unreadable": "the price table could not be read",
+    "report.cost.factor.speed": "{value} mode (not in the price table)",
+    "report.cost.factor.geo_us": "US-only inference (not in the price table)",
+    "report.cost.factor.geo": "inference region {value} (not in the price table)",
+    "report.cost.factor.tier": "\"{value}\" service tier (not in the price table)",
+    "report.cost.factor.web_search": "web search fees (not in the price table)",
+    "report.cost.factor.long_prompt": "{model} prompts over {n} tokens (not in the price table)",
+    "report.cost.factor.other": "billing factor {value} (not in the price table)",
+    "report.list_sep": ", ",
     "report.write_failed": "Could not write the report to {path}: {reason}",
     "report.open_failed": "Could not open the report in the default browser; it is at {path}",
 }

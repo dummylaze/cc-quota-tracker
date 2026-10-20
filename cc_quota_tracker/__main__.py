@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import NamedTuple, Optional
 
-from . import COMMAND, __version__, atomic, claude_provider, i18n, report_page, token_report, transcripts
+from . import COMMAND, __version__, atomic, claude_provider, i18n, prices, report_page, token_report, transcripts
 from .board import Board, SwitchOutcome
 from .claude_provider import FieldStatus, NoReading, SchemaCheck
 from .core import BindingsUnreadable, Core, InvalidLabel, NoCredential, UnknownLabel
@@ -139,7 +139,8 @@ def report(paths: ResolvedPaths, lang: str, request: _ReportRequest) -> int:
     managed = ManagedDirectory(paths.managed_dir)
     scan = transcripts.scan(paths.claude_dir)
     switches = managed.read_switches()
-    status = token_report.update_ledger(managed, scan, switches, now)
+    table = prices.load()
+    status = token_report.update_ledger(managed, scan, switches, now, table)
     log = ErrorLog(paths.settings_file.parent, lambda: now)
     if request.ledger_only:
         if status.failure is None:
@@ -150,7 +151,7 @@ def report(paths: ResolvedPaths, lang: str, request: _ReportRequest) -> int:
         log.failed(token_report.ReportWarning(message))
         return 1
     data = token_report.build_data(scan, switches, managed.list_accounts(), now, lang,
-                                   managed.read_usage_ledger(), status)
+                                   managed.read_usage_ledger(), status, table)
     path = paths.settings_file.parent / report_page.REPORT_FILE
     try:
         atomic.write_atomic(path, report_page.render(data, lang).encode("utf-8"))
