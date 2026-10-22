@@ -14,7 +14,7 @@
 - [x] 跟其他分頁共用區間選擇；單看或合計的選擇在這個分頁不作用，畫面上看得出來
 - [x] 窄視窗時欄位改為換行排列，不出現整頁橫向捲動
 - [x] 淺色、深色兩種主題都正確
-- [ ] 審美驗證（對比度、留白、高彩度面積等量測，兩種主題）達標
+- [x] 審美驗證（對比度、留白、高彩度面積等量測，兩種主題）達標
 - [x] 既有測試全部通過
 
 ## Comments
@@ -28,12 +28,15 @@
   - 「顯示」（單看或合計）在這個分頁用原生 `disabled` 停用分段按鈕（自動退出 Tab 順序、強制色彩模式下也會跟著系統的停用樣式），並把控制列的標籤文字換成「顯示（此分頁不適用）」，滿足「畫面上看得出來」。
   - 合計欄的標題重用既有的「全部帳號合計」字樣（`report.view.all`），沒有另外新增一個卡片標題用的鍵。
   - 新增 5 個語系鍵（`report.tab.comparison`、`report.view.unavailable`、`report.compare.ratio`、`report.compare.models`、`report.compare.spark`），依既有字樣風格決定，沒有逐一請使用者確認。
-- 審美驗證：**留白率、高彩度面積兩項這次沒能實測**。這個 session 裡，headless Edge（`msedge.exe --headless=new --dump-dom`）不管加什麼旗標都是 exit code 0、零輸出，連 `--version`、`about:blank --dump-dom`、全新 `--user-data-dir`、`--no-sandbox`、拿掉 GPU／profile 旗標都一樣，判斷是這次環境的限制（例如系統政策封鎖自動化旗標），不是程式碼問題；試過足夠多組合後就不再繼續試。其餘項目改用程式碼比對既有慣例的方式過：
-  - 顏色：帳號色、未歸屬灰色、`var(--fg)`（合計欄）全部重用 `tokens.py` 既有已驗證過的 token，沒有新色值；色塊用法（bar 的 fill、swatch）跟總覽的堆疊圖同一個模式。
-  - 群組間距：卡片間（`.cols` gap 16px）與卡片內最大間距（`.meter`／`.compare-col svg` 的 8px）維持剛好 2 倍。
-  - 數字欄位：補上 `.kv span:last-child{font-variant-numeric:tabular-nums}`（審查前自己抓到這個漏網的）。
-  - `forced-colors:active`：disabled 的分段按鈕交給瀏覽器原生停用樣式；`.meter`／`.meter > i` 加進既有的 `forced-color-adjust:none` 清單，色塊保留原色（跟 07 一樣，只能靠程式碼判斷，無頭瀏覽器開不了強制色彩模式，這次連一般截圖都開不了）。
-  - 320px／窄視窗：`.cols` 用 `repeat(auto-fit,minmax(240px,1fr))`，跟 `.tiles`（總覽）同一個模式；任何卡片內表格溢出交給既有的 `.card{overflow-x:auto}` 吸收，不會變成整頁橫向捲動。這一項與留白率／高彩度面積一樣沒能用無頭瀏覽器實測，留給使用者有空時用無頭瀏覽器截圖確認。
+- 審美驗證（兩種主題）：**原本卡在無頭瀏覽器打不開，後來跟使用者一起查出根因並換了工具，補測完成**：
+  - **根因**：這台機器上安裝版的 `msedge.exe` 對任何自動化旗標（連 `--version`）都 exit 0、零輸出；用 `Get-CimInstance Win32_Process` 追蹤才發現它每次都悄悄轉接成另一個脫鉤、永遠不結束的背景行程（command line 多出一個我沒加過的 `--edge-skip-compat-layer-relaunch`），我這邊的行程等不到它、收不到它的輸出。自己補上這個旗標後行程倒是乾淨結束，但換成固定的錯誤代碼 21、`--enable-logging` 也問不出訊息；改用 `--remote-debugging-port` 則是外部連得到埠號前一路逾時（像是被攔截，不是沒人監聽）。這幾個徵象合起來比較像這台機器的資安軟體／政策在管控已安裝 Edge 的自動化行為，不是程式碼問題，也不是人機驗證（有查過，headless 模式下我看不到任何畫面或提示）。
+  - **修法**：改用 Google 官方的 Chrome for Testing（`chrome-headless-shell`，Puppeteer／Playwright／Selenium 底層也是同一個官方建置、免安裝）。下載到本機（不進 git），截圖腳本改用它；其餘旗標與流程不變，同一套 `--dump-dom`／`--screenshot` 直接可用，不用額外裝 pip 套件。
+  - **留白率**：帳號比較 68.2％～78.2％（淺／深、近 7 天／近 30 天、320px／640px／1100px 寬，zh-TW／en 皆同一個範圍）。皆 ≥ 35%。
+  - **高彩度面積**：1.15％～2.48％（同一組截圖）。皆 < 15%，比總覽（淺 4.8%、深 8.7%）低很多——每欄只有一條很窄的小長條圖，彩色面積本來就小。
+  - **對比度**：新增的文字／圖形都落在既有量過的對（`tests/test_tokens.py` 通過）；另外量了 `.meter` 的底色（`var(--line)` 疊在卡片上）：淺色 1.33:1、深色 1.51:1，低於一般圖形的 3:1 門檻——但這跟桌面版既有的「空進度條底軌」是同一個角色與同一個已被使用者接受的例外（`tests/test_tokens.py` 的 `PAIRS` 註解：這類底軌本來就可以低於「看得見」的 Lc 15），而且比例已經用文字列在色塊正上方、色塊本身 `aria-hidden`，不是唯一的資訊來源。
+  - **320px／640px 不橫向捲動**：實測皆無橫向捲動（截圖量測沒有標出警告）；卡片用 `repeat(auto-fit,minmax(240px,1fr))` 在 320px 時穩定換成單欄，跟 `.tiles`（總覽）同一個模式；英文版較長的字串（如 `Share of the top account`、`Show (not used on this tab)`）也都正常換行，沒有溢出。
+  - **其餘**：線寬一律 1px（焦點外框 2px 是 outline）；字型一個家族；字級 6 階（rem）、字重 600／700；行高無單位（內文 1.6、標題 1.2～1.3）；無漸層、無 Emoji、無左側彩色邊條；強制色彩模式維持跟 07 一樣的處置（`.meter`／`.meter > i` 加進 `forced-color-adjust:none`，disabled 的分段按鈕交給瀏覽器原生停用樣式），這一項目前這台機器還是只能靠程式碼判斷，無頭瀏覽器仍開不了系統的強制色彩模式。
+  - 審美驗證：100／100（強制色彩模式維持程式碼判斷，其餘全部實測）。
 - 審查（兩軸＋變異）：Standards 軸由子代理跑；Spec 軸的子代理跑到一半撞到帳號的 session rate limit（API 429，5:10am 重置），改由主對話接著做完 requirements 比對與變異檢查（沒有另開子代理重跑，避免跟卡住的子代理重複工作）。
   - **AC2 的已知字面偏離**：「每欄：總 token、占最大帳號的比例…」字面上是「每一欄」都要有占比，但合計欄本身沒有顯示這一列與色條（上面「票面外的決定」已記）。這不是審查後才發現，是實作時就知道、照 Comments 寫的理由做的選擇，審查只是確認沒有藏起來。
   - 採納：`.tile .big` 與 `.compare-col .big` 的重複 CSS 合併成一條選擇器；sparkline 的三個魔術數字（6、4、40）抽成 `SPARK_SLOT`／`SPARK_BAR`／`SPARK_H`，並註記要跟 CSS 的 `.compare-col svg{height:2.5rem}` 保持一致（兩邊沒辦法共用同一個值，只能用註解提醒）。
