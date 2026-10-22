@@ -23,8 +23,10 @@ _PAGE_TEXT = {
     "range.all": "report.range.all",
     "tab.overview": "report.tab.overview",
     "tab.daily": "report.tab.daily",
+    "tab.comparison": "report.tab.comparison",
     "view": "report.view",
     "view.all": "report.view.all",
+    "viewUnavailable": "report.view.unavailable",
     "units": "report.units",
     "tileTokens": "report.tile.tokens",
     "tileCacheSplit": "report.tile.cache_split",
@@ -49,6 +51,9 @@ _PAGE_TEXT = {
     "cacheHitRatio": "report.col.cache_hit",
     "total": "report.row.total",
     "unattributed": "report.row.unattributed",
+    "compareRatio": "report.compare.ratio",
+    "compareModels": "report.compare.models",
+    "compareSpark": "report.compare.spark",
     "empty": "report.empty",
     "cacheNote": "report.cache_note",
     "unattributedNote": "report.unattributed_note",
@@ -128,7 +133,7 @@ h2{margin:0 0 8px;font-size:var(--text-base);line-height:1.3;font-weight:700;tex
 .banner{margin:0;padding:12px 16px;border-radius:8px;background:var(--banner);color:var(--banner-fg);font-size:var(--text-md);text-wrap:pretty}
 button{font:inherit;color:inherit;cursor:pointer}
 .tabs button,.seg button,.day{white-space:nowrap}  /* 標籤不斷行 */
-button:focus-visible{outline:2px solid var(--fg);outline-offset:2px}
+button:focus-visible,summary:focus-visible{outline:2px solid var(--fg);outline-offset:2px}
 .tabs{display:flex;gap:8px;margin:0 0 16px;border-bottom:1px solid var(--line)}
 .tabs button{margin-bottom:-1px;padding:8px 16px;background:none;border:0;border-bottom:1px solid transparent;
   color:var(--sub);font-size:var(--text-base)}
@@ -140,18 +145,31 @@ button:focus-visible{outline:2px solid var(--fg);outline-offset:2px}
 .seg button{display:inline-flex;align-items:center;gap:8px;padding:4px 12px;background:none;border:0;font-size:var(--text-md)}
 .seg button + button{border-left:1px solid var(--line)}
 .seg button[aria-pressed=true]{background:var(--fg);color:var(--panel)}
+.seg button:disabled{opacity:.45;cursor:not-allowed}
 .swatch{display:inline-block;width:10px;height:10px;border-radius:2px;flex:none}
 .stack > * + *{margin-top:24px}
 .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;overflow-x:auto}
 .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px}
 .tile .label{color:var(--sub);font-size:var(--text-sm)}
-.tile .big{margin:4px 0;font-size:var(--text-display);line-height:1.2;font-weight:700;font-variant-numeric:tabular-nums}
+.tile .big,.compare-col .big{margin:4px 0;font-size:var(--text-display);line-height:1.2;font-weight:700;font-variant-numeric:tabular-nums}
 .tile .sub{color:var(--sub);font-size:var(--text-sm);text-wrap:pretty}
 svg{display:block;width:100%;height:auto;min-width:560px}
 svg text{fill:var(--sub);font-size:var(--text-xs);font-family:var(--font)}
 svg .grid{stroke:var(--line);stroke-width:1}
 .legend{display:flex;flex-wrap:wrap;gap:8px 16px;margin:8px 0 0;color:var(--sub);font-size:var(--text-sm)}
 .legend span{display:inline-flex;align-items:center;gap:8px}
+.cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px}
+.compare-col h2{display:flex;align-items:center;gap:8px}
+.compare-col .big{margin:4px 0;font-size:var(--text-display);line-height:1.2;font-weight:700;font-variant-numeric:tabular-nums}
+.compare-col svg{min-width:0;height:2.5rem;margin:4px 0 8px}  /* 覆寫下面全域 svg 的 min-width：每欄的小長條圖很窄 */
+.compare-col details{margin-top:8px}
+.compare-col table{margin-top:8px}
+.meter{height:6px;border-radius:3px;background:var(--line);overflow:hidden;margin:0 0 8px}  /* 卡片內最大的間距仍只有外層 .cols 間距（16px）的一半，維持群組內外至少 2 倍的節奏 */
+.meter > i{display:block;height:100%}
+.kv{display:flex;justify-content:space-between;gap:8px;padding:4px 0;border-bottom:1px solid var(--line);font-size:var(--text-md)}
+.kv:last-of-type{border-bottom:0}
+.kv span:first-child{color:var(--sub)}
+.kv span:last-child{font-variant-numeric:tabular-nums}
 table{width:100%;border-collapse:collapse;font-size:var(--text-md)}
 th,td{padding:12px 8px;text-align:right;white-space:nowrap;border-bottom:1px solid var(--line)}
 th{color:var(--sub);font-size:var(--text-sm);font-weight:600;white-space:normal;word-break:keep-all;vertical-align:bottom}
@@ -173,12 +191,12 @@ tr.model td:first-child{padding-left:1.5rem}
 .banner,.notes p,.tile .sub{overflow-wrap:break-word}  /* 橫幅與附註可能帶長的模型名稱或原因 */
 @media (hover:hover){  /* 滑鼠才有的回饋；觸控裝置上 hover 會黏住 */
   .tabs button:hover,.toggle:hover,.day:hover{color:var(--fg)}
-  .seg button[aria-pressed=false]:hover{background:var(--line)}
+  .seg button:not(:disabled)[aria-pressed=false]:hover{background:var(--line)}
 }
 @media (forced-colors:active){  /* 背景會被拿掉：選中的靠系統色加粗體與底線分辨，色塊保留原色 */
   .tabs button[aria-selected=true]{text-decoration:underline;text-decoration-thickness:2px;text-underline-offset:.5rem}
   .seg button[aria-pressed=true]{background:Highlight;color:HighlightText;forced-color-adjust:none;font-weight:700;text-decoration:underline}
-  .swatch,svg rect{forced-color-adjust:none}
+  .swatch,svg rect,.meter,.meter > i{forced-color-adjust:none}
 }
 </style>
 </head>
@@ -419,6 +437,7 @@ function makeCompact(spec, language, trim) {
 
   // 各模型的表：其他欄位預設收起，展開的選擇在各分頁之間保留
   var MORE = ['input', 'output', 'cacheWrite5m', 'cacheWrite1h'];
+  var COMPARE_MODEL_COLUMNS = ['tokens', 'cacheHitRatio', 'cost'];  // 帳號比較分頁的摺疊區：每欄已經夠窄，只留這三項
   function modelTable(f) {
     var columns = ['tokens', 'cacheWrite', 'cacheRead', 'cacheHitRatio'].concat(state.moreColumns ? MORE : []).concat(['cost']);
     var table = el('table');
@@ -525,12 +544,122 @@ function makeCompact(spec, language, trim) {
     return node;
   }
 
+  // ---- 帳號比較 ----
+  // 每欄的「各模型與其他欄位」展開狀態：只屬於這個分頁，切換區間時保留（跟 openDays 同一個做法）
+  var compareOpen = {};
+  // 欄的順序：合計在最前，接著依 data.accounts 的順序（跟其他分頁的帳號選單同一個順序），未歸屬最後
+  function compareColumns(summary) {
+    var cols = [{ key: 'total', label: T['view.all'], account: null, isTotal: true, figure: summary.total }];
+    data.accounts.forEach(function (a) {
+      var row = summary.accounts.filter(function (r) { return r.account === a.key; })[0];
+      if (row) cols.push({ key: a.key, label: a.label, account: a.key, figure: row });
+    });
+    var lost = summary.accounts.filter(function (r) { return r.account === null; })[0];
+    if (lost) cols.push({ key: 'unattributed', label: T.unattributed, account: null, figure: lost });
+    return cols;
+  }
+  function colorOfColumn(col) { return col.isTotal ? 'var(--fg)' : colorOf(col.account); }
+  // 一欄的小長條圖：區間的日軸，各欄自己的最大值換算高度，跟總覽的堆疊圖是同一份每日資料
+  var SPARK_SLOT = 6, SPARK_BAR = 4, SPARK_H = 40;  // SPARK_H 要跟下面 CSS 的 .compare-col svg{height:2.5rem} 一致（預設字級下 1rem=16px）
+  function sparkline(col, summary, color) {
+    var byDay = {};
+    summary.daily.forEach(function (entry) {
+      if (!col.isTotal && entry.account !== col.account) return;
+      byDay[entry.day] = (byDay[entry.day] || 0) + entry.tokens;
+    });
+    var values = summary.days.map(function (day) { return byDay[day] || 0; });
+    var max = Math.max.apply(null, [1].concat(values));
+    var w = Math.max(1, values.length) * SPARK_SLOT;
+    var root = svg('svg', { viewBox: '0 0 ' + w + ' ' + SPARK_H, role: 'img', 'aria-label': fill(T.compareSpark, { account: col.label }) });
+    values.forEach(function (v, i) {
+      var height = Math.max(v ? 1 : 0, v / max * (SPARK_H - 2));
+      root.appendChild(svg('rect', { x: i * SPARK_SLOT, y: SPARK_H - height, width: SPARK_BAR, height: height, fill: color }));
+    });
+    return root;
+  }
+  function compareKv(label, text, title) {
+    var row = el('div', null, 'kv');
+    row.appendChild(el('span', label));
+    var cell = el('span', text);
+    if (title) cell.title = title;
+    row.appendChild(cell);
+    return row;
+  }
+  // 摺疊區：各模型（tokens、命中比例、金額）與 input、output 兩個總數
+  function compareDetails(col, f) {
+    var table = el('table');
+    var head = el('tr');
+    ['model'].concat(COMPARE_MODEL_COLUMNS).forEach(function (c) { head.appendChild(el('th', T[c])); });
+    table.appendChild(head);
+    f.models.forEach(function (m) {
+      var tr = el('tr');
+      tr.appendChild(el('td', m.model));
+      figureCells(tr, COMPARE_MODEL_COLUMNS, m);
+      table.appendChild(tr);
+    });
+    var node = el('details');
+    node.open = !!compareOpen[col.key];
+    node.addEventListener('toggle', function () { compareOpen[col.key] = node.open; });
+    var label = el('summary', T.compareModels, 'toggle');
+    label.dataset.focus = 'compare:' + col.key;
+    node.appendChild(label);
+    node.appendChild(table);
+    [['input', f.input], ['output', f.output]].forEach(function (pair) {
+      node.appendChild(compareKv(T[pair[0]], compact(pair[1]), numbers.format(pair[1])));
+    });
+    return node;
+  }
+  function compareCard(col, summary, maxTokens) {
+    var color = colorOfColumn(col);
+    var f = col.figure;
+    var node = el('section', null, 'card compare-col');
+    var h2 = el('h2');
+    if (!col.isTotal) h2.appendChild(swatch(col.account));
+    h2.appendChild(el('span', col.label));
+    node.appendChild(h2);
+    node.appendChild(big(compact(f.tokens), numbers.format(f.tokens)));
+    if (!col.isTotal) {  // 合計欄自己必是最大，占比沒有意義，不顯示
+      var ratio = maxTokens ? f.tokens / maxTokens : 0;
+      node.appendChild(compareKv(T.compareRatio, percent(ratio)));
+      var meter = el('div', null, 'meter');
+      meter.setAttribute('aria-hidden', 'true');  // 比例已經用文字列出，色塊只是加強，不重複念出
+      var bar = el('i');
+      bar.style.width = Math.min(100, ratio * 100) + '%';
+      bar.style.background = color;
+      meter.appendChild(bar);
+      node.appendChild(meter);
+    }
+    node.appendChild(sparkline(col, summary, color));
+    node.appendChild(compareKv(T.cacheHitRatio, percent(f.cacheHitRatio)));
+    node.appendChild(compareKv(T.cacheWrite, compact(f.cacheWrite), numbers.format(f.cacheWrite)));
+    node.appendChild(compareKv(T.cacheRead, compact(f.cacheRead), numbers.format(f.cacheRead)));
+    var money = cost(f);
+    node.appendChild(compareKv(T.cost, money.text, money.title));
+    node.appendChild(compareDetails(col, f));
+    return node;
+  }
+  function comparison(summary) {
+    var node = el('div', null, 'stack');
+    if (!summary.accounts.length) {
+      node.appendChild(el('p', T.empty, 'card empty'));
+      return node;
+    }
+    var cols = compareColumns(summary);
+    var maxTokens = Math.max.apply(null, [1].concat(cols.filter(function (c) { return !c.isTotal; })
+      .map(function (c) { return c.figure.tokens; })));
+    var grid = el('div', null, 'cols');
+    cols.forEach(function (col) { grid.appendChild(compareCard(col, summary, maxTokens)); });
+    node.appendChild(grid);
+    return node;
+  }
+
   // ---- 分頁框架：頁首的選擇各分頁共用，切換分頁時不重設 ----
   var TABS = [{ id: 'overview', label: T['tab.overview'], render: overview },
-              { id: 'daily', label: T['tab.daily'], render: daily }];
+              { id: 'daily', label: T['tab.daily'], render: daily },
+              { id: 'comparison', label: T['tab.comparison'], render: comparison }];
   var wantFocus = null;  // 方向鍵換分頁後，重建完要把焦點給新的分頁
 
-  function segmented(label, options, selected, choose) {
+  function segmented(label, options, selected, choose, disabled) {
     var group = el('div', null, 'group');
     group.appendChild(el('span', label));
     var seg = el('div', null, 'seg');
@@ -542,7 +671,11 @@ function makeCompact(spec, language, trim) {
       button.dataset.focus = label + ':' + option.id;
       button.setAttribute('aria-pressed', String(option.id === selected));
       if (option.account !== undefined) button.insertBefore(swatch(option.account), button.firstChild);
-      button.addEventListener('click', function () { choose(option.id); });
+      if (disabled) {
+        button.disabled = true;  // 原生 disabled：自動退出 Tab 順序，強制色彩模式下也會跟著系統的停用樣式
+      } else {
+        button.addEventListener('click', function () { choose(option.id); });
+      }
       seg.appendChild(button);
     });
     group.appendChild(seg);
@@ -585,7 +718,9 @@ function makeCompact(spec, language, trim) {
     var views = [{ id: 'all', label: T['view.all'] }].concat(data.accounts.map(function (a) {
       return { id: a.key, label: a.label, account: a.key };
     }));
-    controls.appendChild(segmented(T.view, views, state.view, function (id) { state.view = id; draw(); }));
+    var onComparison = state.tab === 'comparison';  // 帳號比較本身就是並排，單看或合計的選擇不作用
+    controls.appendChild(segmented(onComparison ? T.viewUnavailable : T.view, views, state.view,
+      function (id) { state.view = id; draw(); }, onComparison));
 
     var summary = data.summary[state.range];
     var panel = document.getElementById('panel');
@@ -597,7 +732,8 @@ function makeCompact(spec, language, trim) {
     notes.textContent = '';
     notes.appendChild(el('p', T.cacheNote));
     notes.appendChild(el('p', T.costNote));
-    if (state.view === 'all' && summary.accounts.some(function (row) { return row.account === null; })) {
+    // 帳號比較不受「顯示」影響，一律跟 view=all 一樣會看到未歸屬那一欄
+    if ((state.view === 'all' || onComparison) && summary.accounts.some(function (row) { return row.account === null; })) {
       notes.appendChild(el('p', T.unattributedNote));
     }
     if (summary.downtimeUnrecognized) {

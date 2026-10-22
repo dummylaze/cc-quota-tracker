@@ -348,8 +348,10 @@ STRINGS = {
     "report.range.all": "All",
     "report.tab.overview": "Overview",
     "report.tab.daily": "Daily",
+    "report.tab.comparison": "Account comparison",
     "report.view": "Show",
     "report.view.all": "All accounts combined",
+    "report.view.unavailable": "Show (not used on this tab)",
     "report.units": "1000:K,1000000:M,1000000000:B",  # large numbers: "size:unit", smallest first; a space before the unit is part of the text
     "report.tile.tokens": "Total tokens",
     "report.tile.cache_split": "Cache read {read}, write {write}",
@@ -374,6 +376,9 @@ STRINGS = {
     "report.col.cache_hit": "Cache hit ratio",
     "report.row.total": "Total",
     "report.row.unattributed": "Unattributed",
+    "report.compare.ratio": "Share of the top account",
+    "report.compare.models": "Models and other fields",
+    "report.compare.spark": "{account} daily usage",
     "report.account.unwatched": "Unwatched account {n}",
     "report.empty": "No usage in this range.",
     "report.cache_note": "Cache hit ratio = cache read ÷ (input + cache write + cache read); output is not counted. "

@@ -294,8 +294,10 @@ STRINGS = {
     "report.range.all": "全部",
     "report.tab.overview": "總覽",
     "report.tab.daily": "每日",
+    "report.tab.comparison": "帳號比較",
     "report.view": "顯示",
     "report.view.all": "全部帳號合計",
+    "report.view.unavailable": "顯示（此分頁不適用）",
     "report.units": "10000: 萬,100000000: 億",  # 大數字換單位：「大小:單位」，小的在前；單位前的空白也是文案的一部分
     "report.tile.tokens": "總 token",
     "report.tile.cache_split": "cache 讀取 {read}，寫入 {write}",
@@ -320,6 +322,9 @@ STRINGS = {
     "report.col.cache_hit": "cache 命中比例",
     "report.row.total": "合計",
     "report.row.unattributed": "未歸屬",
+    "report.compare.ratio": "占最大帳號的比例",
+    "report.compare.models": "各模型與其他欄位",
+    "report.compare.spark": "{account} 每日用量",
     "report.account.unwatched": "未監看帳號 {n}",
     "report.empty": "這個區間沒有用量。",
     "report.cache_note": "cache 命中比例＝cache 讀取 ÷（input＋cache 寫入＋cache 讀取），output 不計。"
