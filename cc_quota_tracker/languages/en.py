@@ -347,6 +347,7 @@ STRINGS = {
     "report.range.30d": "Last 30 days",
     "report.range.all": "All",
     "report.tab.overview": "Overview",
+    "report.tab.daily": "Daily",
     "report.view": "Show",
     "report.view.all": "All accounts combined",
     "report.units": "1000:K,1000000:M,1000000000:B",  # large numbers: "size:unit", smallest first; a space before the unit is part of the text
@@ -358,7 +359,9 @@ STRINGS = {
     "report.chart.daily": "Daily usage",
     "report.chart.tip": "{day}  {account}: {n} tokens",
     "report.models": "By model",
+    "report.daily": "Daily breakdown",
     "report.col.model": "Model",
+    "report.col.day": "Date",
     "report.col.tokens": "Total tokens",
     "report.col.cache_write": "Cache write",
     "report.columns.more": "Show input, output and more",

@@ -293,6 +293,7 @@ STRINGS = {
     "report.range.30d": "近 30 天",
     "report.range.all": "全部",
     "report.tab.overview": "總覽",
+    "report.tab.daily": "每日",
     "report.view": "顯示",
     "report.view.all": "全部帳號合計",
     "report.units": "10000: 萬,100000000: 億",  # 大數字換單位：「大小:單位」，小的在前；單位前的空白也是文案的一部分
@@ -304,7 +305,9 @@ STRINGS = {
     "report.chart.daily": "每日用量",
     "report.chart.tip": "{day}　{account}：{n} token",
     "report.models": "各模型",
+    "report.daily": "每日明細",
     "report.col.model": "模型",
+    "report.col.day": "日期",
     "report.col.tokens": "合計 token",
     "report.col.cache_write": "cache 寫入",
     "report.columns.more": "展開 input、output 等欄位",

@@ -446,6 +446,87 @@ class OverviewDataTest(ReportTestCase):
         self.assertEqual([(a["key"], a["color"]) for a in data["accounts"]], [("a1", "account_1"), ("a2", "account_2")])
 
 
+class DailyDataTest(ReportTestCase):
+    """每日分頁用的資料：每個有用量的日子一筆，帶合計、各帳號與各模型的同樣數字。畫面只負責加總以外的排版。"""
+
+    def setUp(self):
+        super().setUp()
+        self.switch(NOW - timedelta(days=90), "acct-1")
+
+    def used(self, at, account_id=None, model="claude-test-1", **counts):
+        if account_id:
+            self.switch(at - timedelta(minutes=1), account_id)
+        name = f"{model}-{stamp(at)}"
+        return assistant(name, "r-" + name, at, model=model, **counts)
+
+    def by_day(self, name="7d"):
+        return self.report()[0]["summary"][name]["byDay"]
+
+    def test_there_is_one_entry_per_day_with_usage_oldest_first_and_none_for_empty_days(self):
+        self.write_transcript("p/s1.jsonl",
+                              self.used(datetime(2025, 12, 29, 9, 0, tzinfo=UTC), input=0, output=1),
+                              self.used(datetime(2025, 12, 29, 20, 0, tzinfo=UTC), input=0, output=2),
+                              self.used(R, input=0, output=4))
+        self.assertEqual([(d["day"], d["total"]["tokens"]) for d in self.by_day()],
+                         [("2025-12-29", 3), ("2026-01-01", 4)])
+
+    def test_a_range_only_lists_the_days_inside_it(self):
+        self.write_transcript("p/s1.jsonl", self.used(NOW - timedelta(days=20), input=0, output=1),
+                              self.used(R, input=0, output=2))
+        self.assertEqual(len(self.by_day("7d")), 1)
+        self.assertEqual(len(self.by_day("30d")), 2)
+
+    def test_a_day_carries_the_same_figures_as_the_range_totals_including_ratio_and_cost(self):
+        self.write_transcript("p/s1.jsonl", self.used(R, input=2_000_000, output=0, read=2_000_000))
+        total = self.by_day()[0]["total"]
+        self.assertAlmostEqual(total["cacheHitRatio"], 0.5)
+        self.assertAlmostEqual(total["cost"], 2 * PRICES["input"] + 2 * PRICES["cacheRead"])
+        self.assertEqual((total["tokens"], total["cacheRead"], total["costUnknown"]), (4_000_000, 2_000_000, []))
+
+    def test_the_day_total_adds_up_the_accounts_and_the_unattributed_usage(self):
+        day = datetime(2025, 12, 31, 5, 0, tzinfo=UTC)
+        self.switch(day + timedelta(hours=3), "")  # 切到帳號未知
+        self.write_transcript("p/s1.jsonl",
+                              self.used(day, "acct-1", input=0, output=1),
+                              self.used(day + timedelta(hours=2), "acct-2", input=0, output=2),
+                              self.used(day + timedelta(hours=4), input=0, output=4))
+        entry = self.by_day()[0]
+        self.assertEqual(entry["total"]["tokens"], 7)
+        self.assertEqual([(a["account"], a["tokens"]) for a in entry["accounts"]], [("a1", 1), ("a2", 2), (None, 4)])
+
+    def test_a_day_without_an_account_has_no_entry_for_it(self):
+        self.write_transcript("p/s1.jsonl", self.used(R, "acct-1", input=0, output=1),
+                              self.used(NOW - timedelta(days=3), "acct-2", input=0, output=1))
+        days = {d["day"]: [a["account"] for a in d["accounts"]] for d in self.by_day()}
+        self.assertEqual(days, {"2025-12-29": ["a2"], "2026-01-01": ["a1"]})
+
+    def test_models_are_split_in_the_day_and_in_each_account_biggest_first(self):
+        t = datetime(2025, 12, 31, 5, 0, tzinfo=UTC)
+        self.write_transcript("p/s1.jsonl",
+                              self.used(t, "acct-1", model="claude-test-1", input=0, output=3),
+                              self.used(t + timedelta(minutes=2), model="claude-test-2", input=0, output=5),
+                              self.used(t + timedelta(hours=2), "acct-2", model="claude-test-1", input=0, output=10))
+        entry = self.by_day()[0]
+        self.assertEqual([(m["model"], m["tokens"]) for m in entry["total"]["models"]],
+                         [("claude-test-1", 13), ("claude-test-2", 5)])
+        first, second = entry["accounts"]
+        self.assertEqual([(m["model"], m["tokens"]) for m in first["models"]], [("claude-test-2", 5), ("claude-test-1", 3)])
+        self.assertEqual([(m["model"], m["tokens"]) for m in second["models"]], [("claude-test-1", 10)])
+
+    def test_a_model_that_cannot_be_priced_only_marks_the_days_it_was_used_on(self):
+        self.write_transcript("p/s1.jsonl",
+                              self.used(NOW - timedelta(days=3), model="claude-unpriced", input=5, output=0),
+                              self.used(R, input=5, output=0))
+        older, newer = self.by_day()
+        self.assertIsNone(older["total"]["cost"])
+        self.assertIn("claude-unpriced", older["total"]["costUnknown"][0])
+        self.assertEqual(newer["total"]["costUnknown"], [])
+        self.assertIsNotNone(newer["total"]["cost"])
+
+    def test_a_range_without_usage_has_no_days(self):
+        self.assertEqual(self.by_day("all"), [])
+
+
 class CacheHitRatioTest(ReportTestCase):
     def test_ratio_is_cache_read_over_input_plus_cache_writes_plus_cache_read_and_output_is_ignored(self):
         self.switch(T0 - timedelta(days=1), "acct-1")

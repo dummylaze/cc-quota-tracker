@@ -29,6 +29,7 @@ SCHEMA = 1  # 報表資料的版本；之後加欄位不升版，改變既有欄
 RANGES = (("7d", 7), ("30d", 30), ("all", None))  # 區間：近 N 個本機的日（含今天），None＝全部
 LEDGER_DELAY = timedelta(hours=24)  # 過了這麼久的小時才入帳；更近的每次從對話紀錄重算，遲到的紀錄才不會漏
 _HourKey = Tuple[datetime, Optional[str], str, Tuple[str, ...]]  # UTC 小時、帳號識別碼（None＝未歸屬）、模型、計費因素
+_DayModels = Dict[str, Dict[Optional[str], Dict[str, "_Tally"]]]  # 日 → 帳號鍵（None＝未歸屬）→ 模型 → 一格
 
 
 class _Tally:
@@ -298,9 +299,11 @@ def _summary(rows: List[dict], today: date, span: Optional[int], zone: Optional[
     selected = [r for r in rows if first is None or r["day"] >= first.isoformat()]
     per_model: Dict[Optional[str], Dict[str, _Tally]] = defaultdict(lambda: defaultdict(_Tally))
     per_day: Dict[Tuple[str, Optional[str]], int] = defaultdict(int)
+    per_day_model: _DayModels = defaultdict(lambda: defaultdict(lambda: defaultdict(_Tally)))
     for r in selected:
         counts = [r[field] for field in TOKEN_FIELDS]
         per_model[r["account"]][r["model"]].add(counts, r["cost"], r["costUnknown"])
+        per_day_model[r["day"]][r["account"]][r["model"]].add(counts, r["cost"], r["costUnknown"])
         per_day[(r["day"], r["account"])] += sum(counts)
     per_account: Dict[Optional[str], _Tally] = {}
     for account, models in per_model.items():
@@ -308,10 +311,7 @@ def _summary(rows: List[dict], today: date, span: Optional[int], zone: Optional[
     # 用量多的在前，未歸屬排最後（有列就一定有用量：列是從用量算出來的）
     ranked = sorted(per_account.items(), key=lambda kv: (kv[0] is None, -sum(kv[1].counts), rank[kv[0]]))
     total = _merged(tally for _, tally in ranked)
-    total_models: Dict[str, _Tally] = defaultdict(_Tally)
-    for models in per_model.values():
-        for model, tally in models.items():
-            total_models[model].merge(tally)
+    total_models = _merged_models(per_model.values())
     range_start = first or (date.fromisoformat(min(r["day"] for r in selected)) if selected else None)
     start: Optional[datetime] = earliest
     if first is not None:
@@ -322,10 +322,34 @@ def _summary(rows: List[dict], today: date, span: Optional[int], zone: Optional[
         "days": _days(range_start, selected, today),
         "daily": [{"day": day, "account": account, "tokens": tokens}
                   for (day, account), tokens in sorted(per_day.items(), key=lambda kv: (kv[0][0], rank[kv[0][1]]))],
+        "byDay": _by_day(per_day_model, rank),
         "accounts": [dict(account=account, **_figures(tally, per_model[account])) for account, tally in ranked],
         "total": _figures(total, total_models),
         "downtimeUnrecognized": bool(selected) and (cutoff is None or (start is not None and start < cutoff)),
     }
+
+
+def _merged_models(per_account: Iterable[Dict[str, _Tally]]) -> Dict[str, _Tally]:
+    """把各帳號的「模型 → 一格」合併成不分帳號的一份。"""
+    merged: Dict[str, _Tally] = defaultdict(_Tally)
+    for models in per_account:
+        for model, tally in models.items():
+            merged[model].merge(tally)
+    return merged
+
+
+def _by_day(per_day_model: _DayModels, rank: Dict[Optional[str], int]) -> List[dict]:
+    """每日分頁的表：有用量的日子（舊的在前），各自帶合計與各帳號的數字（未歸屬排最後），每組都附各模型的細分。"""
+    entries = []
+    for day, accounts in sorted(per_day_model.items()):
+        total_models = _merged_models(accounts.values())
+        entries.append({
+            "day": day,
+            "total": _figures(_merged(total_models.values()), total_models),
+            "accounts": [dict(account=account, **_figures(_merged(models.values()), models))
+                         for account, models in sorted(accounts.items(), key=lambda kv: rank[kv[0]])],
+        })
+    return entries
 
 
 def _days(start: Optional[date], selected: Sequence[dict], today: date) -> List[str]:
