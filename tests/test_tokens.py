@@ -5,7 +5,8 @@ from cc_quota_tracker.tokens import ACCOUNT_COLORS, RADIUS, SPACE, THEMES
 
 SEVERITIES = ("normal", "warning", "critical")
 
-# 門檻：(WCAG 2 對比下限, APCA |Lc| 目標)。WCAG 是下限，APCA 是設計目標，兩者都要過
+# 門檻：(WCAG 2 對比下限, APCA |Lc| 目標)。WCAG 是下限，APCA 是設計目標，兩者都要過。
+# 本檔只量 WCAG；APCA 目標由本機的量測腳本讀同一份 PAIRS 量（APCA 的授權不允許放進這個 repo）
 TEXT = (4.5, 60)  # 非內文文字：標籤、數值、附註。百分比 13pt 粗體小於大字門檻（14pt 粗體），照一般文字算
 GRAPHIC = (3, 30)  # 進度條填色、色點、外框等 UI 元件
 VISIBLE = (1, 15)  # 只要看得見的元素（空的進度條底軌）：WCAG 沒有要求，APCA 不低於 15
@@ -55,44 +56,12 @@ def contrast(a, b):
     return (hi + 0.05) / (lo + 0.05)
 
 
-def _apca_y(color):
-    r, g, b = (int(color[i:i + 2], 16) / 255 for i in (1, 3, 5))
-    y = 0.2126729 * r ** 2.4 + 0.7151522 * g ** 2.4 + 0.0721750 * b ** 2.4
-    return y + (0.022 - y) ** 1.414 if y < 0.022 else y  # 近黑色的軟鉗制
-
-
-def apca(text, background):
-    """APCA-W3 0.0.98G 的 Lc：深字淺底為正、淺字深底為負。"""
-    yt, yb = _apca_y(text), _apca_y(background)
-    if abs(yb - yt) < 0.0005:
-        return 0.0
-    if yb > yt:
-        s = (yb ** 0.56 - yt ** 0.57) * 1.14
-        return 0.0 if s < 0.1 else (s - 0.027) * 100
-    s = (yb ** 0.65 - yt ** 0.62) * 1.14
-    return 0.0 if s > -0.1 else (s + 0.027) * 100
-
-
-class ApcaTest(unittest.TestCase):
-    def test_matches_reference_values(self):
-        # APCA-W3 文件的參考值：黑字白底 Lc 106.04、白字黑底 Lc -107.88、#888 字白底 Lc 63.06
-        self.assertAlmostEqual(apca("#000000", "#ffffff"), 106.04, places=1)
-        self.assertAlmostEqual(apca("#ffffff", "#000000"), -107.88, places=1)
-        self.assertAlmostEqual(apca("#888888", "#ffffff"), 63.06, places=1)
-
-
 class ColorPairTest(unittest.TestCase):
     def test_every_pair_meets_the_wcag_floor_in_both_themes(self):
         for theme, c in THEMES.items():
             for fore, back, (ratio, _), where in PAIRS:
                 with self.subTest(theme=theme, pair=f"{fore}/{back}", where=where):
                     self.assertGreaterEqual(contrast(c[fore], c[back]), ratio)
-
-    def test_every_pair_meets_the_apca_target_in_both_themes(self):
-        for theme, c in THEMES.items():
-            for fore, back, (_, lc), where in PAIRS:
-                with self.subTest(theme=theme, pair=f"{fore}/{back}", where=where):
-                    self.assertGreaterEqual(abs(apca(c[fore], c[back])), lc)
 
     def test_both_themes_define_the_same_roles(self):
         self.assertEqual(set(THEMES["light"]), set(THEMES["dark"]))
