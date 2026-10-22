@@ -252,8 +252,9 @@ function makeCompact(spec, language, trim) {
   function counted(node, n) { node.title = numbers.format(n); return node; }
   function percent(ratio) { return ratio == null ? DASH : (ratio * 100).toFixed(1) + '%'; }
   // 金額：全部算不出是「—」，部分算不出是「已知＋—」；提示列出到分的已知金額與算不出的原因
-  function cost(row) {
-    var known = row.cost == null ? null : dollars.format(row.cost);
+  // headline：頭條數字的金額磚，不到 100 美元時直接顯示到分，免得剛開始用時看起來像沒花錢（$0）
+  function cost(row, headline) {
+    var known = row.cost == null ? null : (headline && row.cost < 100 ? cents : dollars).format(row.cost);
     var tip = [];
     if (row.cost != null) tip.push(cents.format(row.cost));
     if (row.costUnknown.length) tip.push(fill(T.costExcludes, { reason: row.costUnknown.join(T.listSep) }));
@@ -305,7 +306,7 @@ function makeCompact(spec, language, trim) {
       text: fill(T.tileCacheSplit, { read: compact(f.cacheRead), write: compact(f.cacheWrite) }),
       title: fill(T.tileCacheSplit, { read: numbers.format(f.cacheRead), write: numbers.format(f.cacheWrite) }) }));
     node.appendChild(tile(T.cacheHitRatio, big(percent(f.cacheHitRatio)), { text: T.tileHitFormula }));
-    var money = cost(f);
+    var money = cost(f, true);
     node.appendChild(tile(T.cost, big(money.text, money.title),
       { text: f.costUnknown.length ? T.tileCostPartial : T.tileCostBasis }));
     return node;
