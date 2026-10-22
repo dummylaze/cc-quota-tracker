@@ -21,6 +21,7 @@ from typing import Dict, Iterable, List, NamedTuple, Optional, Sequence, Tuple
 from . import i18n, prices
 from .managed_directory import AccountLabels, ManagedDirectory, SwitchLog, SwitchRecord, WatchedAccount
 from .prices import PriceTable
+from .tokens import ACCOUNT_COLORS
 from .transcripts import Scan, Usage
 from .usage_ledger import TOKEN_FIELDS, LedgerCell, LedgerFailure, LedgerRead, LedgerStatus
 
@@ -117,13 +118,16 @@ def build_data(scan: Scan, switch_log: SwitchLog, labelling: Labelling, now: dat
     today = now.astimezone(zone).date()
     cutoff = next((r.at for r in switch_log.records if r.last_run_at is not None), None)
     earliest = min([u.at for u in live] + [c.hour for c in ledger.cells], default=None)
+    used = {r["account"] for r in rows}
+    listed = [(account_id, key) for account_id, key in keys.items() if key in used]  # 有用量的帳號
     return {
         "schema": SCHEMA,
         "generatedAt": now.isoformat(),
         "today": today.isoformat(),
         "language": lang,
-        "accounts": [{"key": key, "label": labels[account_id]} for account_id, key in keys.items()
-                     if any(r["account"] == key for r in rows)],
+        # 帳號依出現的順序輪流領顏色（第 5 個起從頭再用）；顏色跟著帳號，不隨區間或檢視的帳號改變
+        "accounts": [{"key": key, "label": labels[account_id], "color": ACCOUNT_COLORS[i % len(ACCOUNT_COLORS)]}
+                     for i, (account_id, key) in enumerate(listed)],
         "rows": rows,
         # 用量帳本：最早有資料的時間、最後一次成功更新的時間（沒更新過是 null）；更新失敗的原因在 notices
         "ledger": {"earliest": earliest.isoformat() if earliest else None,
@@ -292,24 +296,51 @@ def _summary(rows: List[dict], today: date, span: Optional[int], zone: Optional[
              cutoff: Optional[datetime], earliest: Optional[datetime], rank: Dict[Optional[str], int]) -> dict:
     first = today - timedelta(days=span - 1) if span else None
     selected = [r for r in rows if first is None or r["day"] >= first.isoformat()]
-    per_account: Dict[Optional[str], _Tally] = defaultdict(_Tally)
+    per_model: Dict[Optional[str], Dict[str, _Tally]] = defaultdict(lambda: defaultdict(_Tally))
+    per_day: Dict[Tuple[str, Optional[str]], int] = defaultdict(int)
     for r in selected:
-        per_account[r["account"]].add([r[field] for field in TOKEN_FIELDS], r["cost"], r["costUnknown"])
+        counts = [r[field] for field in TOKEN_FIELDS]
+        per_model[r["account"]][r["model"]].add(counts, r["cost"], r["costUnknown"])
+        per_day[(r["day"], r["account"])] += sum(counts)
+    per_account: Dict[Optional[str], _Tally] = {}
+    for account, models in per_model.items():
+        per_account[account] = _merged(models.values())
     # 用量多的在前，未歸屬排最後（有列就一定有用量：列是從用量算出來的）
     ranked = sorted(per_account.items(), key=lambda kv: (kv[0] is None, -sum(kv[1].counts), rank[kv[0]]))
-    total = _Tally()
-    for _, tally in ranked:
-        total.merge(tally)
+    total = _merged(tally for _, tally in ranked)
+    total_models: Dict[str, _Tally] = defaultdict(_Tally)
+    for models in per_model.values():
+        for model, tally in models.items():
+            total_models[model].merge(tally)
+    range_start = first or (date.fromisoformat(min(r["day"] for r in selected)) if selected else None)
     start: Optional[datetime] = earliest
     if first is not None:
         start = (datetime.combine(first, time.min, tzinfo=zone) if zone
                  else datetime.combine(first, time.min).astimezone())
     return {
         "from": first.isoformat() if first else None,
-        "accounts": [dict(account=account, **_figures(counts)) for account, counts in ranked],
-        "total": _figures(total),
+        "days": _days(range_start, selected, today),
+        "daily": [{"day": day, "account": account, "tokens": tokens}
+                  for (day, account), tokens in sorted(per_day.items(), key=lambda kv: (kv[0][0], rank[kv[0][1]]))],
+        "accounts": [dict(account=account, **_figures(tally, per_model[account])) for account, tally in ranked],
+        "total": _figures(total, total_models),
         "downtimeUnrecognized": bool(selected) and (cutoff is None or (start is not None and start < cutoff)),
     }
+
+
+def _days(start: Optional[date], selected: Sequence[dict], today: date) -> List[str]:
+    """長條圖的日軸：區間第一天到今天，每一天都有（沒用量的日子留空）；用量比今天還晚（時鐘被調過）時延到那一天。"""
+    if start is None:
+        return []
+    end = max([today] + [date.fromisoformat(r["day"]) for r in selected])
+    return [(start + timedelta(days=n)).isoformat() for n in range((end - start).days + 1)]
+
+
+def _merged(tallies: Iterable[_Tally]) -> _Tally:
+    merged = _Tally()
+    for tally in tallies:
+        merged.merge(tally)
+    return merged
 
 
 def _add(cell: List[int], counts: Sequence[int]) -> None:
@@ -317,11 +348,17 @@ def _add(cell: List[int], counts: Sequence[int]) -> None:
         cell[i] += n
 
 
-def _figures(tally: _Tally) -> dict:
+def _figures(tally: _Tally, models: Optional[Dict[str, _Tally]] = None) -> dict:
+    """一組合計的數字。models 有給時，另附各模型的同樣數字（token 多的在前）。"""
     figures: dict = dict(zip(TOKEN_FIELDS, tally.counts))
+    figures["tokens"] = sum(tally.counts)  # 全部種類相加
+    figures["cacheWrite"] = figures["cacheWrite5m"] + figures["cacheWrite1h"]
     figures["cacheHitRatio"] = cache_hit_ratio(figures)
     figures["cost"] = tally.cost  # 美元，只含算得出的部分；沒有任何部分算得出是 null
     figures["costUnknown"] = tally.unknown  # 算不出的部分的原因；空的是全部算得出
+    if models is not None:
+        figures["models"] = [dict(model=model, **_figures(t)) for model, t in
+                             sorted(models.items(), key=lambda kv: (-sum(kv[1].counts), kv[0]))]
     return figures
 
 

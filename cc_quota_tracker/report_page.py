@@ -6,7 +6,7 @@ import json
 import re
 
 from . import i18n
-from .tokens import FONTS, THEMES
+from .tokens import ACCOUNT_COLORS, FONTS, THEMES
 
 REPORT_FILE = "token-report.html"  # 放在設定檔所在的目錄，每次覆寫
 
@@ -21,7 +21,23 @@ _PAGE_TEXT = {
     "range.7d": "report.range.7d",
     "range.30d": "report.range.30d",
     "range.all": "report.range.all",
-    "account": "report.col.account",
+    "tab.overview": "report.tab.overview",
+    "view": "report.view",
+    "view.all": "report.view.all",
+    "units": "report.units",
+    "tileTokens": "report.tile.tokens",
+    "tileCacheSplit": "report.tile.cache_split",
+    "tileHitFormula": "report.tile.hit_formula",
+    "tileCostBasis": "report.tile.cost_basis",
+    "tileCostPartial": "report.tile.cost_partial",
+    "chartDaily": "report.chart.daily",
+    "chartTip": "report.chart.tip",
+    "models": "report.models",
+    "model": "report.col.model",
+    "tokens": "report.col.tokens",
+    "cacheWrite": "report.col.cache_write",
+    "columnsMore": "report.columns.more",
+    "columnsFewer": "report.columns.fewer",
     "input": "report.col.input",
     "output": "report.col.output",
     "cacheWrite5m": "report.col.cache_write_5m",
@@ -53,7 +69,7 @@ NOTICE_KEYS = {
     "labelsUnavailable": "report.notice.labels_unavailable",
     "costUnknown": "report.notice.cost_unknown",
 }
-_HOLES = {"n": "{n}", "date": "{date}", "reason": "{reason}", "cost": "{cost}"}  # 讓 text() 把佔位符原樣留下，由腳本填
+_HOLES = {name: "{" + name + "}" for name in ("n", "date", "reason", "cost", "read", "write", "day", "account")}  # 讓 text() 把佔位符原樣留下，由腳本填
 
 
 def notice_text(lang: str, notice: dict) -> str:
@@ -78,15 +94,18 @@ def _json(value) -> str:
 def _theme_css() -> str:
     def block(theme):
         t = THEMES[theme]
+        accounts = "".join(f"--{role}:{t[role]};" for role in ACCOUNT_COLORS)
         return (f"--panel:{t['panel']};--card:{t['card']};--fg:{t['fg']};--sub:{t['sub']};"
-                f"--banner:{t['banner']};--banner-fg:{t['banner_fg']};")
+                f"--banner:{t['banner']};--banner-fg:{t['banner_fg']};{accounts}--unattributed:{t['unattributed']};")
     family = FONTS["body"][0]
     return (f':root{{--font:"{family}","Segoe UI",system-ui,sans-serif;}}'
             f":root{{{block('light')}}}"
             f"@media (prefers-color-scheme:dark){{:root{{{block('dark')}}}}}")
 
 
-_PAGE = """<!doctype html>
+
+# 腳本裡的 — 等跳脫序列要原樣留給 JavaScript，所以整頁用 raw 字串
+_PAGE = r"""<!doctype html>
 <html lang="{{LANG}}">
 <head>
 <meta charset="utf-8">
@@ -94,29 +113,52 @@ _PAGE = """<!doctype html>
 <title>{{TITLE}}</title>
 <style>
 {{THEMES}}
-:root{color-scheme:light dark;--line:color-mix(in srgb,var(--fg) 14%,transparent)}  /* 線不另立顏色，由文字色淡化而來 */
+:root{--text-xs:12px;--text-sm:13px;--text-md:14px;--text-base:15px;--text-title:22px;--text-display:28px;  /* 字級只有這幾階，依用途命名 */
+  color-scheme:light dark;--line:color-mix(in srgb,var(--fg) 14%,transparent)}  /* 線不另立顏色，由文字色淡化而來 */
 *{box-sizing:border-box}
-body{margin:0;background:var(--panel);color:var(--fg);
-  font:15px/1.6 var(--font)}
-main{max-width:960px;margin:0 auto;padding:32px 24px 48px}
-h1{margin:0 0 4px;font-size:22px;line-height:1.2;font-weight:700}
-.meta{margin:0 0 24px;color:var(--sub);font-size:13px}
+body{margin:0;background:var(--panel);color:var(--fg);font:var(--text-base)/1.6 var(--font)}
+main{max-width:1040px;margin:0 auto;padding:32px 16px 48px}
+h1{margin:0 0 4px;font-size:var(--text-title);line-height:1.2;font-weight:700}
+h2{margin:0 0 8px;font-size:var(--text-base);line-height:1.3;font-weight:700}
+.meta{margin:0 0 24px;color:var(--sub);font-size:var(--text-sm)}
 .banners{display:grid;gap:8px;margin:0 0 24px}
-.banner{margin:0;padding:12px 16px;border-radius:8px;background:var(--banner);color:var(--banner-fg);font-size:14px}
-.controls{display:flex;align-items:center;gap:8px;margin:0 0 16px}
-.controls label{color:var(--sub);font-size:13px}
-select{font:inherit;font-size:14px;color:var(--fg);background:var(--card);border:1px solid var(--line);
-  border-radius:8px;padding:6px 12px}
-.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:8px 16px;overflow-x:auto}
-table{width:100%;border-collapse:collapse;font-size:14px}
+.banner{margin:0;padding:12px 16px;border-radius:8px;background:var(--banner);color:var(--banner-fg);font-size:var(--text-md)}
+button{font:inherit;color:inherit;cursor:pointer}
+button:focus-visible{outline:2px solid var(--fg);outline-offset:2px}
+.tabs{display:flex;gap:8px;margin:0 0 16px;border-bottom:1px solid var(--line)}
+.tabs button{margin-bottom:-1px;padding:8px 16px;background:none;border:0;border-bottom:1px solid transparent;
+  color:var(--sub);font-size:var(--text-base)}
+.tabs button[aria-selected=true]{color:var(--fg);font-weight:700;border-bottom-color:var(--fg)}
+.controls{display:flex;flex-wrap:wrap;align-items:center;gap:8px 24px;margin:0 0 24px}
+.group{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.group > span{color:var(--sub);font-size:var(--text-sm)}
+.seg{display:inline-flex;flex-wrap:wrap;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:var(--card)}
+.seg button{display:inline-flex;align-items:center;gap:8px;padding:4px 12px;background:none;border:0;font-size:var(--text-md)}
+.seg button + button{border-left:1px solid var(--line)}
+.seg button[aria-pressed=true]{background:var(--fg);color:var(--panel)}
+.swatch{display:inline-block;width:10px;height:10px;border-radius:2px;flex:none}
+.stack > * + *{margin-top:24px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;overflow-x:auto}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px}
+.tile .label{color:var(--sub);font-size:var(--text-sm)}
+.tile .big{margin:4px 0;font-size:var(--text-display);line-height:1.2;font-weight:700;font-variant-numeric:tabular-nums}
+.tile .sub{color:var(--sub);font-size:var(--text-sm)}
+svg{display:block;width:100%;height:auto;min-width:560px}
+svg text{fill:var(--sub);font-size:var(--text-xs);font-family:var(--font)}
+svg .grid{stroke:var(--line);stroke-width:1}
+.legend{display:flex;flex-wrap:wrap;gap:8px 16px;margin:8px 0 0;color:var(--sub);font-size:var(--text-sm)}
+.legend span{display:inline-flex;align-items:center;gap:8px}
+table{width:100%;border-collapse:collapse;font-size:var(--text-md)}
 th,td{padding:12px 8px;text-align:right;white-space:nowrap;border-bottom:1px solid var(--line)}
-th{color:var(--sub);font-size:13px;font-weight:600}
-th:first-child,td:first-child{text-align:left}
+th{color:var(--sub);font-size:var(--text-sm);font-weight:600;white-space:normal;word-break:keep-all;vertical-align:bottom}
+th:first-child,td:first-child{text-align:left;padding-left:0}  /* 表的左右邊與卡片內的標題對齊 */
+th:last-child,td:last-child{padding-right:0}
 td{font-variant-numeric:tabular-nums}
 tr.total td{font-weight:700;border-bottom:0}
+.toggle{margin:8px 0 0;padding:4px 0;background:none;border:0;color:var(--sub);font-size:var(--text-sm);text-decoration:underline}
 .empty{margin:0;padding:24px 8px;color:var(--sub)}
 .notes{margin:24px 0 0;display:grid;gap:8px}
-.notes p{margin:0;color:var(--sub);font-size:13px}
+.notes p{margin:0;color:var(--sub);font-size:var(--text-sm)}
 </style>
 </head>
 <body>
@@ -124,28 +166,63 @@ tr.total td{font-weight:700;border-bottom:0}
 <h1 id="title"></h1>
 <p class="meta" id="meta"></p>
 <div class="banners" id="banners"></div>
-<div class="controls"><label for="range" id="range-label"></label><select id="range"></select></div>
-<div class="card" id="card"></div>
+<div class="tabs" role="tablist" id="tabs"></div>
+<div class="controls" id="controls"></div>
+<div id="panel" role="tabpanel"></div>
 <div class="notes" id="notes"></div>
 </main>
 <script type="application/json" id="report-data">{{DATA}}</script>
 <script type="application/json" id="report-texts">{{TEXTS}}</script>
 <script>
+/* compact:start */
+// 大數字換單位。spec 是語系檔的「大小:單位」清單（小的在前）；小於最小單位的整數照原樣顯示，
+// 其餘取三位有效數字（1.23、12.3、123，不再帶小數的整數放千分位）。進位後剛好湊滿下一個單位時改用下一個。
+// trim：座標軸的刻度本來就是整齊的數字，去掉尾端的 0（1 億，不是 1.00 億）
+function makeCompact(spec, language, trim) {
+  var units = spec.split(',').map(function (entry) {
+    var cut = entry.indexOf(':');
+    return { size: Number(entry.slice(0, cut)), label: entry.slice(cut + 1) };
+  });
+  function digitsOf(value) { return value < 10 ? 2 : value < 100 ? 1 : 0; }
+  function scaled(n, unit) {
+    var value = n / unit.size;
+    var digits = digitsOf(value);
+    var rounded = Number(value.toFixed(digits));
+    digits = Math.min(digits, digitsOf(rounded));  // 99.96 進位成 100 之後不再帶小數
+    rounded = Number(value.toFixed(digits));
+    return { rounded: rounded, text: rounded.toLocaleString(language,
+      { minimumFractionDigits: trim ? 0 : digits, maximumFractionDigits: digits }) + unit.label };
+  }
+  return function compact(n) {
+    if (!units.length || n < units[0].size) return n.toLocaleString(language);
+    var i = units.length - 1;
+    while (n < units[i].size) i--;
+    var shown = scaled(n, units[i]);
+    if (i + 1 < units.length && shown.rounded * units[i].size >= units[i + 1].size) shown = scaled(n, units[i + 1]);
+    return shown.text;
+  };
+}
+/* compact:end */
 (function () {
   var data = JSON.parse(document.getElementById('report-data').textContent);
   var T = JSON.parse(document.getElementById('report-texts').textContent);
   var numbers = new Intl.NumberFormat(data.language);
-  var labels = {};
-  data.accounts.forEach(function (a) { labels[a.key] = a.label; });
+  var compact = makeCompact(T.units, data.language);
+  var compactTick = makeCompact(T.units, data.language, true);
+  var accounts = {};
+  data.accounts.forEach(function (a) { accounts[a.key] = a; });
   // 金額：格子是整數美元，完整到分的數字放在滑鼠停留提示
   var dollars = new Intl.NumberFormat(data.language,
     { style: 'currency', currency: 'USD', currencyDisplay: 'narrowSymbol', maximumFractionDigits: 0 });
   var cents = new Intl.NumberFormat(data.language,
     { style: 'currency', currency: 'USD', currencyDisplay: 'narrowSymbol', minimumFractionDigits: 2 });
-  var COLUMNS = ['input', 'output', 'cacheWrite5m', 'cacheWrite1h', 'cacheRead', 'cacheHitRatio', 'cost'];
+  var DASH = '—';
+  var RANGES = ['7d', '30d', 'all'];
+  // 各分頁共用的選擇放這裡：切換分頁時不重設
+  var state = { tab: 'overview', range: '7d', view: 'all', moreColumns: false };
 
   function fill(template, values) {
-    return template.replace(/\\{(\\w+)\\}/g, function (whole, name) { return name in values ? values[name] : whole; });
+    return template.replace(/\{(\w+)\}/g, function (whole, name) { return name in values ? values[name] : whole; });
   }
   function el(tag, text, className) {
     var node = document.createElement(tag);
@@ -153,20 +230,35 @@ tr.total td{font-weight:700;border-bottom:0}
     if (className) node.className = className;
     return node;
   }
-  function figure(row, column) {
-    if (column === 'cacheHitRatio') return row[column] == null ? '\\u2014' : (row[column] * 100).toFixed(1) + '%';
-    return numbers.format(row[column]);
+  // SVG 元素要帶 SVG 的命名空間；從 HTML 解析器造出來的 <svg> 借用它，頁面裡就不必寫任何網址
+  var SVG = (function () {
+    var holder = document.createElement('div');
+    holder.innerHTML = '<svg></svg>';
+    return holder.firstChild.namespaceURI;
+  })();
+  function svg(tag, attributes) {
+    var node = document.createElementNS(SVG, tag);
+    Object.keys(attributes || {}).forEach(function (name) { node.setAttribute(name, attributes[name]); });
+    return node;
   }
-  // 金額格：全部算不出是「—」，部分算不出是「已知＋—」；提示列出到分的已知金額與算不出的原因
-  function cell(row, column) {
-    if (column !== 'cost') return el('td', figure(row, column));
+  function colorOf(account) { return account === null ? 'var(--unattributed)' : 'var(--' + accounts[account].color + ')'; }
+  function swatch(account) {
+    var node = el('i', null, 'swatch');
+    node.style.background = colorOf(account);
+    return node;
+  }
+  function nameOf(account) { return account === null ? T.unattributed : accounts[account].label; }
+  // 大數字換單位顯示，完整數值放在滑鼠停留提示
+  function counted(node, n) { node.title = numbers.format(n); return node; }
+  function percent(ratio) { return ratio == null ? DASH : (ratio * 100).toFixed(1) + '%'; }
+  // 金額：全部算不出是「—」，部分算不出是「已知＋—」；提示列出到分的已知金額與算不出的原因
+  function cost(row) {
     var known = row.cost == null ? null : dollars.format(row.cost);
-    var td = el('td', known == null ? '\\u2014' : row.costUnknown.length ? fill(T.costPartial, { cost: known }) : known);
     var tip = [];
     if (row.cost != null) tip.push(cents.format(row.cost));
     if (row.costUnknown.length) tip.push(fill(T.costExcludes, { reason: row.costUnknown.join(T.listSep) }));
-    td.title = tip.join('\\n');
-    return td;
+    return { text: known == null ? DASH : row.costUnknown.length ? fill(T.costPartial, { cost: known }) : known,
+             title: tip.join('\n') };
   }
 
   document.getElementById('title').textContent = T.title;
@@ -174,16 +266,9 @@ tr.total td{font-weight:700;border-bottom:0}
   document.getElementById('meta').textContent = [
     T.generatedAt + ' ' + when(data.generatedAt),
     T.ledgerUpdatedAt + ' ' + (data.ledger.updatedAt ? when(data.ledger.updatedAt) : T.ledgerNever),
-    T.earliest + ' ' + (data.ledger.earliest ? when(data.ledger.earliest) : '\\u2014'),
-    fill(T.pricesVersion, { date: data.prices.version || '\\u2014' })
-  ].join(' \\u00b7 ');
-  document.getElementById('range-label').textContent = T.range;
-  var select = document.getElementById('range');
-  ['7d', '30d', 'all'].forEach(function (name) {
-    var option = el('option', T['range.' + name]);
-    option.value = name;
-    select.appendChild(option);
-  });
+    T.earliest + ' ' + (data.ledger.earliest ? when(data.ledger.earliest) : DASH),
+    fill(T.pricesVersion, { date: data.prices.version || DASH })
+  ].join(' · ');
 
   var banners = document.getElementById('banners');
   data.notices.forEach(function (notice) {
@@ -193,43 +278,227 @@ tr.total td{font-weight:700;border-bottom:0}
     banners.appendChild(banner);
   });
 
-  function draw() {
-    var summary = data.summary[select.value];
-    var card = document.getElementById('card');
-    card.textContent = '';
-    if (!summary.accounts.length) {
-      card.appendChild(el('p', T.empty, 'empty'));
-    } else {
-      var table = el('table');
-      var head = el('tr');
-      ['account'].concat(COLUMNS).forEach(function (column) { head.appendChild(el('th', T[column])); });
-      table.appendChild(head);
-      summary.accounts.forEach(function (row) {
-        var tr = el('tr');
-        tr.appendChild(el('td', row.account === null ? T.unattributed : labels[row.account]));
-        COLUMNS.forEach(function (column) { tr.appendChild(cell(row, column)); });
-        table.appendChild(tr);
-      });
-      var total = el('tr', null, 'total');
-      total.appendChild(el('td', T.total));
-      COLUMNS.forEach(function (column) { total.appendChild(cell(summary.total, column)); });
-      table.appendChild(total);
-      card.appendChild(table);
+  // 目前選的區間與帳號：合計時是區間的總計；單看一個帳號時是該帳號在區間內的那一列，區間內沒有它的用量是 null
+  function figures(summary) {
+    if (state.view === 'all') return summary.accounts.length ? summary.total : null;
+    return summary.accounts.filter(function (row) { return row.account === state.view; })[0] || null;
+  }
+
+  // ---- 總覽 ----
+  function tile(label, value, sub) {
+    var node = el('div', null, 'card tile');
+    node.appendChild(el('div', label, 'label'));
+    node.appendChild(value);
+    var line = el('div', sub.text, 'sub');
+    if (sub.title) line.title = sub.title;
+    node.appendChild(line);
+    return node;
+  }
+  function big(text, title) {
+    var node = el('div', text, 'big');
+    if (title) node.title = title;
+    return node;
+  }
+  function tiles(f) {
+    var node = el('section', null, 'tiles');
+    node.appendChild(tile(T.tileTokens, big(compact(f.tokens), numbers.format(f.tokens)), {
+      text: fill(T.tileCacheSplit, { read: compact(f.cacheRead), write: compact(f.cacheWrite) }),
+      title: fill(T.tileCacheSplit, { read: numbers.format(f.cacheRead), write: numbers.format(f.cacheWrite) }) }));
+    node.appendChild(tile(T.cacheHitRatio, big(percent(f.cacheHitRatio)), { text: T.tileHitFormula }));
+    var money = cost(f);
+    node.appendChild(tile(T.cost, big(money.text, money.title),
+      { text: f.costUnknown.length ? T.tileCostPartial : T.tileCostBasis }));
+    return node;
+  }
+
+  // 長條圖座標的刻度：最大值除以 4 之後，取 1、2、5 乘上 10 的次方
+  function niceStep(max) {
+    var raw = max / 4, power = Math.pow(10, Math.floor(Math.log(raw) / Math.LN10)), unit = raw / power;
+    return (unit <= 1 ? 1 : unit <= 2 ? 2 : unit <= 5 ? 5 : 10) * power;
+  }
+  function chart(summary) {
+    var series = [];  // 由下往上堆：合計時依帳號出現的順序，未歸屬在最上面；單看一個帳號只有它自己
+    var byDay = {};
+    summary.daily.forEach(function (entry) {
+      if (state.view !== 'all' && entry.account !== state.view) return;
+      (byDay[entry.day] = byDay[entry.day] || {})[entry.account] = entry.tokens;
+      if (series.indexOf(entry.account) < 0) series.push(entry.account);
+    });
+    var order = data.accounts.map(function (a) { return a.key; }).concat([null]);
+    series.sort(function (a, b) { return order.indexOf(a) - order.indexOf(b); });
+
+    var days = summary.days, W = 1000, H = 220, LEFT = 64, BOTTOM = 28, TOP = 8;
+    var peak = Math.max.apply(null, [1].concat(days.map(function (day) {
+      return series.reduce(function (sum, a) { return sum + ((byDay[day] || {})[a] || 0); }, 0);
+    })));
+    var step = niceStep(peak), top = Math.ceil(peak / step) * step;
+    var plot = H - BOTTOM - TOP, slot = (W - LEFT - 8) / days.length, gap = Math.min(4, slot * 0.25);
+    function scale(n) { return n / top * plot; }
+
+    var root = svg('svg', { viewBox: '0 0 ' + W + ' ' + H, role: 'img', 'aria-label': T.chartDaily });
+    for (var tick = 0; tick <= top + step / 2; tick += step) {
+      var y = TOP + plot - scale(tick);
+      root.appendChild(svg('line', { 'class': 'grid', x1: LEFT, x2: W, y1: y, y2: y }));
+      var label = svg('text', { x: LEFT - 8, y: y + 4, 'text-anchor': 'end' });
+      label.textContent = compactTick(tick);
+      root.appendChild(label);
     }
+    var every = Math.ceil(days.length / 8);
+    days.forEach(function (day, i) {
+      var x = LEFT + i * slot, base = TOP + plot;
+      series.forEach(function (account) {
+        var n = (byDay[day] || {})[account];
+        if (!n) return;
+        var h = Math.max(1, scale(n));  // 極小的段至少畫 1px，免得消失
+        base -= h;
+        var bar = svg('rect', { x: x + gap / 2, y: base, width: Math.max(1, slot - gap), height: h, fill: colorOf(account) });
+        var tip = svg('title');
+        tip.textContent = fill(T.chartTip, { day: day, account: nameOf(account), n: numbers.format(n) });
+        bar.appendChild(tip);
+        root.appendChild(bar);
+      });
+      if (i % every === 0) {
+        var text = svg('text', { x: x + slot / 2, y: H - 8, 'text-anchor': 'middle' });
+        text.textContent = day.slice(5).replace('-', '/');
+        root.appendChild(text);
+      }
+    });
+
+    var node = el('section', null, 'card');
+    node.appendChild(el('h2', T.chartDaily));
+    node.appendChild(root);
+    var legend = el('div', null, 'legend');
+    series.forEach(function (account) {
+      var item = el('span', nameOf(account));
+      item.insertBefore(swatch(account), item.firstChild);
+      legend.appendChild(item);
+    });
+    node.appendChild(legend);
+    return node;
+  }
+
+  // 各模型的表：其他欄位預設收起，展開的選擇在各分頁之間保留
+  var MORE = ['input', 'output', 'cacheWrite5m', 'cacheWrite1h'];
+  function modelTable(f) {
+    var columns = ['tokens', 'cacheWrite', 'cacheRead', 'cacheHitRatio'].concat(state.moreColumns ? MORE : []).concat(['cost']);
+    var table = el('table');
+    var head = el('tr');
+    ['model'].concat(columns).forEach(function (column) { head.appendChild(el('th', T[column])); });
+    table.appendChild(head);
+    function row(label, figure, className) {
+      var tr = el('tr', null, className);
+      tr.appendChild(el('td', label));
+      columns.forEach(function (column) {
+        var td;
+        if (column === 'cacheHitRatio') {
+          td = el('td', percent(figure[column]));
+        } else if (column === 'cost') {
+          var money = cost(figure);
+          td = el('td', money.text);
+          td.title = money.title;
+        } else {
+          td = counted(el('td', compact(figure[column])), figure[column]);
+        }
+        tr.appendChild(td);
+      });
+      return tr;
+    }
+    f.models.forEach(function (m) { table.appendChild(row(m.model, m)); });
+    table.appendChild(row(T.total, f, 'total'));
+    var node = el('section', null, 'card');
+    node.appendChild(el('h2', T.models));
+    node.appendChild(table);
+    var toggle = el('button', state.moreColumns ? T.columnsFewer : T.columnsMore, 'toggle');
+    toggle.type = 'button';
+    toggle.dataset.focus = 'columns';
+    toggle.setAttribute('aria-expanded', String(state.moreColumns));
+    toggle.addEventListener('click', function () { state.moreColumns = !state.moreColumns; draw(); });
+    node.appendChild(toggle);
+    return node;
+  }
+
+  function overview(summary) {
+    var f = figures(summary);
+    var node = el('div', null, 'stack');
+    if (!f) {
+      node.appendChild(el('p', T.empty, 'card empty'));
+      return node;
+    }
+    node.appendChild(tiles(f));
+    node.appendChild(chart(summary));
+    node.appendChild(modelTable(f));
+    return node;
+  }
+
+  // ---- 分頁框架：頁首的選擇各分頁共用，切換分頁時不重設 ----
+  var TABS = [{ id: 'overview', label: T['tab.overview'], render: overview }];
+
+  function segmented(label, options, selected, choose) {
+    var group = el('div', null, 'group');
+    group.appendChild(el('span', label));
+    var seg = el('div', null, 'seg');
+    seg.setAttribute('role', 'group');
+    seg.setAttribute('aria-label', label);
+    options.forEach(function (option) {
+      var button = el('button', option.label);
+      button.type = 'button';
+      button.dataset.focus = label + ':' + option.id;
+      button.setAttribute('aria-pressed', String(option.id === selected));
+      if (option.account !== undefined) button.insertBefore(swatch(option.account), button.firstChild);
+      button.addEventListener('click', function () { choose(option.id); });
+      seg.appendChild(button);
+    });
+    group.appendChild(seg);
+    return group;
+  }
+
+  function draw() {
+    var focused = document.activeElement && document.activeElement.dataset ? document.activeElement.dataset.focus : null;
+    var tabs = document.getElementById('tabs');
+    tabs.textContent = '';
+    TABS.forEach(function (tab) {
+      var button = el('button', tab.label);
+      button.type = 'button';
+      button.setAttribute('role', 'tab');
+      button.setAttribute('aria-controls', 'panel');
+      button.dataset.focus = 'tab:' + tab.id;
+      button.setAttribute('aria-selected', String(tab.id === state.tab));
+      button.addEventListener('click', function () { state.tab = tab.id; draw(); });
+      tabs.appendChild(button);
+    });
+
+    var controls = document.getElementById('controls');
+    controls.textContent = '';
+    controls.appendChild(segmented(T.range, RANGES.map(function (name) { return { id: name, label: T['range.' + name] }; }),
+      state.range, function (id) { state.range = id; draw(); }));
+    var views = [{ id: 'all', label: T['view.all'] }].concat(data.accounts.map(function (a) {
+      return { id: a.key, label: a.label, account: a.key };
+    }));
+    controls.appendChild(segmented(T.view, views, state.view, function (id) { state.view = id; draw(); }));
+
+    var summary = data.summary[state.range];
+    var panel = document.getElementById('panel');
+    panel.textContent = '';
+    panel.appendChild(TABS.filter(function (tab) { return tab.id === state.tab; })[0].render(summary));
+
     var notes = document.getElementById('notes');
     notes.textContent = '';
     notes.appendChild(el('p', T.cacheNote));
     notes.appendChild(el('p', T.costNote));
-    if (summary.accounts.some(function (row) { return row.account === null; })) {
+    if (state.view === 'all' && summary.accounts.some(function (row) { return row.account === null; })) {
       notes.appendChild(el('p', T.unattributedNote));
     }
     if (summary.downtimeUnrecognized) {
       notes.appendChild(el('p', data.downtimeRecordedSince
         ? fill(T.downtimeSince, { date: data.downtimeRecordedSince }) : T.downtimeNever));
     }
+    // 整頁重建會丟掉鍵盤焦點：把焦點還給重建後同一個按鈕
+    if (focused) {
+      var again = Array.prototype.filter.call(document.querySelectorAll('[data-focus]'),
+        function (node) { return node.dataset.focus === focused; })[0];
+      if (again) again.focus();
+    }
   }
-  select.addEventListener('change', draw);
-  select.value = '7d';
   draw();
 })();
 </script>

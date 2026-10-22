@@ -339,6 +339,113 @@ class LocalDaysAndRangesTest(ReportTestCase):
         self.assertEqual([(r["day"], r["output"]) for r in data["rows"]], [("2025-12-31", 7)])
 
 
+class OverviewDataTest(ReportTestCase):
+    """總覽分頁用的資料：每日序列、各模型的細分、帳號的顏色。畫面的算術只剩加總，這些在 Python 端算好才測得到。"""
+
+    def setUp(self):
+        super().setUp()
+        self.switch(NOW - timedelta(days=90), "acct-1")
+
+    def used(self, at, account_id=None, model="claude-test-1", **counts):
+        if account_id:
+            self.switch(at - timedelta(minutes=1), account_id)
+        name = f"{model}-{stamp(at)}"
+        return assistant(name, "r-" + name, at, model=model, **counts)
+
+    def test_every_figure_set_carries_the_token_total_and_the_combined_cache_write(self):
+        self.write_transcript("p/s1.jsonl", assistant("m1", "r1", R, input=1, output=2, write_5m=4, write_1h=8, read=16))
+        total = self.report()[0]["summary"]["all"]["total"]
+        self.assertEqual((total["tokens"], total["cacheWrite"]), (31, 12))
+
+    def test_the_day_axis_runs_from_the_range_start_to_today_with_empty_days_in_between(self):
+        self.write_transcript("p/s1.jsonl", assistant("m1", "r1", datetime(2025, 12, 29, 9, 0, tzinfo=UTC), output=1),
+                              assistant("m2", "r2", R, output=1))
+        summary = self.report()[0]["summary"]
+        self.assertEqual(summary["7d"]["days"], [f"2025-12-{d}" for d in (26, 27, 28, 29, 30, 31)] + ["2026-01-01"])
+        self.assertEqual(len(summary["30d"]["days"]), 30)
+        self.assertEqual(summary["all"]["days"][0], "2025-12-29")
+        self.assertEqual(summary["all"]["days"][-1], "2026-01-01")
+        self.assertEqual(len(summary["all"]["days"]), 4)
+
+    def test_usage_dated_after_today_extends_the_axis_so_its_bar_is_not_dropped(self):
+        self.write_transcript("p/s1.jsonl", assistant("m1", "r1", NOW + timedelta(days=2), output=1),
+                              assistant("m2", "r2", R, output=1))
+        summary = self.report()[0]["summary"]
+        self.assertEqual(summary["7d"]["days"][-1], "2026-01-03")
+        self.assertIn("2026-01-03", {d["day"] for d in summary["7d"]["daily"]})
+
+    def test_a_range_without_any_usage_has_no_days_when_it_is_all_and_a_full_axis_otherwise(self):
+        summary = self.report()[0]["summary"]
+        self.assertEqual((summary["all"]["days"], len(summary["7d"]["days"])), ([], 7))
+        self.assertEqual(summary["7d"]["daily"], [])
+
+    def test_the_daily_series_has_one_entry_per_day_and_account_and_none_for_empty_ones(self):
+        morning = datetime(2025, 12, 31, 3, 0, tzinfo=UTC)
+        evening = datetime(2025, 12, 31, 20, 0, tzinfo=UTC)
+        self.write_transcript("p/s1.jsonl",
+                              self.used(morning, "acct-1", input=1, output=1),
+                              self.used(morning + timedelta(minutes=5), model="claude-test-2", input=2, output=0),
+                              self.used(evening, "acct-2", input=0, output=4),
+                              self.used(R, input=0, output=8))
+        daily = self.report()[0]["summary"]["7d"]["daily"]
+        self.assertEqual([(d["day"], d["account"], d["tokens"]) for d in daily],
+                         [("2025-12-31", "a1", 4), ("2025-12-31", "a2", 4), ("2026-01-01", "a2", 8)])
+
+    def test_usage_that_belongs_to_no_account_is_its_own_series_after_the_accounts(self):
+        self.write_transcript("p/s1.jsonl", assistant("m1", "r1", NOW - timedelta(days=100), input=0, output=3),
+                              assistant("m2", "r2", R, input=0, output=5))
+        self.switch(R - timedelta(minutes=5), "")  # 切到帳號未知
+        daily = self.report()[0]["summary"]["all"]["daily"]
+        self.assertEqual([(d["account"], d["tokens"]) for d in daily], [(None, 3), (None, 5)])
+
+    def test_models_are_split_in_the_total_and_in_each_account_biggest_first(self):
+        t = datetime(2025, 12, 31, 5, 0, tzinfo=UTC)
+        self.write_transcript("p/s1.jsonl",
+                              self.used(t, "acct-1", model="claude-test-1", input=10, output=0, read=30),
+                              self.used(t + timedelta(minutes=2), model="claude-test-2", input=0, output=5),
+                              self.used(t + timedelta(hours=2), "acct-2", model="claude-test-2", input=0, output=100))
+        all_ = self.report()[0]["summary"]["all"]
+        self.assertEqual([(m["model"], m["tokens"]) for m in all_["total"]["models"]],
+                         [("claude-test-2", 105), ("claude-test-1", 40)])
+        second, first = all_["accounts"]  # 用量多的帳號在前
+        self.assertEqual((first["account"], [(m["model"], m["tokens"]) for m in first["models"]]),
+                         ("a1", [("claude-test-1", 40), ("claude-test-2", 5)]))
+        self.assertEqual((second["account"], [(m["model"], m["tokens"]) for m in second["models"]]),
+                         ("a2", [("claude-test-2", 100)]))
+
+    def test_each_model_row_has_the_same_figures_as_the_totals_including_ratio_and_cost(self):
+        self.write_transcript("p/s1.jsonl", self.used(R, "acct-1", model="claude-test-1", input=2_000_000, output=0,
+                                                      read=2_000_000),
+                              self.used(R + timedelta(minutes=1), model="claude-unpriced", input=5, output=0))
+        models = {m["model"]: m for m in self.report()[0]["summary"]["all"]["total"]["models"]}
+        priced, unpriced = models["claude-test-1"], models["claude-unpriced"]
+        self.assertAlmostEqual(priced["cacheHitRatio"], 0.5)
+        self.assertAlmostEqual(priced["cost"], 2 * PRICES["input"] + 2 * PRICES["cacheRead"])
+        self.assertEqual((priced["cacheWrite"], priced["costUnknown"]), (0, []))
+        self.assertIsNone(unpriced["cost"])
+        self.assertIn("claude-unpriced", unpriced["costUnknown"][0])
+
+    def test_a_range_only_lists_the_models_used_in_it(self):
+        self.write_transcript("p/s1.jsonl", assistant("m1", "r1", NOW - timedelta(days=40), model="claude-test-2", output=1),
+                              assistant("m2", "r2", R, output=1))
+        summary = self.report()[0]["summary"]
+        self.assertEqual([m["model"] for m in summary["30d"]["total"]["models"]], ["claude-test-1"])
+        self.assertEqual({m["model"] for m in summary["all"]["total"]["models"]}, {"claude-test-1", "claude-test-2"})
+
+    def test_accounts_take_the_four_account_colors_in_turn_and_start_over_from_the_fifth(self):
+        for i in range(1, 6):
+            self.write_transcript(f"p/s{i}.jsonl", self.used(R + timedelta(minutes=10 * i), f"acct-{i}", output=1))
+        data, _ = self.report()
+        self.assertEqual([a["color"] for a in data["accounts"]],
+                         ["account_1", "account_2", "account_3", "account_4", "account_1"])
+
+    def test_the_color_of_an_account_does_not_depend_on_the_range(self):
+        self.write_transcript("p/s1.jsonl", self.used(NOW - timedelta(days=40), "acct-1", output=1),
+                              self.used(R, "acct-2", output=1))
+        data, _ = self.report()
+        self.assertEqual([(a["key"], a["color"]) for a in data["accounts"]], [("a1", "account_1"), ("a2", "account_2")])
+
+
 class CacheHitRatioTest(ReportTestCase):
     def test_ratio_is_cache_read_over_input_plus_cache_writes_plus_cache_read_and_output_is_ignored(self):
         self.switch(T0 - timedelta(days=1), "acct-1")
@@ -391,7 +498,8 @@ class AccountLabelTest(ReportTestCase):
         self.write_transcript("p/s1.jsonl", assistant("m1", "r1", T0 - timedelta(minutes=90), output=1),
                               assistant("m2", "r2", T0, output=2))
         data, _ = self.report()
-        self.assertEqual(data["accounts"], [{"key": "a1", "label": "work"}, {"key": "a2", "label": "home"}])
+        self.assertEqual(data["accounts"], [{"key": "a1", "label": "work", "color": "account_1"},
+                          {"key": "a2", "label": "home", "color": "account_2"}])
 
     def test_accounts_with_no_binding_show_as_numbered_unwatched_accounts_in_order_of_first_appearance(self):
         self.add_account("work", "rt-1", "acct-1")
@@ -412,7 +520,8 @@ class AccountLabelTest(ReportTestCase):
         self.assertEqual(self.labels(), ["work"])
         self.remove_account("work")
         _, out, _ = self.run_report("--no-open")
-        self.assertEqual(self.read_data(out.strip())["accounts"], [{"key": "a1", "label": "work"}])
+        self.assertEqual(self.read_data(out.strip())["accounts"],
+                         [{"key": "a1", "label": "work", "color": "account_1"}])
         self.assertNotIn("acct-1", self.read_html(out.strip()))
 
     def test_a_renamed_account_shows_the_new_label_and_stays_one_account(self):
@@ -422,7 +531,7 @@ class AccountLabelTest(ReportTestCase):
         self.remove_account("work")
         self.add_account("job", "rt-1", "acct-1")  # 同一個登入換個標籤納管
         data, _ = self.report()
-        self.assertEqual(data["accounts"], [{"key": "a1", "label": "job"}])
+        self.assertEqual(data["accounts"], [{"key": "a1", "label": "job", "color": "account_1"}])
         self.assertEqual(len(data["rows"]), 1)
         self.remove_account("job")
         self.assertEqual(self.labels(), ["job"])  # 之後移除，沿用最新的標籤

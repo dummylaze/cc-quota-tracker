@@ -18,6 +18,9 @@ THEMES = {
         "normal": "#118246", "warning": "#916c00", "critical": "#cd3c3e",
         "banner": "#fbecc8", "banner_fg": "#5c4300",
         "active_row": "#f5f7fd",  # 版面 B 展開時當前憑證帳號那一列的淡色底；列上的文字與圖形對它另外量
+        # token 報表：顏色只代表帳號（依帳號出現的順序輪流用，第 5 個起從頭再用）；未歸屬固定用中性灰
+        "account_1": "#2f63c9", "account_2": "#17795f", "account_3": "#9a5b0c", "account_4": "#7a4fb0",
+        "unattributed": "#6b7079",
     },
     # 深色不是淺色的反轉：每一對另外量過，對比不足時只調明度、保持色相
     "dark": {
@@ -31,8 +34,12 @@ THEMES = {
         "normal": "#54cc86", "warning": "#f0c030", "critical": "#fe9b97",
         "banner": "#3d3218", "banner_fg": "#f5dc9a",
         "active_row": "#1e2130",  # 比卡片暗：提亮會讓 sub 與嚴重度文字跌破 Lc 60
+        "account_1": "#7ea4f5", "account_2": "#4fc3a1", "account_3": "#e2ac55", "account_4": "#b997ea",
+        "unattributed": "#9aa0a8",
     },
 }
+
+ACCOUNT_COLORS = ("account_1", "account_2", "account_3", "account_4")  # 報表給帳號輪流用的顏色，依這個順序
 
 # (字型家族, 字級, 粗細)
 FONTS = {

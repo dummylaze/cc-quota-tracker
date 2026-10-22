@@ -1,7 +1,7 @@
 """設計 token：spec〈畫面層〉配色規則中可機械判定的部分。每一組「前景＋它實際畫在上面的底色」，兩套主題各量一次。"""
 import unittest
 
-from cc_quota_tracker.tokens import RADIUS, SPACE, THEMES
+from cc_quota_tracker.tokens import ACCOUNT_COLORS, RADIUS, SPACE, THEMES
 
 SEVERITIES = ("normal", "warning", "critical")
 
@@ -28,6 +28,12 @@ PAIRS = [
     ("sub", "active_row", TEXT, "當前憑證列的讀數年齡、附註"),
     *((s, "active_row", TEXT, "當前憑證列的百分比數值、嚴重度提示文字與色點") for s in SEVERITIES),
     ("accent", "active_row", GRAPHIC, "當前憑證列的當前憑證標籤、未監看提示的色點"),
+    # token 報表：文字直接畫在底板上（頁首、分頁名稱、附註），選中的按鈕是反白
+    ("fg", "panel", TEXT, "報表的標題、分頁名稱"),
+    ("sub", "panel", TEXT, "報表的頁首、附註、未選中的分頁名稱"),
+    ("panel", "fg", TEXT, "報表選中的按鈕：底板色的字畫在文字色的底上"),
+    # token 報表：長條圖的段與圖例的色點畫在卡片上，附近一定有帳號名稱的文字，所以按圖形算
+    *((role, "card", GRAPHIC, "報表的帳號顏色：長條圖的段、圖例的色點") for role in (*ACCOUNT_COLORS, "unattributed")),
 ]
 # 使用者決定的例外（票 17）：淡色底本身對卡片、以及空底軌對淡色底，都低於「看得見」的 Lc 15。
 # 淡色底要淡才不壓過內容；當前憑證列另有當前憑證標籤，不只靠底色辨認
@@ -102,6 +108,14 @@ class ColorMeaningTest(unittest.TestCase):
         for theme, c in THEMES.items():
             with self.subTest(theme=theme):
                 self.assertNotIn(c["neutral"], {c["accent"], *(c[s] for s in SEVERITIES)})
+
+    def test_account_colors_are_only_for_accounts(self):
+        # 報表的顏色只代表帳號：帳號的幾個顏色與未歸屬的灰互不相同，也不借用當前憑證、嚴重度與中性資訊的色
+        for theme, c in THEMES.items():
+            with self.subTest(theme=theme):
+                account = [c[role] for role in ACCOUNT_COLORS]
+                self.assertEqual(len(set(account + [c["unattributed"]])), len(ACCOUNT_COLORS) + 1)
+                self.assertFalse(set(account + [c["unattributed"]]) & {c["accent"], c["neutral"], *(c[s] for s in SEVERITIES)})
 
     def test_standby_chip_has_its_own_colors(self):
         for theme, c in THEMES.items():
