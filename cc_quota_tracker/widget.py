@@ -10,10 +10,10 @@ import sys
 import threading
 import tkinter as tk
 from dataclasses import replace
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from tkinter import filedialog, messagebox, simpledialog
-from typing import Callable, Optional, Tuple, Union
+from typing import Callable, List, Optional, Sequence, Tuple, Union
 
 from . import __version__, i18n
 from .board import Board, Preferences, SwitchOutcome, SwitchResult, SwitchStep
@@ -28,6 +28,7 @@ from .managed_directory import ManagedDirectory
 from .fmt import account_label, query_reason, restore_confirmation, switch_confirmation, switch_refusal, switch_step
 from .i18n import text
 from .render_text import add_warning
+from .report_jobs import LEDGER_ARGS, REPORT_ARGS, Job, JobFailed
 from .claude_provider import AUTO_QUERY_FIELD, PROVIDER
 from .switch_overlay import SwitchOverlay
 from .settings import PREFERENCE_FIELDS, ResolvedPaths, WriteResult, write_preference, write_provider_setting
@@ -37,6 +38,7 @@ from .zorder import out_of_topmost_band
 POLL_MS = 5000  # 固定值，不開放設定
 QUERY_POLL_MS = 500  # 固定值：查詢進行中縮短間隔，查完的新讀數才不必再等一整輪（查詢最久 20 秒，這段期間最多多 poll 約 40 次）
 SWITCH_CHECK_MS = 100  # 固定值：切換在背景執行，每隔這麼久看一次有沒有跑完
+LEDGER_UPDATE_EVERY = timedelta(hours=24)  # 固定值：啟動後立刻更新一次，之後每隔這麼久再更新
 STALL_ROUNDS = 12  # 固定值：連續這麼多輪沒有完成（約 1 分鐘）才亮停止更新橫幅
 DEFAULT_POSITION = (40, 40)  # 主螢幕上的位置：第一次啟動，或上次的位置已經不在任何螢幕內
 _GRIP = 20  # 判斷位置在不在螢幕內時，看視窗左上角往內這麼多的那一點：要拖得到視窗才算在螢幕內
@@ -96,12 +98,15 @@ class Widget:
                  on_screen: Optional[Callable[[int, int], bool]] = None,
                  system_theme: Callable[[], str] = windows_app_theme, autostart=None,
                  system_language: Callable[[], Optional[str]] = i18n.system_tag,
-                 clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc)):
+                 clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
+                 report_launcher: Optional[Callable[[Sequence[str]], Job]] = None):
         """core 提供 poll、add、import_snapshot；paths 是啟動時解析的路徑，設定檔與納管目錄都取自它。
         system_theme 回傳系統目前的深淺色，主題選「跟隨系統」時每次渲染都問一次。
         autostart 提供 is_enabled、enable、disable；None 表示這個平台沒有開機自動啟動，選單就不放這一項。
         system_language 回傳作業系統的語系標籤（例如 zh-TW），語系選「跟隨系統」時每次渲染都問一次。
-        clock 回傳目前時間，停止更新橫幅以它算最後一次完成一輪是多久前。"""
+        clock 回傳目前時間，停止更新橫幅以它算最後一次完成一輪是多久前，每日的帳本更新也以它算是否到期。
+        report_launcher 在背景啟動報表的子行程（參數見 report_jobs），回傳可 poll 的工作；None 表示這個視窗不跑子行程，
+        選單就不放「token 報表」，也不做每日的帳本更新。"""
         self.root = root
         self._core = core
         self._autostart = autostart
@@ -115,6 +120,9 @@ class Widget:
         self._menu_labels = []  # (選單, 項目序號, 語系鍵)：換語系時逐項改字，選單本身不重建
         self._managed = ManagedDirectory(paths.managed_dir)
         self._error_log = ErrorLog(paths.settings_file.parent, clock)
+        self._report_launcher = report_launcher
+        self._jobs: List[Tuple[Sequence[str], Job]] = []  # 執行中的背景子行程，連同啟動它的參數
+        self._next_ledger_update: Optional[datetime] = None  # 下一次更新帳本的時間；None 表示啟動後還沒更新過
         self._board: Optional[Board] = None
         self._prefs: Optional[Preferences] = None  # 目前套用中的偏好；None 表示還沒套用過
         self._in_memory = {}  # 設定檔讀不懂時 GUI 的改動（欄位 → 值）：只在記憶體生效，修好設定檔後以設定檔為準
@@ -201,6 +209,8 @@ class Widget:
         self._query_index = menu.index("end")
         self._add_entry(menu, "checkbutton", "menu.auto_query", variable=self._auto_query_var,
                         command=self._toggle_auto_query)
+        if self._report_launcher is not None:
+            self._add_entry(menu, "command", "menu.report", command=self.open_token_report)
         self._add_entry(menu, "command", "menu.add", command=self.add_current_account)
         self._add_entry(menu, "command", "menu.import", command=self.import_credential_file)
         folders = tk.Menu(menu, tearoff=0)
@@ -438,6 +448,7 @@ class Widget:
         """poll 一次並渲染，再排下一輪；排程永遠只有一個。這一輪出錯也照樣排下一輪，視窗才不會就此凍結。
         重試寫回設定檔、poll、渲染任一步丟出例外都算這一輪沒有完成：例外不往外丟（由 Tk 排程呼叫時，pythonw 下沒人看得到；
         由選單或按鈕直接呼叫時，會丟回它們的處理函式），畫面維持最後一次成功的看板，連續 STALL_ROUNDS 輪才亮停止更新橫幅；錯誤詳情寫進錯誤紀錄（error_log）。"""
+        self._run_report_jobs()
         if self._after is not None:
             self.root.after_cancel(self._after)
         if self.switching:  # 背景的切換正在用核心：這一輪不 poll，畫面維持原樣，切換結束時會立刻重畫
@@ -465,6 +476,55 @@ class Widget:
         finally:
             querying = self._board is not None and self._board.usage_query.in_progress
             self._after = self.root.after(QUERY_POLL_MS if querying else POLL_MS, self.refresh)
+
+    def open_token_report(self):
+        """右鍵選單的「token 報表」：在背景子行程產生報表，由它完成後用預設瀏覽器打開。上一份還在產生時什麼都不做，
+        免得使用者等不及連點，開出一排瀏覽器分頁。不跳任何提示：失敗只寫進錯誤紀錄。"""
+        try:
+            self._reap_jobs()  # 剛結束的那一份不能還算在「正在產生」裡
+            if not self._running(REPORT_ARGS):
+                self._start_job(REPORT_ARGS)
+        except Exception as e:  # 選單的處理函式：例外丟出去 pythonw 下沒人看得到
+            self._error_log.failed(e)
+
+    def _running(self, args: Sequence[str]) -> bool:
+        return any(tuple(started) == tuple(args) for started, _ in self._jobs)
+
+    def _start_job(self, args: Sequence[str]):
+        try:
+            self._jobs.append((args, self._report_launcher(args)))
+        except Exception as e:  # 多半是 OSError（執行檔不見了、不能執行）；其他例外也只記錄，免得每輪重試、重複寫紀錄
+            self._error_log.failed(e)
+
+    def _run_report_jobs(self):
+        """每輪：收走結束的子行程（非 0 結束只寫進錯誤紀錄），再看每日的帳本更新到期了沒。
+        帳本更新啟動後每 LEDGER_UPDATE_EVERY 一次；前一個還沒結束就等它結束，開不起來也照樣排到下一個週期。
+        不丟例外（理由同 refresh）：這一步出錯不該讓視窗停止更新。"""
+        if self._report_launcher is None:
+            return
+        try:
+            self._reap_jobs()
+            now = self._clock()
+            if (self._next_ledger_update is None or now >= self._next_ledger_update) \
+                    and not self._running(LEDGER_ARGS):
+                self._start_job(LEDGER_ARGS)
+                self._next_ledger_update = now + LEDGER_UPDATE_EVERY
+        except Exception as e:
+            self._error_log.failed(e)
+
+    def _reap_jobs(self):
+        """收走結束的子行程；非 0 結束寫進錯誤紀錄。子行程自己的失敗（例如帳本更新）也會寫一筆，所以同一件事可能有兩筆：
+        它那筆是原因，這一筆多了結束代碼，而且連沒機會寫紀錄的失敗（開不起來、被強制結束）也記得到。"""
+        running = []
+        for args, job in self._jobs:
+            code = job.poll()
+            if code is None:
+                running.append((args, job))
+                continue
+            output = job.error_output()
+            if code != 0:
+                self._error_log.failed(JobFailed(args, code, output))
+        self._jobs = running
 
     def query_usage(self):
         """卡片上的「更新」與右鍵選單的「查詢額度」：請核心開始查詢，立刻 poll 一次讓畫面顯示進行中。

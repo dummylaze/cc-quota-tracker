@@ -159,6 +159,7 @@ STRINGS = {
     "menu.autostart": "Start at login",
     "menu.query": "Query usage",
     "menu.auto_query": "Auto-query usage",
+    "menu.report": "Token report",
     "menu.add": "Manage the signed-in account…",
     "menu.import": "Import credential file…",
     "menu.open_folder": "Open folder",

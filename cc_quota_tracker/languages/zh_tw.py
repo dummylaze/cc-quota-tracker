@@ -136,6 +136,7 @@ STRINGS = {
     "menu.autostart": "開機自動啟動",
     "menu.query": "查詢額度",
     "menu.auto_query": "自動查詢額度",
+    "menu.report": "token 報表",
     "menu.add": "納管目前登入的帳號…",
     "menu.import": "匯入憑證檔…",
     "menu.open_folder": "開啟資料夾",

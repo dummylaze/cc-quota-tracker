@@ -695,6 +695,52 @@ class AccountLabelTest(ReportTestCase):
         self.assertEqual(data["notices"], [{"kind": "labelsUnavailable"}])
         self.assertEqual([a["label"] for a in data["accounts"]], ["未監看帳號 1"])
 
+    def error_log(self):
+        path = self.settings_file().parent / "errors.log"
+        return path.read_text(encoding="utf-8") if path.exists() else ""
+
+    def test_the_daily_update_keeps_the_label_so_an_account_removed_before_any_report_still_has_it(self):
+        self.add_account("work", "rt-1", "acct-1")
+        self.used_by("acct-1")
+        self.assertEqual(self.run_report("--update-ledger")[0], 0)  # 報表從沒產生過
+        self.remove_account("work")
+        self.assertEqual(self.labels(), ["work"])
+
+    def test_the_daily_update_gives_unwatched_accounts_their_numbers(self):
+        self.used_by("acct-x")
+        self.used_by("acct-y", R + timedelta(hours=1))
+        self.run_report("--update-ledger")
+        self.assertEqual(json.loads(self.label_map_file.read_text(encoding="utf-8"))["unwatched"],
+                         {"acct-x": 1, "acct-y": 2})
+
+    def test_a_map_the_daily_update_cannot_read_goes_to_the_error_log_and_stderr_and_the_exit_code_stays_0(self):
+        self.add_account("work", "rt-1", "acct-1")
+        self.used_by("acct-1")
+        self.run_report("--update-ledger")
+        before = self.label_map_file.read_bytes()
+        with self.locked("account-labels.json"):
+            code, out, err = self.run_report("--update-ledger")
+        self.assertEqual((code, out), (0, ""))
+        self.assertIn("帳號標籤的對照存取不了", err)
+        self.assertIn("帳號標籤的對照存取不了", self.error_log())
+        self.assertEqual(self.label_map_file.read_bytes(), before)
+
+    def test_a_map_the_daily_update_cannot_write_does_not_change_how_the_ledger_update_ends(self):
+        self.used_by("acct-x", NOW - timedelta(hours=30))
+        with mock.patch.object(ManagedDirectory, "write_account_labels", side_effect=OSError("disk full")):
+            code, _, err = self.run_report("--update-ledger")
+        self.assertEqual(code, 0)
+        self.assertIn("帳號標籤的對照存取不了", self.error_log())
+        self.assertTrue((self.paths.managed_dir / ".state" / "usage-ledger.jsonl").exists())
+
+    def test_a_ledger_failure_is_still_exit_1_and_the_labels_are_still_updated(self):
+        self.used_by("acct-x", NOW - timedelta(hours=30))
+        with mock.patch("cc_quota_tracker.atomic.append", side_effect=OSError(28, "No space left on device")):
+            code, _, err = self.run_report("--update-ledger")
+        self.assertEqual(code, 1)
+        self.assertIn("用量帳本更新失敗（No space left on device）", err)
+        self.assertIn("acct-x", self.label_map_file.read_text(encoding="utf-8"))
+
     def test_a_map_that_cannot_be_understood_is_treated_as_empty(self):
         self.label_map_file.parent.mkdir(parents=True, exist_ok=True)
         self.label_map_file.write_text("{not json", encoding="utf-8")

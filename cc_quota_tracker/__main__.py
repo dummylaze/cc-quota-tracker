@@ -6,7 +6,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import NamedTuple, Optional
 
-from . import COMMAND, __version__, atomic, claude_provider, i18n, prices, report_page, token_report, transcripts
+from . import (COMMAND, __version__, atomic, claude_provider, i18n, prices, report_jobs, report_page, token_report,
+               transcripts)
 from .board import Board, SwitchOutcome
 from .claude_provider import FieldStatus, NoReading, SchemaCheck
 from .core import BindingsUnreadable, Core, InvalidLabel, NoCredential, UnknownLabel
@@ -134,7 +135,8 @@ def _report_request(params) -> Optional[_ReportRequest]:
 def report(paths: ResolvedPaths, lang: str, request: _ReportRequest) -> int:
     """先把過了 24 小時的用量記進帳本，再由帳本加上最近 24 小時的對話紀錄算出各帳號的用量，寫成報表並印出檔案路徑：
     產生成功結束代碼 0（示警印到 stderr、也寫進錯誤紀錄，不改變結束代碼）；報表沒能寫成 1。
-    只更新帳本時不產生報表：帳本更新失敗結束代碼 1（原因寫進錯誤紀錄、印到 stderr），其餘 0。"""
+    只更新帳本時不產生報表，但帳號標籤的對照照樣更新：帳本更新失敗結束代碼 1，其餘 0；
+    帳本與對照的失敗都寫進錯誤紀錄、印到 stderr，對照的失敗不改變結束代碼。"""
     now = datetime.now(timezone.utc)
     managed = ManagedDirectory(paths.managed_dir)
     scan = transcripts.scan(paths.claude_dir)
@@ -142,15 +144,19 @@ def report(paths: ResolvedPaths, lang: str, request: _ReportRequest) -> int:
     table = prices.load()
     status = token_report.update_ledger(managed, scan, switches, now, table)
     log = ErrorLog(paths.settings_file.parent, lambda: now)
-    if request.ledger_only:
-        if status.failure is None:
-            return 0
-        message = report_page.notice_text(lang, {"kind": "ledgerUpdateFailed",
-                                                 "reason": token_report.failure_reason(lang, status.failure)})
-        print(message, file=sys.stderr)
-        log.failed(token_report.ReportWarning(message))
-        return 1
     ledger = managed.read_usage_ledger()
+    if request.ledger_only:
+        failures = []
+        if status.failure is not None:
+            failures.append({"kind": "ledgerUpdateFailed", "reason": token_report.failure_reason(lang, status.failure)})
+        try:  # 帳號標籤的對照一併更新；它的失敗不改變結束代碼，只留紀錄
+            saved = token_report.update_labels(managed, switches, ledger, managed.list_accounts(), lang).saved
+        except OSError:
+            saved = False
+        if not saved:
+            failures.append({"kind": "labelsUnavailable"})
+        _warn(failures, lang, log)
+        return 1 if status.failure is not None else 0
     labelling = token_report.update_labels(managed, switches, ledger, managed.list_accounts(), lang)
     data = token_report.build_data(scan, switches, labelling, now, lang, ledger, status, table)
     path = paths.settings_file.parent / report_page.REPORT_FILE
@@ -159,14 +165,19 @@ def report(paths: ResolvedPaths, lang: str, request: _ReportRequest) -> int:
     except OSError as e:
         print(text(lang, "report.write_failed", path=path, reason=e.strerror or e), file=sys.stderr)
         return 1
-    for notice in data["notices"]:
-        message = report_page.notice_text(lang, notice)
-        print(message, file=sys.stderr)
-        log.failed(token_report.ReportWarning(message))
+    _warn(data["notices"], lang, log)
     print(path)
     if request.open_browser and not webbrowser.open(path.as_uri()):
         print(text(lang, "report.open_failed", path=path), file=sys.stderr)
     return 0
+
+
+def _warn(notices, lang: str, log: ErrorLog) -> None:
+    """報表頂端的示警同樣印到 stderr、寫進錯誤紀錄。"""
+    for notice in notices:
+        message = report_page.notice_text(lang, notice)
+        print(message, file=sys.stderr)
+        log.failed(token_report.ReportWarning(message))
 
 
 class _SwitchRequest(NamedTuple):
@@ -238,7 +249,7 @@ def gui(paths: ResolvedPaths) -> int:
     if sys.platform == "win32":  # 開機自動啟動寫的是 Windows 登錄
         from .autostart import RegistryAutostart
         autostart = RegistryAutostart()
-    Widget(root, core, paths, autostart=autostart)
+    Widget(root, core, paths, autostart=autostart, report_launcher=report_jobs.launch)
     root.mainloop()
     return 0
 
