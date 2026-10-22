@@ -379,6 +379,9 @@ STRINGS = {
                                    "computed from the transcripts, and is lost once they are deleted.",
     "report.notice.ledger_skipped": "{n} places in the usage ledger could not be understood and were skipped; "
                                     "actual usage may be higher than shown.",
+    "report.notice.labels_unavailable": "The account label map could not be read or saved: usage of accounts whose snapshot was removed may "
+                                        "temporarily show as unwatched accounts, and unwatched account numbers may "
+                                        "differ from earlier reports.",
     "report.notice.cost_unknown": "Some usage could not be priced; totals include only the priced part: {reason}",
     "report.prices.version": "Price table {date}",
     "report.col.cost": "Estimated cost (USD)",

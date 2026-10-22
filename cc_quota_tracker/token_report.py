@@ -5,6 +5,8 @@
 （本工具停止運作期間發生了切換，P 到切換偵測到的時間之間不知道是哪個帳號）。
 
 報表資料不含帳號識別碼與 email：帳號只以不透明的鍵（a1、a2…）和帳號標籤出現。
+帳號標籤取自「帳號識別碼 → 最後用過的標籤」的對照（納管目錄裡，每次產生報表時依現有的綁定更新）：憑證快照移除後綁定跟著清掉，
+歷史用量仍用最後的標籤；從沒納管過的帳號依首次出現的順序編成「未監看帳號 n」，編號存在同一份對照裡，之後不變。
 
 資料來源是用量帳本加上最近的對話紀錄：帳本記著「through 之前的小時」，這些小時一律取帳本，對話紀錄只算 through 之後的小時
 （沒入帳的最近 24 小時，遲到的紀錄因此不會漏）。兩邊的小時互不重疊，不會重複計算。
@@ -14,10 +16,10 @@
 from bisect import bisect_right
 from collections import defaultdict
 from datetime import date, datetime, time, timedelta, tzinfo
-from typing import Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Dict, Iterable, List, NamedTuple, Optional, Sequence, Tuple
 
 from . import i18n, prices
-from .managed_directory import ManagedDirectory, SwitchLog, SwitchRecord, WatchedAccount
+from .managed_directory import AccountLabels, ManagedDirectory, SwitchLog, SwitchRecord, WatchedAccount
 from .prices import PriceTable
 from .transcripts import Scan, Usage
 from .usage_ledger import TOKEN_FIELDS, LedgerCell, LedgerFailure, LedgerRead, LedgerStatus
@@ -80,11 +82,18 @@ class Attribution:
         return self._records[index - 1].account_id
 
 
-def build_data(scan: Scan, switch_log: SwitchLog, accounts: Sequence[WatchedAccount], now: datetime,
+class Labelling(NamedTuple):
+    """帳號識別碼 → 報表上顯示的帳號標籤，與這一份對照有沒有存好（讀不到或寫不成是 False，報表頂端示警）。"""
+    shown: Dict[str, str]
+    saved: bool
+
+
+def build_data(scan: Scan, switch_log: SwitchLog, labelling: Labelling, now: datetime,
                lang: str, ledger: LedgerRead, status: LedgerStatus, table: PriceTable) -> dict:
     zone = local_zone()
     attribution = Attribution(switch_log.records)
-    keys, labels = _account_keys(switch_log.records, accounts, lang, (c.account_id for c in ledger.cells))
+    keys = _account_keys(_seen_accounts(switch_log, ledger))
+    labels = labelling.shown
 
     # 先收成 UTC 小時（帳本就是這個粒度），再把小時換算成本機的日。小時整個歸給「小時起點」所在的日：
     # 半小時偏移的時區（+5:30、+5:45）裡，一個 UTC 小時會跨本機的日界，那半小時會歸給前一天；這是帳本粒度的代價
@@ -124,7 +133,7 @@ def build_data(scan: Scan, switch_log: SwitchLog, accounts: Sequence[WatchedAcco
         "summary": {name: _summary(rows, today, span, zone, cutoff, earliest, rank) for name, span in RANGES},
         # 單價表的版本日期；單價表讀不到是 null（所有金額都是未知，notices 裡有原因）
         "prices": {"version": table.version},
-        "notices": _notices(scan, switch_log, ledger, status, lang, rows),
+        "notices": _notices(scan, switch_log, ledger, status, labelling, lang, rows),
     }
 
 
@@ -236,27 +245,47 @@ def update_ledger(managed: ManagedDirectory, scan: Scan, switch_log: SwitchLog, 
     return status
 
 
-def _account_keys(switches: Sequence[SwitchRecord], accounts: Sequence[WatchedAccount], lang: str,
-                  ledgered: Iterable[Optional[str]] = ()) -> Tuple[Dict[str, str], Dict[str, str]]:
-    """帳號識別碼 → 不透明的鍵（依在切換紀錄首次出現的順序）、帳號識別碼 → 顯示的標籤。
-    標籤取自現有的綁定；查不到的是未監看帳號，依首次出現的順序編號（編號跨次報表固定的規則在 token-report/05）。"""
-    by_id: Dict[str, str] = {}
-    for account in accounts:
-        if account.account_id and account.account_id not in by_id:
-            by_id[account.account_id] = account.label
-    keys: Dict[str, str] = {}
-    labels: Dict[str, str] = {}
-    unwatched = 0
-    # 帳本裡的帳號識別碼接在切換紀錄之後（切換紀錄讀不到時，帳本裡的帳號照樣要有鍵）
-    for account_id in [r.account_id for r in switches] + list(ledgered):
-        if account_id and account_id not in keys:
-            keys[account_id] = f"a{len(keys) + 1}"
-            if account_id in by_id:
-                labels[account_id] = by_id[account_id]
-            else:
-                unwatched += 1
-                labels[account_id] = i18n.text(lang, "report.account.unwatched", n=unwatched)
-    return keys, labels
+def _seen_accounts(switch_log: SwitchLog, ledger: LedgerRead) -> List[str]:
+    """出現過的帳號識別碼，依首次出現的順序：切換紀錄在前，帳本裡的接在後面（切換紀錄讀不到時，帳本裡的帳號照樣要有）。"""
+    seen: Dict[str, None] = {}
+    for account_id in [r.account_id for r in switch_log.records] + [c.account_id for c in ledger.cells]:
+        if account_id:
+            seen.setdefault(account_id)
+    return list(seen)
+
+
+def _account_keys(seen: Sequence[str]) -> Dict[str, str]:
+    """帳號識別碼 → 不透明的鍵（依首次出現的順序）。"""
+    return {account_id: f"a{i}" for i, account_id in enumerate(seen, 1)}
+
+
+def update_labels(managed: ManagedDirectory, switch_log: SwitchLog, ledger: LedgerRead,
+                   accounts: Sequence[WatchedAccount], lang: str) -> Labelling:
+    """依現有的綁定更新「帳號識別碼 → 最後用過的標籤」的對照並存好，回傳出現過的帳號各自該顯示的標籤。
+    綁定優先於舊標籤（改標籤後歷史用量跟著換）；沒有標籤的帳號是未監看帳號，依首次出現的順序領到下一個沒用過的編號，
+    編號存在同一份對照裡、之後不變，帳號後來納管了也不讓出。對照讀不到時不寫（不蓋掉讀不到的內容），編號只在這次報表有效。"""
+    stored = managed.read_account_labels()
+    before = stored or AccountLabels({}, {})
+    labels = dict(before.labels)
+    bound: Dict[str, str] = {}
+    for account in accounts:  # 同一個帳號有幾份憑證快照時，取第一份
+        if account.account_id and account.account_id not in bound:
+            bound[account.account_id] = account.label
+    labels.update(bound)
+    unwatched = dict(before.unwatched)
+    seen = _seen_accounts(switch_log, ledger)
+    for account_id in seen:
+        if account_id not in labels and account_id not in unwatched:
+            unwatched[account_id] = max(unwatched.values(), default=0) + 1
+    saved = stored is not None
+    if saved and (labels, unwatched) != (before.labels, before.unwatched):
+        try:
+            managed.write_account_labels(AccountLabels(labels, unwatched))
+        except OSError:
+            saved = False
+    shown = {account_id: labels[account_id] if account_id in labels
+             else i18n.text(lang, "report.account.unwatched", n=unwatched[account_id]) for account_id in seen}
+    return Labelling(shown, saved)
 
 
 def _summary(rows: List[dict], today: date, span: Optional[int], zone: Optional[tzinfo],
@@ -302,8 +331,8 @@ def cache_hit_ratio(figures: dict) -> Optional[float]:
     return figures["cacheRead"] / denominator if denominator else None
 
 
-def _notices(scan: Scan, switch_log: SwitchLog, ledger: LedgerRead, status: LedgerStatus, lang: str,
-             rows: Sequence[dict]) -> List[dict]:
+def _notices(scan: Scan, switch_log: SwitchLog, ledger: LedgerRead, status: LedgerStatus, labelling: Labelling,
+             lang: str, rows: Sequence[dict]) -> List[dict]:
     notices = []
     unknown = _Tally()
     for r in rows:
@@ -322,6 +351,8 @@ def _notices(scan: Scan, switch_log: SwitchLog, ledger: LedgerRead, status: Ledg
         notices.append({"kind": "ledgerUpdateFailed", "reason": failure_reason(lang, status.failure)})
     if ledger.skipped:
         notices.append({"kind": "ledgerSkipped", "count": ledger.skipped})
+    if not labelling.saved:
+        notices.append({"kind": "labelsUnavailable"})
     return notices
 
 

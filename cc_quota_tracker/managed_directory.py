@@ -32,6 +32,10 @@
   等不到鎖就跳過這次追加（update_usage_ledger 回報 True），不是失敗。寫不成丟 OSError，既有的行不變。read_usage_ledger：不存在就是
   還沒有入帳，打不開回報 unreadable，讀不懂或被中斷的批次不採用並計數。
 - .state/usage-ledger-status.json，帳本的更新狀態（最後成功更新的時間、最近一次失敗的原因）：每次更新後覆寫。讀不到、讀不懂都當成沒有；寫不成丟 OSError。
+- .state/account-labels.json，帳號標籤的對照（token 報表）：帳號識別碼 → 最後用過的帳號標籤、帳號識別碼 → 未監看帳號的編號，
+  每次產生報表時依現有的綁定更新（內容沒變不寫），只增不刪（憑證快照移除後歷史用量仍用最後的標籤，編號固定不讓出）。
+  read_account_labels：不存在、讀不懂視為空的，讀不到（作業系統層的讀取錯誤）回 None，呼叫端不寫；內容裡不合規格的項目略過。
+  寫不成丟 OSError。
 - .state/pre-switch.json，切換前憑證（當前憑證原文＋帳號資訊，含 email；只保存、不顯示）：每次切換在寫入當前憑證之前覆寫，
   只有一份。寫不成丟 OSError，呼叫端不切換。
 - .state/window.json，視窗位置：寫不成是「這次沒記住」，不丟例外；收不緊權限照常寫入。
@@ -121,6 +125,12 @@ class SwitchRecord(NamedTuple):
     last_run_at: Optional[datetime] = None
 
 
+class AccountLabels(NamedTuple):
+    """token 報表的帳號標籤對照：帳號識別碼 → 最後用過的帳號標籤、帳號識別碼 → 未監看帳號的編號（從 1 起，不重複使用）。"""
+    labels: Dict[str, str]
+    unwatched: Dict[str, int]
+
+
 class SwitchLog(NamedTuple):
     """讀回的切換紀錄：依時間排序的紀錄、讀不懂而略過的行數、整個檔案是否打不開。"""
     records: Tuple[SwitchRecord, ...]
@@ -176,6 +186,7 @@ class ManagedDirectory:
         self._usage_ledger = self._state_dir / "usage-ledger.jsonl"
         self._ledger_lock = self._state_dir / "usage-ledger.lock"
         self._ledger_status = self._state_dir / "usage-ledger-status.json"
+        self._account_labels = self._state_dir / "account-labels.json"
         self._window_position = self._state_dir / "window.json"
         self._bindings_file = self._state_dir / "bindings.json"  # 憑證指紋 → 帳號識別碼
         self._writeback_file = self._state_dir / "writeback.json"  # 沒寫成的憑證快照的憑證指紋 → 寫回失敗
@@ -377,6 +388,21 @@ class ManagedDirectory:
         failure = {"kind": status.failure.kind, "detail": status.failure.detail} if status.failure else None
         updated = status.updated_at.isoformat() if status.updated_at else None
         self._write_state(self._ledger_status, {"updatedAt": updated, "failure": failure})
+
+    def read_account_labels(self) -> Optional[AccountLabels]:
+        """帳號標籤的對照（token 報表用）。讀不到回傳 None；不存在、讀不懂、不合規格的項目都當成沒有。"""
+        state = self._read_state(self._account_labels)
+        if state is None:
+            return None
+        labels, unwatched = state.get("labels"), state.get("unwatched")
+        return AccountLabels(
+            {k: v for k, v in labels.items() if isinstance(v, str) and v} if isinstance(labels, dict) else {},
+            {k: v for k, v in unwatched.items() if type(v) is int and v >= 1} if isinstance(unwatched, dict) else {})
+
+    def write_account_labels(self, account_labels: AccountLabels) -> None:
+        """寫不成就丟 OSError。"""
+        self._write_state(self._account_labels,
+                          {"labels": account_labels.labels, "unwatched": account_labels.unwatched})
 
     def list_accounts(self) -> Tuple[WatchedAccount, ...]:
         """所有監看帳號，依帳號標籤排序。綁定檔讀不到時當成都沒有綁定；憑證指紋讀不出來的是「未知」。"""

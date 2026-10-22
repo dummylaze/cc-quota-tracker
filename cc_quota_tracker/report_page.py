@@ -50,6 +50,7 @@ NOTICE_KEYS = {
     "switchLogSkipped": "report.notice.switch_log_skipped",
     "ledgerUpdateFailed": "report.notice.ledger_failed",
     "ledgerSkipped": "report.notice.ledger_skipped",
+    "labelsUnavailable": "report.notice.labels_unavailable",
     "costUnknown": "report.notice.cost_unknown",
 }
 _HOLES = {"n": "{n}", "date": "{date}", "reason": "{reason}", "cost": "{cost}"}  # 讓 text() 把佔位符原樣留下，由腳本填

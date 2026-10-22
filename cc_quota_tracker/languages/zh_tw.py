@@ -314,6 +314,7 @@ STRINGS = {
     "report.notice.switch_log_skipped": "切換紀錄有 {n} 行讀不懂，已略過，歸屬可能不完整。",
     "report.notice.ledger_failed": "用量帳本更新失敗（{reason}）：還沒入帳的用量只能從對話紀錄算出，對話紀錄被刪掉後就會少算。",
     "report.notice.ledger_skipped": "用量帳本有 {n} 處讀不懂，已略過，實際用量可能比報表高。",
+    "report.notice.labels_unavailable": "帳號標籤的對照存取不了：憑證快照已移除的帳號，歷史用量可能暫時顯示為未監看帳號，編號也可能與先前的報表不同。",
     "report.notice.cost_unknown": "有部分用量算不出金額，合計只含算得出的部分：{reason}",
     "report.prices.version": "單價表 {date} 版",
     "report.col.cost": "估算金額（USD）",

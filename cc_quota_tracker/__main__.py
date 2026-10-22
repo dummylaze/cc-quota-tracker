@@ -150,8 +150,9 @@ def report(paths: ResolvedPaths, lang: str, request: _ReportRequest) -> int:
         print(message, file=sys.stderr)
         log.failed(token_report.ReportWarning(message))
         return 1
-    data = token_report.build_data(scan, switches, managed.list_accounts(), now, lang,
-                                   managed.read_usage_ledger(), status, table)
+    ledger = managed.read_usage_ledger()
+    labelling = token_report.update_labels(managed, switches, ledger, managed.list_accounts(), lang)
+    data = token_report.build_data(scan, switches, labelling, now, lang, ledger, status, table)
     path = paths.settings_file.parent / report_page.REPORT_FILE
     try:
         atomic.write_atomic(path, report_page.render(data, lang).encode("utf-8"))

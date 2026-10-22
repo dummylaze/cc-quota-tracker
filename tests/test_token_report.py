@@ -3,6 +3,8 @@
 import io
 import json
 import re
+import sys
+import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from datetime import datetime, timedelta, timezone
 from unittest import mock
@@ -10,12 +12,13 @@ from unittest import mock
 from cc_quota_tracker import prices
 from cc_quota_tracker.__main__ import main
 from cc_quota_tracker.managed_directory import ManagedDirectory
-from tests.fakehome import NOW, HomeTestCase
+from tests.fakehome import NOW, HomeTestCase, WindowsAclAssertions
 
 UTC = timezone.utc
 T0 = datetime(2025, 12, 31, 8, 0, tzinfo=UTC)
 # 假單價表的單價（每百萬 token 的美元）：input、output、cache 寫入 5 分鐘、1 小時、cache 讀取
 PRICES = {"input": 1, "output": 2, "cacheWrite5m": 3, "cacheWrite1h": 4, "cacheRead": 0.5}
+R = NOW - timedelta(hours=10)  # 最近 24 小時之內：還沒入帳，每次產生報表都重算，晚到的紀錄不會被帳本的進度擋掉
 LATE = ' '  # 字串內容裡的 U+2028：str.splitlines 會把含它的一行切成兩半
 
 
@@ -364,6 +367,22 @@ class AccountLabelTest(ReportTestCase):
         with self.cli_environment(), redirect_stdout(io.StringIO()):
             self.assertEqual(main(["add", label]), 0)
 
+    def remove_account(self, label):
+        with self.cli_environment(), redirect_stdout(io.StringIO()):
+            self.assertEqual(main(["remove", label]), 0)
+
+    def used_by(self, account_id, at=R):
+        self.switch(at - timedelta(minutes=30), account_id)
+        self.write_transcript(f"p/{account_id}.jsonl", assistant(f"m-{account_id}", f"r-{account_id}", at, output=1))
+
+    def labels(self, **kw):
+        data, _ = self.report(**kw)
+        return [a["label"] for a in data["accounts"]]
+
+    @property
+    def label_map_file(self):
+        return self.paths.managed_dir / ".state" / "account-labels.json"
+
     def test_accounts_show_the_label_of_their_current_binding(self):
         self.add_account("work", "rt-1", "acct-1")
         self.add_account("home", "rt-2", "acct-2")
@@ -387,6 +406,124 @@ class AccountLabelTest(ReportTestCase):
         data, _ = self.report(system_language="en")
         self.assertEqual([a["label"] for a in data["accounts"]], ["Unwatched account 1", "work", "Unwatched account 2"])
 
+    def test_a_removed_account_keeps_the_last_label_it_was_seen_with(self):
+        self.add_account("work", "rt-1", "acct-1")
+        self.used_by("acct-1")
+        self.assertEqual(self.labels(), ["work"])
+        self.remove_account("work")
+        _, out, _ = self.run_report("--no-open")
+        self.assertEqual(self.read_data(out.strip())["accounts"], [{"key": "a1", "label": "work"}])
+        self.assertNotIn("acct-1", self.read_html(out.strip()))
+
+    def test_a_renamed_account_shows_the_new_label_and_stays_one_account(self):
+        self.add_account("work", "rt-1", "acct-1")
+        self.used_by("acct-1")
+        self.assertEqual(self.labels(), ["work"])
+        self.remove_account("work")
+        self.add_account("job", "rt-1", "acct-1")  # 同一個登入換個標籤納管
+        data, _ = self.report()
+        self.assertEqual(data["accounts"], [{"key": "a1", "label": "job"}])
+        self.assertEqual(len(data["rows"]), 1)
+        self.remove_account("job")
+        self.assertEqual(self.labels(), ["job"])  # 之後移除，沿用最新的標籤
+
+    def test_an_account_first_seen_after_its_removal_is_an_unwatched_account(self):
+        self.add_account("work", "rt-1", "acct-1")
+        self.remove_account("work")  # 移除前沒產生過報表：沒有標籤可沿用
+        self.used_by("acct-1")
+        self.assertEqual(self.labels(), ["未監看帳號 1"])
+
+    def test_unwatched_numbers_do_not_change_when_an_earlier_account_shows_up_later(self):
+        self.used_by("acct-y", R)
+        self.assertEqual(self.labels(), ["未監看帳號 1"])
+        self.used_by("acct-x", R - timedelta(hours=5))  # 切換紀錄依時間排序，x 排在 y 前面
+        self.assertEqual(self.labels(), ["未監看帳號 2", "未監看帳號 1"])
+
+    def test_an_unwatched_account_that_is_later_watched_takes_its_label_and_keeps_it_after_removal(self):
+        self.used_by("acct-1")
+        self.assertEqual(self.labels(), ["未監看帳號 1"])
+        self.add_account("work", "rt-1", "acct-1")
+        self.assertEqual(self.labels(), ["work"])
+        self.remove_account("work")
+        self.assertEqual(self.labels(), ["work"])
+
+    def test_the_number_of_an_unwatched_account_that_became_watched_is_not_given_out_again(self):
+        self.used_by("acct-1")
+        self.assertEqual(self.labels(), ["未監看帳號 1"])
+        self.add_account("work", "rt-1", "acct-1")
+        self.used_by("acct-2", R + timedelta(hours=1))
+        self.assertEqual(self.labels(), ["work", "未監看帳號 2"])
+
+    def test_a_new_unwatched_account_gets_the_number_after_the_highest_used_even_with_gaps(self):
+        self.label_map_file.parent.mkdir(parents=True, exist_ok=True)
+        self.label_map_file.write_text(json.dumps({"labels": {}, "unwatched": {"acct-a": 1, "acct-c": 3}}),
+                                       encoding="utf-8")
+        self.used_by("acct-a", R)
+        self.used_by("acct-c", R + timedelta(hours=1))
+        self.used_by("acct-n", R + timedelta(hours=2))
+        self.assertEqual(self.labels(), ["未監看帳號 1", "未監看帳號 3", "未監看帳號 4"])
+
+    def test_an_account_bound_to_two_snapshots_shows_the_label_that_sorts_first(self):
+        self.add_account("zeta", "rt-1", "acct-1")
+        self.add_account("alpha", "rt-1", "acct-1")  # 同一個登入再以另一個標籤納管
+        self.used_by("acct-1")
+        self.assertEqual(self.labels(), ["alpha"])
+
+    def test_the_unwatched_label_follows_the_language_setting_while_the_number_stays(self):
+        self.used_by("acct-x")
+        self.assertEqual(self.labels(), ["未監看帳號 1"])
+        self.assertEqual(self.labels(system_language="en"), ["Unwatched account 1"])
+
+    def test_the_map_is_kept_in_the_managed_directory_and_the_page_has_only_labels(self):
+        self.add_account("work", "rt-1", "acct-1")
+        self.used_by("acct-1")
+        self.used_by("acct-x", R + timedelta(hours=1))
+        _, out, _ = self.run_report("--no-open")
+        stored = self.label_map_file.read_text(encoding="utf-8")
+        self.assertIn("acct-1", stored)
+        self.assertIn("work", stored)
+        html = self.read_html(out.strip())
+        for secret in ("acct-1", "acct-x", "account-labels"):
+            self.assertNotIn(secret, html)
+
+    def test_a_map_that_cannot_be_read_warns_and_is_left_alone(self):
+        self.add_account("work", "rt-1", "acct-1")
+        self.used_by("acct-1")
+        self.assertEqual(self.labels(), ["work"])
+        before = self.label_map_file.read_bytes()
+        self.remove_account("work")
+        with self.locked("account-labels.json"):
+            data, err = self.report()
+        self.assertEqual(data["notices"], [{"kind": "labelsUnavailable"}])
+        self.assertIn("帳號標籤的對照存取不了", err)
+        self.assertEqual(self.label_map_file.read_bytes(), before)
+
+    def test_a_map_that_cannot_be_written_warns_but_the_report_is_still_made(self):
+        self.used_by("acct-x")
+        with mock.patch.object(ManagedDirectory, "write_account_labels", side_effect=OSError("disk full")):
+            data, _ = self.report()
+        self.assertEqual(data["notices"], [{"kind": "labelsUnavailable"}])
+        self.assertEqual([a["label"] for a in data["accounts"]], ["未監看帳號 1"])
+
+    def test_a_map_that_cannot_be_understood_is_treated_as_empty(self):
+        self.label_map_file.parent.mkdir(parents=True, exist_ok=True)
+        self.label_map_file.write_text("{not json", encoding="utf-8")
+        self.used_by("acct-x")
+        data, _ = self.report()
+        self.assertEqual((data["notices"], [a["label"] for a in data["accounts"]]), ([], ["未監看帳號 1"]))
+        self.assertIn("acct-x", self.label_map_file.read_text(encoding="utf-8"))
+
+    def test_entries_in_the_map_that_make_no_sense_are_dropped(self):
+        self.label_map_file.parent.mkdir(parents=True, exist_ok=True)
+        self.label_map_file.write_text(json.dumps({"labels": {"acct-x": 5, "acct-y": "kept"},
+                                                   "unwatched": {"acct-z": "1", "acct-w": 2, "acct-v": True,
+                                                                  "acct-u": 0, "acct-t": -4}}),
+                                       encoding="utf-8")
+        for i, account_id in enumerate(("acct-x", "acct-y", "acct-z", "acct-w", "acct-v", "acct-u", "acct-t")):
+            self.used_by(account_id, R - timedelta(hours=7 - i))
+        self.assertEqual(self.labels(), ["未監看帳號 3", "kept", "未監看帳號 4", "未監看帳號 2", "未監看帳號 5",
+                                         "未監看帳號 6", "未監看帳號 7"])
+
     def test_accounts_without_usage_are_not_listed(self):
         self.switch(T0 - timedelta(hours=1), "acct-1")
         self.switch(T0 - timedelta(minutes=30), "acct-2")
@@ -405,6 +542,17 @@ class AccountLabelTest(ReportTestCase):
         for secret in ("acct-1", "acct-secret-9", "someone@example.com", "example.com"):
             self.assertNotIn(secret, html)
         self.assertIn("work", html)
+
+
+class AccountLabelPermissionTest(ReportTestCase, WindowsAclAssertions):
+    @unittest.skipUnless(sys.platform == "win32", "Windows ACL")
+    def test_the_label_map_is_private_like_the_switch_log(self):
+        self.switch(T0 - timedelta(hours=1), "acct-x")
+        self.write_transcript("p/s1.jsonl", assistant("m1", "r1", T0, output=1))
+        self.report()
+        state = self.paths.managed_dir / ".state"
+        for path in (state / "account-labels.json", state / "switches.jsonl"):
+            self.assert_private(path)
 
 
 class WarningsTest(ReportTestCase):
