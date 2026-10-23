@@ -22,6 +22,7 @@ Unofficial; not affiliated with or endorsed by Anthropic. Use at your own risk �
 - **Expanded mode**: one card per watched account, the active one highlighted; standby accounts show their last observed reading and how old it is.
 - **Query usage** (on request): when the active account's reading has fallen behind, one click asks Claude Code to look up the latest usage. See [Query usage](#query-usage).
 - **Switch account**: change to another managed account from the right-click menu or the command line, without logging in again in Claude Code; a wrong switch can be undone with *Restore previous switch*. See [Switching accounts](#switching-accounts).
+- **Token report**: how many tokens each account used, by day and by model, with the cache hit ratio and an estimated cost, from Claude Code's conversation records. See [Token report](#token-report).
 - Three layouts (card list, dense table / one-line strip, ring gauge), light / dark / follow-system theme, adjustable opacity, Traditional Chinese or English interface.
 
 **Everything comes from local files that Claude Code already maintains. By default the tool sends no requests and never changes Claude Code's settings (no statusLine, no hooks). Only when you press the button, or turn on auto-query, does it ask Claude Code to look the usage up on its behalf. The tool writes to Claude Code's files only when you switch accounts, and then only the current credential and the one account-info key in Claude Code's settings file; see [Switching accounts](#switching-accounts).**
@@ -93,6 +94,8 @@ cc-quota-tracker-cli list                # print the same information as the win
 cc-quota-tracker-cli query               # ask Claude Code for the latest usage (see "Query usage")
 cc-quota-tracker-cli switch <label>      # switch to this managed account (see "Switching accounts")
 cc-quota-tracker-cli switch --previous   # restore the previous switch (see "Switching accounts")
+cc-quota-tracker-cli report              # build the token report and open it (see "Token report")
+cc-quota-tracker-cli report --no-open    # build it and only print the file's path
 cc-quota-tracker-cli check               # see "For hosts" below
 cc-quota-tracker-cli gui                 # open the window, with a console attached; double-click cc-quota-tracker.exe for no console
 cc-quota-tracker-cli --version           # print the version
@@ -259,6 +262,40 @@ Every number comes from Claude Code's usage cache, and Claude Code only updates 
 
 **Finding `claude`.** The tool looks for `claude` on `PATH`. If it is somewhere else, put its full path in `providers.claude.claudeCommand` in the settings file; that takes effect without a restart. A filled-in path that is not absolute or does not point to an existing file makes the query fail — the tool does **not** fall back to `PATH`, because that would silently run a different `claude` than the one you chose. (Unlike the path fields below, a bad `claudeCommand` does not stop the tool; only the query fails.) As with `CLAUDE_CONFIG_DIR`, a tool started at login only sees *user-level* `PATH` entries; if Update says it cannot find `claude` although it works in your terminal, set `claudeCommand`.
 
+## Token report
+
+The window shows quota percentages; the **token report** shows how many tokens were used: in total, by account, by model, and how much of the input came from the cache. It is a single local HTML page with three tabs (overview, daily breakdown, account comparison), opened in your default browser. You can pick the last 7 days, the last 30 days or everything, and look at one account or all accounts combined.
+
+**Ways to open it**
+
+- **Right-click → *Token report***: builds the report in the background and opens it in your default browser. The window stays as light as before.
+- **Command line**: `cc-quota-tracker-cli report` builds it and opens it; `cc-quota-tracker-cli report --no-open` only builds it and prints the file's path, for your own scripts. Errors go to stderr. The exit code is `0` when the report was produced (even if the page carries a warning banner) and `1` when it could not be produced.
+
+**Where the numbers come from.** From the conversation records that Claude Code keeps under its own directory (`projects/`, sub-agents included); the tool parses them itself with the standard library. Nothing else is needed: no extra software to install, and the report makes no network request. Claude Code deletes old conversation records (30 days by default, depending on its retention setting), so the tool keeps its own **usage ledger**: right after the window starts and then once every 24 hours (and whenever you build a report) it adds the usage of every hour that is more than 24 hours old to the ledger, in a background process. Usage recorded in the ledger stays in the report after Claude Code has deleted the records; everything not yet in the ledger, at least the last 24 hours, is recomputed from the records every time. If the ledger update fails, the reason is written to the error log and shown at the top of the report; the window shows nothing. The page also shows the date of the earliest data in the ledger, which is why usage older than that cannot be seen.
+
+**Where the files are**
+
+| File | Location | What it holds |
+|---|---|---|
+| Usage ledger | `.state/usage-ledger.jsonl` in the managed directory | tokens per hour × account × model. Append-only, never rewritten. Same restricted permissions as the switch log, because it holds account identifiers |
+| Report page | `token-report.html` next to `settings.json` (`%APPDATA%\cc-quota-tracker\` by default) | overwritten on every build, so it never piles up. It contains account labels only, never account identifiers or email addresses |
+
+**Which account the usage belongs to.** The conversation records do not say which account a response was for, so the tool attributes usage by time, using the switch log (see [For hosts](#for-hosts-what-the-tool-depends-on)): a response belongs to the account that was the active account at that moment, so several switches in one day are split correctly. Accounts you removed keep their last label in the report. An account you never managed shows as *Unwatched account 1*, *Unwatched account 2*, …, never as an identifier or email address.
+
+**Unattributed.** Usage that cannot be tied to an account is shown as its own *Unattributed* row. It is counted in the combined total, but not given to any account, and not listed on the Overview and Daily tabs when you look at a single account (the Account comparison tab always has its own column for it). Three cases:
+
+- usage from **before the switch log began**;
+- usage after a switch to an account that could not be identified;
+- usage while **this tool was not running** and an account was switched in the meantime: the switch is only noticed after the tool starts again.
+
+A limit to know about: the tool began recording its last running time only at a certain date, and the switch log does not say when the tool was not running before that. So for a range that reaches back before that date, the report adds a note: a switch made while the tool was off cannot be recognised, and the usage is attributed by the time in the switch log, which may be wrong.
+
+**Cache hit ratio** = cache read ÷ (input + cache write + cache read); output is not counted. The provider does not publish how it computes this ratio; this follows from its definition "total input = the sum of the three", and the report says so.
+
+**Cost is an estimate.** Amounts are computed from the API prices in a price table that ships with the program (the page shows the date of that table), not from an actual bill; subscription plans are not billed by token. Prices change, so the table may be out of date. A model that is not in the table, or a billing factor it does not cover (such as a fast mode), still counts toward the tokens, but the cost cell shows "—" with the reason, and a total that leaves such usage out says so.
+
+If the structure of the conversation records is not recognised, or the switch log cannot be read, the top of the page shows a banner instead of a quiet 0.
+
 ## Credentials expire
 
 A credential snapshot's refresh token lives about 30 days, and a refresh does not extend it. Each card shows the time left; when less than `expiryWarningDays` (default 7) remain, it warns you, but the account can still be switched to. Once it has expired the account is a watch-only account (reason "expired") and can no longer be switched to. To renew: log in to that account again in Claude Code, then either right-click the window and choose *Manage the signed-in account…* with the same label, or run `add <label>` again.
@@ -272,6 +309,7 @@ Drag anywhere to move; double-click to switch between compact and expanded. Righ
 - **Layout**: card list (default) / dense table and one-line strip / ring gauge
 - **Query usage** and **Auto-query usage** (default off): see [Query usage](#query-usage)
 - **Switch account**: a submenu listing the standby accounts, with *Restore previous switch* as its last row: see [Switching accounts](#switching-accounts)
+- **Token report**: builds the report and opens it in your browser: see [Token report](#token-report)
 - **Always on top** (default on), **Mode** (compact / expanded)
 - **Language**: follow system (default), 正體中文, English. Follow system uses the Windows display language and falls back to English when it is neither Traditional Chinese nor English. Switching takes effect at once; the command line (`list`, `add`, `check`, …) follows the same setting. Values Claude reports itself (a lock reason, the name of a limit this tool doesn't recognise) are shown as reported, not translated
 - **Theme**: follow system (default), light, dark
@@ -338,7 +376,7 @@ If none of the three levels is set and `~/.claude.json` cannot be found, the win
 
 ## For hosts: what the tool depends on
 
-All usage numbers come from the `cachedUsageUtilization` field in Claude Code's `.claude.json`. **This is an internal, undocumented field. Claude Code makes no compatibility promise about it, and a Claude Code update can change or remove it.** Switching accounts also depends on two more things: `oauthAccount` (the account info) in `.claude.json` and `.credentials.json` (the current credential); the same lack of compatibility promise applies, and `check` verifies the former.
+All quota numbers come from the `cachedUsageUtilization` field in Claude Code's `.claude.json`. **This is an internal, undocumented field. Claude Code makes no compatibility promise about it, and a Claude Code update can change or remove it.** Switching accounts also depends on two more things: `oauthAccount` (the account info) in `.claude.json` and `.credentials.json` (the current credential); the same lack of compatibility promise applies, and `check` verifies the former. The [Token report](#token-report) reads Claude Code's conversation records instead, whose structure is just as undocumented; entries it cannot recognise are counted and announced in a banner at the top of the report.
 
 The tool tolerates the expected kinds of trouble: a file caught mid-write (it keeps the last value quietly), a missing field (shown as "no reading yet", not an error), and unknown limit types (shown under their original names as "other limits"). If the structure genuinely changes, a banner appears — only after the problem persists for 3 consecutive polls — together with the last successful reading and its time, instead of a wall of 0%. A different banner, "Board stopped updating", means the tool itself could not finish a poll for about a minute (12 polls in a row): the board stays on the last successful reading, shown with its time, and the banner clears as soon as a poll succeeds again.
 
@@ -350,7 +388,7 @@ cc-quota-tracker-cli check
 
 It verifies that every field path the tool relies on still exists with the expected type, lists new unknown fields under `utilization`, and prints the Claude Code directory and managed directory actually in use, saying whether each came from the settings file, the environment variable, or the default. It prints field names and types only, never values.
 
-The tool also appends a log of every account switch — whether it made the switch itself or observed one made by another tool or `/login` (time and account identifier only, kept in the managed directory with restricted permissions and never shown on screen) — and the time it last ran, so that future reporting can attribute usage to the right account.
+The tool also appends a log of every account switch — whether it made the switch itself or observed one made by another tool or `/login` (time and account identifier only, kept in the managed directory with restricted permissions and never shown on screen) — and the time it last ran, so that the [Token report](#token-report) can attribute usage to the right account.
 
 ## For developers: running from source
 
@@ -369,7 +407,7 @@ The exe is built with PyInstaller, which is needed only for building and is pinn
 
 ## Out of scope for this version
 
-Encrypting credential snapshots, a restore history deeper than one step, token reports, other providers, macOS / Linux, network requests made by the tool itself (Query usage goes through Claude Code), querying standby accounts, and any automation triggered by quota level.
+Encrypting credential snapshots, a restore history deeper than one step, other providers, macOS / Linux, network requests made by the tool itself (Query usage goes through Claude Code), querying standby accounts, and any automation triggered by quota level.
 
 ## Disclaimer
 

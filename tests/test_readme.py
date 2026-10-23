@@ -122,6 +122,16 @@ class ReadmeOpeningTest(unittest.TestCase):
             section = text[text.index(heading):text.index("\n## ", text.index(heading) + 1)]
             self.assertNotRegex(section, r"(?i)exe", path.name)
 
+    def test_token_reports_are_no_longer_out_of_scope_and_the_hosts_section_points_to_the_report(self):
+        for path, heading, hosts, link in (
+                (README["en"], "## Out of scope for this version", "## For hosts", "(#token-report)"),
+                (README["zh"], "## 目前版本的範圍外", "## 給架設者", "〈token 報表〉")):
+            text = read(path)
+            scope = text[text.index(heading):text.index("\n## ", text.index(heading) + 1)]
+            self.assertNotRegex(scope, r"(?i)token report|token 報表", path.name)
+            section = text[text.index(hosts):text.index("\n## ", text.index(hosts) + 1)]
+            self.assertIn(link, section, path.name)
+
     def test_commands_are_written_for_the_exe_except_in_the_developers_section(self):
         for path, developers in ((README["en"], "## For developers"), (README["zh"], "## 給開發者")):
             text = read(path)
