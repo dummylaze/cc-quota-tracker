@@ -1,7 +1,7 @@
 import sys
 
 # 版本號的唯一來源：--version、右鍵選單、發佈 workflow 都讀它
-__version__ = "1.1.0"
+__version__ = "1.2.0"
 
 
 def command_for(frozen: bool) -> str:
