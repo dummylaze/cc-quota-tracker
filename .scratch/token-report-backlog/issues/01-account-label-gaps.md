@@ -19,3 +19,4 @@
 
 - 2026-10-22：由 `token-report/05-account-label-mapping` 的審查提出，使用者決定先記下、不改。05 的 Comments 指到這張。
 - 2026-10-23：token 報表結案時從 `token-report/11-account-label-gaps` 搬到這個獨立 feature（結案審查前就存在的備忘票，不屬於 token 報表的範圍）；內容不變，仍待分流。舊路徑在 `token-report/05`、`09` 的 Comments 裡已追加指向這裡的註記。
+- 2026-10-23：架構審查開了 `.scratch/architecture-review/issues/07-usage-ledger-module.md`（用量帳本收成一個 module），方向包括把對照的讀改寫放進帳本的鎖，可能順帶補上第二個缺口；分流時一起看。
