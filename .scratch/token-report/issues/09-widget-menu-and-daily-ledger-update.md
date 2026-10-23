@@ -32,3 +32,4 @@
   - 標籤對照的讀改寫沒有鎖（`token-report/11-account-label-gaps`）：每日更新現在也寫對照，視窗啟動那次與使用者同時點選單時，編號撞號的機率比 05 時高一些。
 - 真實啟動：在 `pythonw.exe` 下用 `report_jobs.launch(("--no-open",))` 對暫存 home 實測，報表產出、結束代碼 0；瀏覽器實際打開沒有自動化驗證（子行程開瀏覽器的分支只有行程內測試）。
 
+- 2026-10-23：`token-report/11-account-label-gaps` 已搬到 `token-report-backlog/01-account-label-gaps`（內容不變）。

@@ -1,4 +1,4 @@
-# 11: 帳號標籤對照的已知缺口
+# 01: 帳號標籤對照的已知缺口
 
 **What to build:** 票 05（帳號標籤對照）結案審查時發現兩個缺口，spec 沒要求、使用者決定先不改，這張票只是記下來。要不要處理、怎麼處理，等實際遇到再分流。
 
@@ -18,3 +18,4 @@
 ## Comments
 
 - 2026-10-22：由 `token-report/05-account-label-mapping` 的審查提出，使用者決定先記下、不改。05 的 Comments 指到這張。
+- 2026-10-23：token 報表結案時從 `token-report/11-account-label-gaps` 搬到這個獨立 feature（結案審查前就存在的備忘票，不屬於 token 報表的範圍）；內容不變，仍待分流。舊路徑在 `token-report/05`、`09` 的 Comments 裡已追加指向這裡的註記。
